@@ -51,6 +51,9 @@ jobs:
               echo "### Swift compiler diagnostics"
               grep -E "error:|warning:" "$RUNNER_TEMP/xcodebuild.log" || true
             } >> "$GITHUB_STEP_SUMMARY"
+            grep -E "error:" "$RUNNER_TEMP/xcodebuild.log" | while IFS= read -r diagnostic; do
+              printf '::error title=Swift compiler::%s\n' "$diagnostic"
+            done
             exit "$BUILD_STATUS"
           fi
 
