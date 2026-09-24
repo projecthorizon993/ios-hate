@@ -31,6 +31,7 @@ jobs:
           set -euo pipefail
           DERIVED_DATA="$RUNNER_TEMP/DerivedData"
           rm -rf "$DERIVED_DATA"
+          set +e
           xcodebuild \
             -project LumaFrame.xcodeproj \
             -scheme LumaFrame \
@@ -42,7 +43,16 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            build
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+          BUILD_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            {
+              echo "### Swift compiler diagnostics"
+              grep -E "error:|warning:" "$RUNNER_TEMP/xcodebuild.log" || true
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$BUILD_STATUS"
+          fi
 
       - name: Package unsigned IPA
         run: |
