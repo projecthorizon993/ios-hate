@@ -54,6 +54,14 @@ jobs:
             exit "$BUILD_STATUS"
           fi
 
+      - name: Upload compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaFrame-Compiler-Diagnostics
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: warn
+
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
