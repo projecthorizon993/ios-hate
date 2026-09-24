@@ -90,11 +90,10 @@ final class CameraCoordinator: NSObject {
                     device.focusMode = .continuousAutoFocus
                 }
                 if device.isExposureModeSupported(.custom) {
-                    device.exposureTargetBias = settings.exposureCompensation
+                    device.setExposureTargetBias(settings.exposureCompensation, completionHandler: nil)
                 }
-                if device.isZoomFactorSupported(settings.zoomFactor) {
-                    device.videoZoomFactor = settings.zoomFactor
-                }
+                let zoomFactor = min(max(settings.zoomFactor, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
+                device.videoZoomFactor = zoomFactor
                 device.unlockForConfiguration()
             } catch {
                 self.notifyError("Camera settings could not be applied.")
@@ -108,9 +107,7 @@ final class CameraCoordinator: NSObject {
             do {
                 try device.lockForConfiguration()
                 let factor = min(max(factor, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
-                if device.isZoomFactorSupported(factor) {
-                    device.videoZoomFactor = factor
-                }
+                device.videoZoomFactor = factor
                 device.unlockForConfiguration()
             } catch {
                 self.notifyError("Zoom could not be changed.")
@@ -163,11 +160,11 @@ final class CameraCoordinator: NSObject {
         }
 
         guard device.isWhiteBalanceModeSupported(.locked) else { return }
-        let temperature = settings.kelvin
-        let tint = settings.tint
-        let clampedTemperature = min(max(temperature, device.minWhiteBalanceTemperature), device.maxWhiteBalanceTemperature)
-        let clampedTint = min(max(tint, device.minWhiteBalanceTint), device.maxWhiteBalanceTint)
-        device.setWhiteBalanceModeLocked(with: AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: clampedTemperature, tint: clampedTint), completionHandler: nil)
+        let temperature = min(max(settings.kelvin, 2500), 8000)
+        let tint = min(max(settings.tint, -150), 150)
+        let values = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: temperature, tint: tint)
+        let gains = device.deviceWhiteBalanceGains(for: values)
+        device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
     }
 
     private func notifyConfigured(_ value: Bool) {
