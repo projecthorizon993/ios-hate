@@ -62,7 +62,6 @@ final class CameraCoordinator: NSObject {
                 ]
                 self.videoOutput.alwaysDiscardsLateVideoFrames = true
                 self.videoOutput.setSampleBufferDelegate(self, queue: self.videoQueue)
-                self.photoOutput.maxPhotoQualityPrioritization = .quality
                 self.cameraDevice = device
                 self.configured = true
                 self.session.commitConfiguration()
@@ -124,10 +123,6 @@ final class CameraCoordinator: NSObject {
             guard let self, self.configured else { return }
             let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
             settings.flashMode = .off
-            settings.photoQualityPrioritization = .quality
-            if self.photoOutput.supportedFlashModes.contains(.off) {
-                settings.flashMode = .off
-            }
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
@@ -168,9 +163,10 @@ final class CameraCoordinator: NSObject {
         }
 
         guard device.isWhiteBalanceModeSupported(.locked) else { return }
-        let temperature = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: settings.kelvin, tint: settings.tint)
-        let clampedTemperature = min(max(temperature.temperature, device.minWhiteBalanceTemperature), device.maxWhiteBalanceTemperature)
-        let clampedTint = min(max(temperature.tint, device.minWhiteBalanceTint), device.maxWhiteBalanceTint)
+        let temperature = settings.kelvin
+        let tint = settings.tint
+        let clampedTemperature = min(max(temperature, device.minWhiteBalanceTemperature), device.maxWhiteBalanceTemperature)
+        let clampedTint = min(max(tint, device.minWhiteBalanceTint), device.maxWhiteBalanceTint)
         device.setWhiteBalanceModeLocked(with: AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: clampedTemperature, tint: clampedTint), completionHandler: nil)
     }
 
