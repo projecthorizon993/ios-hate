@@ -24,37 +24,56 @@ final class CameraViewModel: ObservableObject {
     @Published var selectedPreset = ColorGradePreset.builtIns.first!
     @Published var grade = GradeSettings.neutral
     @Published var showManualControls = false
+    @Published private(set) var isConfigured = false
 
     let coordinator: CameraCoordinator
     let library: MediaLibrary
     let presetStore: PresetStore
+    let diagnostics: DiagnosticsLog
 
     private let pipeline = ImagePipeline()
+    private let previewPipeline = ImagePipeline()
+    private let previewQueue = DispatchQueue(label: "com.lumaframe.preview.processing", qos: .userInitiated)
     private var bracketFrames: [Data] = []
+    private var isPreviewProcessing = false
 
     init() {
         coordinator = CameraCoordinator()
         library = MediaLibrary()
         presetStore = PresetStore()
+        diagnostics = DiagnosticsLog()
         coordinator.onFrame = { [weak self] image in
-            guard let self else { return }
-            self.isProcessing = false
-            self.processedFrame = UIImage(cgImage: self.pipeline.process(cgImage: image, grade: self.grade) ?? image)
+            guard let self, !self.isPreviewProcessing else { return }
+            self.isPreviewProcessing = true
+            let grade = self.grade
+            self.previewQueue.async { [weak self] in
+                guard let self else { return }
+                let processed = self.previewPipeline.process(cgImage: image, grade: grade) ?? image
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.isPreviewProcessing = false
+                    self.processedFrame = UIImage(cgImage: processed)
+                }
+            }
         }
         coordinator.onPhoto = { [weak self] data in
             self?.receivePhoto(data)
         }
         coordinator.onConfigured = { [weak self] success in
             guard let self else { return }
+            self.isConfigured = success
             if success {
                 self.capabilities = DeviceCapabilities.discover()
                 self.zoomFactor = max(self.capabilities.minimumZoomFactor, min(1, self.capabilities.maximumZoomFactor))
+                self.diagnostics.record("Camera configured", level: "info")
             } else {
                 self.errorMessage = "Camera setup was not completed."
+                self.diagnostics.record("Camera setup failed")
             }
         }
         coordinator.onError = { [weak self] message in
             self?.errorMessage = message
+            self?.diagnostics.record(message)
         }
     }
 
@@ -93,6 +112,7 @@ final class CameraViewModel: ObservableObject {
 
     func selectMode(_ newMode: CaptureMode) {
         mode = newMode
+        diagnostics.record("Mode changed to \(newMode.rawValue)", level: "info")
         if newMode == .cinematic {
             shutterDuration = 1.0 / 48.0
             selectedPreset = ColorGradePreset.builtIns[1]
@@ -100,21 +120,26 @@ final class CameraViewModel: ObservableObject {
         } else if newMode == .manual {
             shutterDuration = 1.0 / 60.0
         }
-        applySettings()
+        if isConfigured {
+            applySettings()
+        }
     }
 
     func setZoom(_ value: CGFloat) {
+        guard isConfigured else { return }
         zoomFactor = min(max(value, capabilities.minimumZoomFactor), capabilities.maximumZoomFactor)
         coordinator.setZoomFactor(zoomFactor)
         applySettings()
     }
 
     func toggleFocusLock() {
+        guard isConfigured else { return }
         focusLocked.toggle()
         applySettings()
     }
 
     func applySettings() {
+        guard isConfigured else { return }
         let settings = CaptureSettings(
             mode: mode,
             iso: min(max(iso, capabilities.minimumISO), capabilities.maximumISO),
@@ -129,6 +154,10 @@ final class CameraViewModel: ObservableObject {
     }
 
     func capture() {
+        guard isConfigured else {
+            errorMessage = "The camera is still starting."
+            return
+        }
         guard !isCapturing else { return }
         isCapturing = true
         isProcessing = true

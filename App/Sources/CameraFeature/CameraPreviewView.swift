@@ -15,6 +15,7 @@ struct CameraPreviewView: UIViewRepresentable {
 
     func updateUIView(_ view: PreviewContainerView, context: Context) {
         view.previewLayer.session = session
+        view.updateConnectionOrientation()
         view.imageView.image = image
         view.imageView.isHidden = image == nil
     }
@@ -29,6 +30,7 @@ final class PreviewContainerView: UIView {
         backgroundColor = .black
         layer.addSublayer(previewLayer)
         imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
         imageView.isHidden = true
         addSubview(imageView)
     }
@@ -41,5 +43,12 @@ final class PreviewContainerView: UIView {
         super.layoutSubviews()
         previewLayer.frame = bounds
         imageView.frame = bounds
+        updateConnectionOrientation()
+    }
+
+    func updateConnectionOrientation() {
+        guard let connection = previewLayer.connection,
+              connection.isVideoRotationAngleSupported(90) else { return }
+        connection.videoRotationAngle = 90
     }
 }

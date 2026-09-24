@@ -54,7 +54,8 @@
 				A10000000000000000000023,
 				A10000000000000000000058,
 				A10000000000000000000059,
-				A10000000000000000000061
+				A10000000000000000000061,
+				A10000000000000000000063
 			);
 			name = LumaFrame;
 			sourceTree = "<group>";
@@ -289,7 +290,8 @@
 				A10000000000000000000051,
 				A10000000000000000000052,
 				A10000000000000000000060,
-				A10000000000000000000062
+				A10000000000000000000062,
+				A10000000000000000000064
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -464,6 +466,16 @@
 		A10000000000000000000062 = {
 			isa = PBXBuildFile;
 			fileRef = A10000000000000000000061;
+		};
+		A10000000000000000000063 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = "App/Sources/Diagnostics/DiagnosticsLog.swift";
+			sourceTree = "<group>";
+		};
+		A10000000000000000000064 = {
+			isa = PBXBuildFile;
+			fileRef = A10000000000000000000063;
 		};
 	};
 	rootObject = A10000000000000000000001;

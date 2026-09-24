@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreImage
 import Foundation
+import OSLog
 import UIKit
 
 final class CameraCoordinator: NSObject {
@@ -10,9 +11,12 @@ final class CameraCoordinator: NSObject {
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let imageContext = CIContext(options: [.cacheIntermediates: true])
+    private let logger = Logger(subsystem: "com.lumaframe", category: "camera")
     private let frameScheduler = FrameScheduler()
     private var cameraDevice: AVCaptureDevice?
     private var configured = false
+    private var videoRotationConfigured = false
+    private var videoSampleCount = 0
 
     var onFrame: ((CGImage) -> Void)?
     var onPhoto: ((Data) -> Void)?
@@ -22,7 +26,10 @@ final class CameraCoordinator: NSObject {
     func configure() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            guard !self.configured else {
+            if self.configured {
+                if !self.session.isRunning {
+                    self.session.startRunning()
+                }
                 self.notifyConfigured(true)
                 return
             }
@@ -62,6 +69,9 @@ final class CameraCoordinator: NSObject {
                 ]
                 self.videoOutput.alwaysDiscardsLateVideoFrames = true
                 self.videoOutput.setSampleBufferDelegate(self, queue: self.videoQueue)
+                if let connection = self.videoOutput.connection(with: .video), connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
+                }
                 self.cameraDevice = device
                 self.configured = true
                 self.session.commitConfiguration()
@@ -152,7 +162,7 @@ final class CameraCoordinator: NSObject {
     }
 
     private func applyWhiteBalance(to device: AVCaptureDevice, settings: CaptureSettings) {
-        guard settings.mode == .manual || settings.mode == .cinematic else {
+        guard settings.mode == .manual else {
             if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
                 device.whiteBalanceMode = .continuousAutoWhiteBalance
             }
@@ -174,6 +184,7 @@ final class CameraCoordinator: NSObject {
     }
 
     private func notifyError(_ message: String) {
+        logger.error("\(message, privacy: .public)")
         DispatchQueue.main.async { [weak self] in
             self?.onError?(message)
         }
@@ -196,6 +207,12 @@ extension CameraCoordinator: AVCapturePhotoCaptureDelegate {
 
 extension CameraCoordinator: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        if !videoRotationConfigured, connection.isVideoRotationAngleSupported(90) {
+            connection.videoRotationAngle = 90
+            videoRotationConfigured = true
+        }
+        videoSampleCount += 1
+        guard videoSampleCount.isMultiple(of: 2) else { return }
         frameScheduler.submit { [weak self] in
             guard let self, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
             let image = CIImage(cvPixelBuffer: pixelBuffer)

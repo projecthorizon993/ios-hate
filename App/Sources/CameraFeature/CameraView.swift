@@ -256,6 +256,7 @@ struct CameraView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .disabled(!viewModel.isConfigured)
                 .accessibilityLabel(viewModel.mode == .bracket ? "Capture night bracket" : "Take photo")
                 Spacer()
                 Button {
@@ -582,6 +583,24 @@ struct SettingsView: View {
                     LabeledContent("Preview", value: viewModel.processedFrame == nil ? "Waiting" : "Active")
                     LabeledContent("Enhancement", value: "Core Image")
                     LabeledContent("Storage", value: "On device")
+                }
+                Section("Diagnostics") {
+                    if viewModel.diagnostics.events.isEmpty {
+                        Label("No recent camera events", systemImage: "checkmark.shield")
+                    } else {
+                        ForEach(Array(viewModel.diagnostics.events.prefix(5))) { event in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(event.message)
+                                    .font(.caption.weight(.semibold))
+                                Text(event.date, style: .relative)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Button("Clear log", role: .destructive) {
+                            viewModel.diagnostics.clear()
+                        }
+                    }
                 }
                 Section("Privacy") {
                     Label("Originals remain on this device", systemImage: "lock.shield")
