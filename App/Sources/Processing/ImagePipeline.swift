@@ -5,8 +5,12 @@ import os.log
 import UIKit
 
 struct ImagePipeline {
-    private let context = CIContext(options: [.cacheIntermediates: true])
+    private let context: CIContext
     private let signpostLog = OSLog(subsystem: "com.lumaframe", category: .pointsOfInterest)
+
+    init(preview: Bool = false) {
+        context = CIContext(options: [.cacheIntermediates: !preview])
+    }
 
     func process(data: Data, grade: GradeSettings, aspectRatio: CaptureAspectRatio = .original, enhanceLowLight: Bool = true) -> Data? {
         guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }

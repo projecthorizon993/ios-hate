@@ -36,7 +36,7 @@ final class CameraViewModel: ObservableObject {
     let performanceMonitor: PerformanceMonitor
 
     private let pipeline = ImagePipeline()
-    private let previewPipeline = ImagePipeline()
+    private let previewPipeline = ImagePipeline(preview: true)
     private let previewQueue = DispatchQueue(label: "com.lumaframe.preview.processing", qos: .userInitiated)
     private var bracketFrames: [Data] = []
     private var pendingRawData: Data?

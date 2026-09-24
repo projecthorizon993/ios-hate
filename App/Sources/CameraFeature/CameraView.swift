@@ -463,6 +463,7 @@ private struct PerformanceOverlayView: View {
             Text(String(format: "PROC %.1f ms", monitor.averageProcessingMilliseconds))
             Text(String(format: "WAIT %.1f ms", monitor.averageQueueWaitMilliseconds))
             Text("DROPS \(monitor.droppedFrameCount)")
+            Text("MEM \(monitor.memoryUsageMB) MB")
             Text("ADAPT \(Int(monitor.recommendedPreviewDimension))px")
             Text("THERMAL \(monitor.thermalLabel.uppercased())")
         }
@@ -671,6 +672,7 @@ struct SettingsView: View {
                     LabeledContent("Frame processing", value: String(format: "%.1f ms avg", performanceMonitor.averageProcessingMilliseconds))
                     LabeledContent("Queue wait", value: String(format: "%.1f ms avg", performanceMonitor.averageQueueWaitMilliseconds))
                     LabeledContent("Dropped frames", value: String(performanceMonitor.droppedFrameCount))
+                    LabeledContent("Memory", value: "\(performanceMonitor.memoryUsageMB) MB")
                     LabeledContent("Adaptive preview", value: "\(Int(performanceMonitor.recommendedPreviewDimension)) px")
                     Text("CPU/GPU utilization: use Instruments with Time Profiler, Core Animation, or Metal System Trace.")
                         .font(.caption)

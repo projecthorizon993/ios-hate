@@ -10,7 +10,7 @@ final class CameraCoordinator: NSObject {
     private let videoQueue = DispatchQueue(label: "com.lumaframe.camera.video", qos: .userInitiated)
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
-    private let imageContext = CIContext(options: [.cacheIntermediates: true])
+    private let imageContext = CIContext(options: [.cacheIntermediates: false])
     private let logger = Logger(subsystem: "com.lumaframe", category: "camera")
     private let frameScheduler = FrameScheduler()
     private var cameraDevice: AVCaptureDevice?
@@ -78,7 +78,9 @@ final class CameraCoordinator: NSObject {
                 self.session.addOutput(self.photoOutput)
                 self.session.addOutput(self.videoOutput)
                 self.videoOutput.videoSettings = [
-                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                    kCVPixelBufferWidthKey as String: 1280,
+                    kCVPixelBufferHeightKey as String: 720
                 ]
                 self.videoOutput.alwaysDiscardsLateVideoFrames = true
                 self.videoOutput.setSampleBufferDelegate(self, queue: self.videoQueue)
