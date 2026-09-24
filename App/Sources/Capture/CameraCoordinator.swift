@@ -69,8 +69,8 @@ final class CameraCoordinator: NSObject {
                 ]
                 self.videoOutput.alwaysDiscardsLateVideoFrames = true
                 self.videoOutput.setSampleBufferDelegate(self, queue: self.videoQueue)
-                if let connection = self.videoOutput.connection(with: .video), connection.isVideoRotationAngleSupported(90) {
-                    connection.videoRotationAngle = 90
+                if let connection = self.videoOutput.connection(with: .video), connection.isVideoRotationAngleSupported(270) {
+                    connection.videoRotationAngle = 270
                 }
                 self.cameraDevice = device
                 self.configured = true
@@ -207,8 +207,8 @@ extension CameraCoordinator: AVCapturePhotoCaptureDelegate {
 
 extension CameraCoordinator: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        if !videoRotationConfigured, connection.isVideoRotationAngleSupported(90) {
-            connection.videoRotationAngle = 90
+        if !videoRotationConfigured, connection.isVideoRotationAngleSupported(270) {
+            connection.videoRotationAngle = 270
             videoRotationConfigured = true
         }
         videoSampleCount += 1

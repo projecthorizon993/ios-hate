@@ -50,7 +50,7 @@ final class CameraViewModel: ObservableObject {
         coordinator.onFrame = { [weak self] image in
             guard let self, !self.isPreviewProcessing else { return }
             self.isPreviewProcessing = true
-            let grade = self.grade
+            let grade = previewGrade(self.grade)
             self.previewQueue.async { [weak self] in
                 guard let self else { return }
                 let processed = self.previewPipeline.process(cgImage: image, grade: grade) ?? image
@@ -228,6 +228,13 @@ final class CameraViewModel: ObservableObject {
         }
         isCapturing = false
         isProcessing = false
+    }
+
+    private func previewGrade(_ grade: GradeSettings) -> GradeSettings {
+        var preview = grade
+        preview.sharpen = min(grade.sharpen * 0.2, 0.08)
+        preview.grain = 0
+        return preview
     }
 
     private func metadata() -> [String: String] {

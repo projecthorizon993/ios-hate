@@ -48,7 +48,7 @@ final class PreviewContainerView: UIView {
 
     func updateConnectionOrientation() {
         guard let connection = previewLayer.connection,
-              connection.isVideoRotationAngleSupported(90) else { return }
-        connection.videoRotationAngle = 90
+              connection.isVideoRotationAngleSupported(270) else { return }
+        connection.videoRotationAngle = 270
     }
 }
