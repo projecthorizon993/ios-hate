@@ -18,6 +18,12 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Verify Xcode toolchain and scheme
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcodebuild -list -project LumaFrame.xcodeproj
+
       - name: Validate signing configuration
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -78,7 +84,7 @@ jobs:
             PRODUCT_BUNDLE_IDENTIFIER="$APP_BUNDLE_ID" \
             PROVISIONING_PROFILE_SPECIFIER="$APPLE_DEVELOPMENT_PROFILE_NAME" \
             CODE_SIGN_IDENTITY="Apple Development" \
-            build
+            archive
 
       - name: Export development IPA
         env:
@@ -123,3 +129,11 @@ jobs:
           name: LumaFrame-Development-IPA
           path: ${{ runner.temp }}/LumaFrame-Development.ipa
           if-no-files-found: error
+
+      - name: Clean up signing assets
+        if: always()
+        env:
+          APPLE_DEVELOPMENT_PROFILE_NAME: ${{ secrets.APPLE_DEVELOPMENT_PROFILE_NAME }}
+        run: |
+          security delete-keychain "$RUNNER_TEMP/$KEYCHAIN_NAME" 2>/dev/null || true
+          rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$APPLE_DEVELOPMENT_PROFILE_NAME.mobileprovision"
