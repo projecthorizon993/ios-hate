@@ -1,4 +1,4 @@
-name: iOS IPA
+name: iOS Unsigned IPA
 
 on:
   workflow_dispatch:
@@ -13,12 +13,9 @@ on:
 
 jobs:
   build:
-    name: Build signed development IPA
+    name: Build unsigned IPA
     runs-on: macos-14
     timeout-minutes: 30
-    env:
-      KEYCHAIN_NAME: lumaframe-signing.keychain
-      KEYCHAIN_PASSWORD: lumaframe-ci-keychain
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -29,116 +26,39 @@ jobs:
           xcodebuild -version
           xcodebuild -list -project LumaFrame.xcodeproj
 
-      - name: Validate signing configuration
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_DEVELOPMENT_PROFILE_NAME: ${{ secrets.APPLE_DEVELOPMENT_PROFILE_NAME }}
-          APP_BUNDLE_ID: ${{ secrets.APP_BUNDLE_ID }}
-          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+      - name: Compile unsigned iOS application
         run: |
           set -euo pipefail
-          for value in "$APPLE_TEAM_ID" "$APPLE_DEVELOPMENT_PROFILE_NAME" "$APP_BUNDLE_ID" "$APPLE_CERTIFICATE_P12_BASE64" "$APPLE_CERTIFICATE_PASSWORD" "$APPLE_PROVISIONING_PROFILE_BASE64"; do
-            test -n "$value"
-          done
-
-      - name: Import Apple signing assets
-        env:
-          APPLE_DEVELOPMENT_PROFILE_NAME: ${{ secrets.APPLE_DEVELOPMENT_PROFILE_NAME }}
-          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
-        run: |
-          set -euo pipefail
-          CERTIFICATE_PATH="$RUNNER_TEMP/developer.p12"
-          PROFILE_PATH="$RUNNER_TEMP/developer.mobileprovision"
-          PROFILE_INFO_PATH="$RUNNER_TEMP/profile.plist"
-          KEYCHAIN_PATH="$RUNNER_TEMP/$KEYCHAIN_NAME"
-          KEYCHAIN_LIST="$(security list-keychains -d user | tr -d '"')"
-          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 -D > "$CERTIFICATE_PATH"
-          printf '%s' "$APPLE_PROVISIONING_PROFILE_BASE64" | base64 -D > "$PROFILE_PATH"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $KEYCHAIN_LIST
-          security default-keychain -s "$KEYCHAIN_PATH"
-          security cms -D -i "$PROFILE_PATH" > "$PROFILE_INFO_PATH"
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$APPLE_DEVELOPMENT_PROFILE_NAME.mobileprovision"
-          rm -f "$CERTIFICATE_PATH" "$PROFILE_PATH" "$PROFILE_INFO_PATH"
-
-      - name: Archive signed application
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APP_BUNDLE_ID: ${{ secrets.APP_BUNDLE_ID }}
-          APPLE_DEVELOPMENT_PROFILE_NAME: ${{ secrets.APPLE_DEVELOPMENT_PROFILE_NAME }}
-        run: |
-          set -euo pipefail
+          DERIVED_DATA="$RUNNER_TEMP/DerivedData"
+          rm -rf "$DERIVED_DATA"
           xcodebuild \
             -project LumaFrame.xcodeproj \
             -scheme LumaFrame \
             -configuration Release \
-            -archivePath "$RUNNER_TEMP/LumaFrame.xcarchive" \
+            -sdk iphoneos \
             -destination "generic/platform=iOS" \
-            -allowProvisioningUpdates \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            PRODUCT_BUNDLE_IDENTIFIER="$APP_BUNDLE_ID" \
-            PROVISIONING_PROFILE_SPECIFIER="$APPLE_DEVELOPMENT_PROFILE_NAME" \
-            CODE_SIGN_IDENTITY="Apple Development" \
-            archive
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build
 
-      - name: Export development IPA
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APP_BUNDLE_ID: ${{ secrets.APP_BUNDLE_ID }}
-          APPLE_DEVELOPMENT_PROFILE_NAME: ${{ secrets.APPLE_DEVELOPMENT_PROFILE_NAME }}
+      - name: Package unsigned IPA
         run: |
           set -euo pipefail
-          EXPORT_OPTIONS="$RUNNER_TEMP/ExportOptions.plist"
-          EXPORT_PATH="$RUNNER_TEMP/ipa"
-          mkdir -p "$EXPORT_PATH"
-          cat > "$EXPORT_OPTIONS" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>development</string>
-            <key>teamID</key>
-            <string>$APPLE_TEAM_ID</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>$APP_BUNDLE_ID</key>
-              <string>$APPLE_DEVELOPMENT_PROFILE_NAME</string>
-            </dict>
-          </dict>
-          </plist>
-          EOF
-          xcodebuild \
-            -exportArchive \
-            -archivePath "$RUNNER_TEMP/LumaFrame.xcarchive" \
-            -exportPath "$EXPORT_PATH" \
-            -exportOptionsPlist "$EXPORT_OPTIONS"
-          mv "$EXPORT_PATH/LumaFrame.ipa" "$RUNNER_TEMP/LumaFrame-Development.ipa"
-          rm -rf "$EXPORT_PATH" "$EXPORT_OPTIONS" "$RUNNER_TEMP/LumaFrame.xcarchive"
+          APP_PATH="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/LumaFrame.app"
+          IPA_ROOT="$RUNNER_TEMP/UnsignedIPA"
+          test -d "$APP_PATH"
+          rm -rf "$IPA_ROOT"
+          mkdir -p "$IPA_ROOT/Payload"
+          ditto "$APP_PATH" "$IPA_ROOT/Payload/LumaFrame.app"
+          (cd "$IPA_ROOT" && zip -qry "$RUNNER_TEMP/LumaFrame-Unsigned.ipa" Payload)
+          test -f "$RUNNER_TEMP/LumaFrame-Unsigned.ipa"
 
-      - name: Upload IPA
+      - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: LumaFrame-Development-IPA
-          path: ${{ runner.temp }}/LumaFrame-Development.ipa
+          name: LumaFrame-Unsigned-IPA
+          path: ${{ runner.temp }}/LumaFrame-Unsigned.ipa
           if-no-files-found: error
-
-      - name: Clean up signing assets
-        if: always()
-        env:
-          APPLE_DEVELOPMENT_PROFILE_NAME: ${{ secrets.APPLE_DEVELOPMENT_PROFILE_NAME }}
-        run: |
-          security delete-keychain "$RUNNER_TEMP/$KEYCHAIN_NAME" 2>/dev/null || true
-          rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$APPLE_DEVELOPMENT_PROFILE_NAME.mobileprovision"
