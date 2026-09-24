@@ -78,6 +78,14 @@ struct CameraView: View {
                     isProcessing: viewModel.isProcessing
                 )
 
+                if viewModel.showPerformanceOverlay {
+                    PerformanceOverlayView(monitor: viewModel.performanceMonitor)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.top, 62)
+                        .padding(.leading, 18)
+                        .allowsHitTesting(false)
+                }
+
                 VStack(spacing: 0) {
                     topBar
                     Spacer()
@@ -405,6 +413,28 @@ private struct ViewfinderOverlay: View {
     }
 }
 
+private struct PerformanceOverlayView: View {
+    @ObservedObject var monitor: PerformanceMonitor
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(monitor.thermalState == .serious || monitor.thermalState == .critical ? Color.red : lumaAccent)
+                    .frame(width: 5, height: 5)
+                Text(String(format: "FPS %.1f", monitor.framesPerSecond))
+            }
+            Text(String(format: "%.1f ms/frame", monitor.frameTimeMilliseconds))
+            Text("THERMAL \(monitor.thermalLabel.uppercased())")
+        }
+        .font(.system(size: 9, weight: .bold, design: .monospaced))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
 struct ControlSlider: View {
     let title: String
     @Binding var value: Double
@@ -570,6 +600,12 @@ struct GalleryView: View {
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var viewModel: CameraViewModel
+    @ObservedObject var performanceMonitor: PerformanceMonitor
+
+    init(viewModel: CameraViewModel) {
+        self.viewModel = viewModel
+        _performanceMonitor = ObservedObject(wrappedValue: viewModel.performanceMonitor)
+    }
 
     var body: some View {
         NavigationStack {
@@ -583,6 +619,13 @@ struct SettingsView: View {
                     LabeledContent("Preview", value: viewModel.processedFrame == nil ? "Waiting" : "Active")
                     LabeledContent("Enhancement", value: "Core Image")
                     LabeledContent("Storage", value: "On device")
+                }
+                Section("Developer") {
+                    Toggle("Show FPS overlay", isOn: $viewModel.showPerformanceOverlay)
+                    LabeledContent("FPS", value: String(format: "%.1f", performanceMonitor.framesPerSecond))
+                    LabeledContent("Frame time", value: String(format: "%.1f ms", performanceMonitor.frameTimeMilliseconds))
+                    LabeledContent("Thermal state", value: performanceMonitor.thermalLabel)
+                    LabeledContent("Processed frames", value: String(performanceMonitor.processedFrameCount))
                 }
                 Section("Diagnostics") {
                     if viewModel.diagnostics.events.isEmpty {

@@ -24,12 +24,14 @@ final class CameraViewModel: ObservableObject {
     @Published var selectedPreset = ColorGradePreset.builtIns.first!
     @Published var grade = GradeSettings.neutral
     @Published var showManualControls = false
+    @Published var showPerformanceOverlay = false
     @Published private(set) var isConfigured = false
 
     let coordinator: CameraCoordinator
     let library: MediaLibrary
     let presetStore: PresetStore
     let diagnostics: DiagnosticsLog
+    let performanceMonitor: PerformanceMonitor
 
     private let pipeline = ImagePipeline()
     private let previewPipeline = ImagePipeline()
@@ -42,6 +44,8 @@ final class CameraViewModel: ObservableObject {
         library = MediaLibrary()
         presetStore = PresetStore()
         diagnostics = DiagnosticsLog()
+        performanceMonitor = PerformanceMonitor()
+        performanceMonitor.start()
         coordinator.onFrame = { [weak self] image in
             guard let self, !self.isPreviewProcessing else { return }
             self.isPreviewProcessing = true
@@ -52,6 +56,7 @@ final class CameraViewModel: ObservableObject {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isPreviewProcessing = false
+                    self.performanceMonitor.recordFrame()
                     self.processedFrame = UIImage(cgImage: processed)
                 }
             }
@@ -90,6 +95,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     func start() {
+        performanceMonitor.start()
         switch authorizationStatus {
         case .authorized:
             coordinator.configure()
@@ -107,6 +113,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     func stop() {
+        performanceMonitor.stop()
         coordinator.stop()
     }
 
