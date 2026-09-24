@@ -59,9 +59,7 @@ struct DeviceCapabilities: Sendable {
         let format = device?.activeFormat
         let minZoom = device?.minAvailableVideoZoomFactor ?? 1
         let maxZoom = device?.maxAvailableVideoZoomFactor ?? 1
-        let supportsRAW = AVCapturePhotoOutput().availablePhotoCodecTypes.contains { codec in
-            codec.rawValue.localizedCaseInsensitiveContains("raw")
-        }
+        let supportsRAW = !AVCapturePhotoOutput().supportedRawPhotoPixelFormatTypes(for: .dng).isEmpty
         return DeviceCapabilities(
             lenses: lenses.isEmpty ? fallback.lenses : lenses,
             minimumZoomFactor: minZoom,

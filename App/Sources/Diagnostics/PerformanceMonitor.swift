@@ -6,10 +6,19 @@ final class PerformanceMonitor: ObservableObject {
     @Published private(set) var framesPerSecond = 0.0
     @Published private(set) var frameTimeMilliseconds = 0.0
     @Published private(set) var processedFrameCount = 0
+    @Published private(set) var processingMilliseconds = 0.0
+    @Published private(set) var averageProcessingMilliseconds = 0.0
+    @Published private(set) var queueWaitMilliseconds = 0.0
+    @Published private(set) var averageQueueWaitMilliseconds = 0.0
+    @Published private(set) var droppedFrameCount = 0
     @Published private(set) var thermalState = ProcessInfo.processInfo.thermalState
     private var timer: Timer?
     private var frameCount = 0
     private var lastSample = Date()
+    private var processingTotal = 0.0
+    private var processingSamples = 0
+    private var queueWaitTotal = 0.0
+    private var queueWaitSamples = 0
 
     var thermalLabel: String {
         switch thermalState {
@@ -19,6 +28,13 @@ final class PerformanceMonitor: ObservableObject {
         case .critical: return "Critical"
         @unknown default: return "Unknown"
         }
+    }
+
+    var recommendedPreviewDimension: CGFloat {
+        if thermalState == .serious || thermalState == .critical { return 720 }
+        if averageProcessingMilliseconds > 50 { return 720 }
+        if averageProcessingMilliseconds > 30 { return 960 }
+        return 1280
     }
 
     func start() {
@@ -37,6 +53,24 @@ final class PerformanceMonitor: ObservableObject {
     func recordFrame() {
         frameCount += 1
         processedFrameCount += 1
+    }
+
+    func recordFrameTiming(_ timing: FrameTiming) {
+        if timing.dropped {
+            droppedFrameCount += 1
+            return
+        }
+        processingMilliseconds = timing.processingMilliseconds
+        processingTotal += timing.processingMilliseconds
+        processingSamples += 1
+        averageProcessingMilliseconds = processingTotal / Double(processingSamples)
+    }
+
+    func recordQueueWait(_ milliseconds: Double) {
+        queueWaitMilliseconds = milliseconds
+        queueWaitTotal += milliseconds
+        queueWaitSamples += 1
+        averageQueueWaitMilliseconds = queueWaitTotal / Double(queueWaitSamples)
     }
 
     private func sample() {

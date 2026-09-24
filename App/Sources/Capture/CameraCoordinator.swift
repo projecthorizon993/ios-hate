@@ -20,9 +20,19 @@ final class CameraCoordinator: NSObject {
     private var videoRotationConfigured = false
 
     var onFrame: ((CGImage) -> Void)?
-    var onPhoto: ((Data) -> Void)?
+    var onPhoto: ((Data, Bool) -> Void)?
     var onConfigured: ((Bool) -> Void)?
     var onError: ((String) -> Void)?
+    var onFrameTiming: ((FrameTiming) -> Void)?
+
+    init() {
+        super.init()
+        frameScheduler.onTiming = { [weak self] timing in
+            DispatchQueue.main.async {
+                self?.onFrameTiming?(timing)
+            }
+        }
+    }
 
     func configure() {
         sessionQueue.async { [weak self] in
@@ -155,10 +165,17 @@ final class CameraCoordinator: NSObject {
         }
     }
 
-    func capturePhoto() {
+    func capturePhoto(rawEnabled: Bool = false) {
         sessionQueue.async { [weak self] in
             guard let self, self.configured else { return }
-            let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+            let processedFormat = [AVVideoCodecKey: AVVideoCodecType.jpeg]
+            let settings: AVCapturePhotoSettings
+            if rawEnabled,
+               let rawPixelFormat = self.photoOutput.supportedRawPhotoPixelFormatTypes(for: .dng).first {
+                settings = AVCapturePhotoSettings(rawPixelFormatType: rawPixelFormat, processedFormat: processedFormat)
+            } else {
+                settings = AVCapturePhotoSettings(format: processedFormat)
+            }
             settings.flashMode = .off
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
@@ -241,7 +258,7 @@ extension CameraCoordinator: AVCapturePhotoCaptureDelegate {
             return
         }
         DispatchQueue.main.async { [weak self] in
-            self?.onPhoto?(data)
+            self?.onPhoto?(data, photo.isRawPhoto)
         }
     }
 }

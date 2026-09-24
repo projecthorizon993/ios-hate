@@ -103,7 +103,6 @@ struct CameraView: View {
                     topBar
                     Spacer()
                     Spacer()
-                    modePicker
                     bottomControls
                 }
                 .padding(.horizontal, 18)
@@ -128,48 +127,53 @@ struct CameraView: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: viewModel.mode == .bracket ? "moon.stars.fill" : "camera.aperture")
-                    .font(.caption.weight(.bold))
-                Text(viewModel.mode.shortTitle)
-                    .font(.caption.weight(.bold))
-                    .tracking(0.8)
-            }
-            .foregroundStyle(lumaAccent)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(.black.opacity(0.34), in: Capsule())
-            Spacer()
-            Button {
-                viewModel.showManualControls.toggle()
+        HStack(spacing: 10) {
+            Image(systemName: "bolt.slash.fill")
+                .font(.title3.weight(.medium))
+            Image(systemName: "timer")
+                .font(.title3.weight(.medium))
+            Menu {
+                ForEach(CaptureAspectRatio.allCases) { ratio in
+                    Button(ratio.title) {
+                        viewModel.aspectRatio = ratio
+                    }
+                }
             } label: {
-                Image(systemName: "tuning.2")
+                Text(viewModel.aspectRatio == .original ? "3:4" : viewModel.aspectRatio.title)
                     .font(.headline.weight(.semibold))
-                    .frame(width: 46, height: 46)
-                    .background(.black.opacity(0.34), in: Circle())
             }
-            .accessibilityLabel("Manual controls")
+            Text(viewModel.rawEnabled ? "DNG" : "12M")
+                .font(.headline.weight(.semibold))
+            Text(String(format: "%+.1f", viewModel.exposureCompensation))
+                .font(.headline.weight(.bold))
+                .foregroundStyle(lumaAccent)
             Button {
                 showingPresets = true
             } label: {
                 Image(systemName: "camera.filters")
-                    .font(.headline.weight(.semibold))
-                    .frame(width: 46, height: 46)
-                    .background(.black.opacity(0.34), in: Circle())
+                    .font(.title3.weight(.medium))
             }
             .accessibilityLabel("Color presets")
+            Image(systemName: "face.smiling")
+                .font(.title3.weight(.medium))
             Button {
                 showingSettings = true
             } label: {
-                Image(systemName: "gearshape")
-                    .font(.headline.weight(.semibold))
-                    .frame(width: 46, height: 46)
-                    .background(.black.opacity(0.34), in: Circle())
+                Image(systemName: "ellipsis")
+                    .font(.title3.weight(.bold))
             }
             .accessibilityLabel("Camera settings")
+            Text("A")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.yellow)
+                .frame(width: 34, height: 34)
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.yellow, lineWidth: 1.5))
         }
         .foregroundStyle(.white)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 12)
+        .background(.black)
     }
 
     private var modePicker: some View {
@@ -181,12 +185,11 @@ struct CameraView: View {
                     }
                 } label: {
                     Text(mode.shortTitle)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
                         .tracking(0.8)
-                        .foregroundStyle(viewModel.mode == mode ? lumaAccent : .white.opacity(0.78))
+                        .foregroundStyle(viewModel.mode == mode ? .white : .white.opacity(0.45))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .overlay(alignment: .bottom) {
+                        .padding(.vertical, 8)
                             if viewModel.mode == mode {
                                 Capsule()
                                     .fill(lumaAccent)
@@ -456,6 +459,10 @@ private struct PerformanceOverlayView: View {
                 Text(String(format: "FPS %.1f", monitor.framesPerSecond))
             }
             Text(String(format: "%.1f ms/frame", monitor.frameTimeMilliseconds))
+            Text(String(format: "PROC %.1f ms", monitor.averageProcessingMilliseconds))
+            Text(String(format: "WAIT %.1f ms", monitor.averageQueueWaitMilliseconds))
+            Text("DROPS \(monitor.droppedFrameCount)")
+            Text("ADAPT \(Int(monitor.recommendedPreviewDimension))px")
             Text("THERMAL \(monitor.thermalLabel.uppercased())")
         }
         .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -658,6 +665,13 @@ struct SettingsView: View {
                     LabeledContent("Frame time", value: String(format: "%.1f ms", performanceMonitor.frameTimeMilliseconds))
                     LabeledContent("Thermal state", value: performanceMonitor.thermalLabel)
                     LabeledContent("Processed frames", value: String(performanceMonitor.processedFrameCount))
+                    LabeledContent("Frame processing", value: String(format: "%.1f ms avg", performanceMonitor.averageProcessingMilliseconds))
+                    LabeledContent("Queue wait", value: String(format: "%.1f ms avg", performanceMonitor.averageQueueWaitMilliseconds))
+                    LabeledContent("Dropped frames", value: String(performanceMonitor.droppedFrameCount))
+                    LabeledContent("Adaptive preview", value: "\(Int(performanceMonitor.recommendedPreviewDimension)) px")
+                    Text("CPU/GPU utilization: use Instruments with Time Profiler, Core Animation, or Metal System Trace.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Diagnostics") {
                     if viewModel.diagnostics.events.isEmpty {

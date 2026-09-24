@@ -1,27 +1,34 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
+import os.log
 import UIKit
 
 struct ImagePipeline {
     private let context = CIContext(options: [.cacheIntermediates: true])
+    private let signpostLog = OSLog(subsystem: "com.lumaframe", category: .pointsOfInterest)
 
-    func process(data: Data, grade: GradeSettings, aspectRatio: CaptureAspectRatio = .original) -> Data? {
+    func process(data: Data, grade: GradeSettings, aspectRatio: CaptureAspectRatio = .original, enhanceLowLight: Bool = true) -> Data? {
         guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
-        let enhanced = LowLightEnhancer.enhance(image)
+        let enhanced = enhanceLowLight ? LowLightEnhancer.enhance(image) : image
         let cropped = crop(enhanced, to: aspectRatio)
         guard let output = render(grade.apply(to: cropped)) else { return nil }
         return UIImage(cgImage: output).jpegData(compressionQuality: 0.98)
     }
 
-    func processPreview(cgImage: CGImage, grade: GradeSettings) -> CGImage? {
+    func processPreview(cgImage: CGImage, grade: GradeSettings, enhanceLowLight: Bool = false, maxDimension: CGFloat = 1280) -> CGImage? {
+        os_signpost(.begin, log: signpostLog, name: "Preview grade processing")
+        defer { os_signpost(.end, log: signpostLog, name: "Preview grade processing") }
         let source = CIImage(cgImage: cgImage)
-        let scale = min(1, 1280 / max(source.extent.width, source.extent.height))
+        let scale = min(1, maxDimension / max(source.extent.width, source.extent.height))
         let resized = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        var image = resized.applyingFilter("CINoiseReduction", parameters: [
-            "inputNoiseLevel": 0.035,
-            "inputSharpness": 0.12
-        ])
+        var image = resized
+        if enhanceLowLight {
+            image = image.applyingFilter("CINoiseReduction", parameters: [
+                "inputNoiseLevel": 0.035,
+                "inputSharpness": 0.12
+            ])
+        }
         image = image.applyingFilter("CIColorControls", parameters: [
             kCIInputContrastKey: grade.contrast,
             kCIInputSaturationKey: grade.saturation,

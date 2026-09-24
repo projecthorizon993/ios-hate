@@ -26,6 +26,7 @@ final class CameraViewModel: ObservableObject {
     @Published var showManualControls = false
     @Published var showPerformanceOverlay = false
     @Published var aspectRatio: CaptureAspectRatio = .original
+    @Published var rawEnabled = false
     @Published private(set) var isConfigured = false
 
     let coordinator: CameraCoordinator
@@ -47,16 +48,23 @@ final class CameraViewModel: ObservableObject {
         diagnostics = DiagnosticsLog()
         performanceMonitor = PerformanceMonitor()
         performanceMonitor.start()
+        coordinator.onFrameTiming = { [weak self] timing in
+            self?.performanceMonitor.recordFrameTiming(timing)
+        }
         coordinator.onFrame = { [weak self] image in
             guard let self, !self.isPreviewProcessing else { return }
             self.isPreviewProcessing = true
             let grade = previewGrade(self.grade)
+            let previewDimension = self.performanceMonitor.recommendedPreviewDimension
+            let queuedAt = DispatchTime.now().uptimeNanoseconds
             self.previewQueue.async { [weak self] in
                 guard let self else { return }
-                let processed = self.previewPipeline.processPreview(cgImage: image, grade: grade) ?? image
+                let queueWait = Double(DispatchTime.now().uptimeNanoseconds - queuedAt) / 1_000_000
+                let processed = self.previewPipeline.processPreview(cgImage: image, grade: grade, maxDimension: previewDimension) ?? image
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isPreviewProcessing = false
+                    self.performanceMonitor.recordQueueWait(queueWait)
                     self.performanceMonitor.recordFrame()
                     self.processedFrame = UIImage(cgImage: processed)
                 }
