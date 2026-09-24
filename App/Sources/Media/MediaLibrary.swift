@@ -26,11 +26,12 @@ final class MediaLibrary: ObservableObject {
         load()
     }
 
-    func savePhoto(data: Data, enhancedData: Data, grade: GradeSettings, metadata: [String: String]) {
+    func savePhoto(data: Data, enhancedData: Data, grade: GradeSettings, metadata: [String: String], originalExtension: String = "jpg") {
         let id = UUID()
         var storedMetadata = metadata
         storedMetadata["grade"] = encodedGrade(grade)
-        let originalURL = rootURL.appendingPathComponent("\(id.uuidString)-original.jpg")
+        storedMetadata["original_type"] = originalExtension.uppercased()
+        let originalURL = rootURL.appendingPathComponent("\(id.uuidString)-original.\(originalExtension)")
         let enhancedURL = rootURL.appendingPathComponent("\(id.uuidString)-enhanced.jpg")
         try? data.write(to: originalURL, options: .atomic)
         try? enhancedData.write(to: enhancedURL, options: .atomic)

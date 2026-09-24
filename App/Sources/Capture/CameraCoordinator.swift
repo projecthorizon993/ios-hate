@@ -168,7 +168,7 @@ final class CameraCoordinator: NSObject {
     func capturePhoto(rawEnabled: Bool = false) {
         sessionQueue.async { [weak self] in
             guard let self, self.configured else { return }
-            let processedFormat = [AVVideoCodecKey: AVVideoCodecType.jpeg]
+            let processedFormat: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.jpeg]
             let settings: AVCapturePhotoSettings
             if rawEnabled,
                let rawPixelFormat = self.photoOutput.supportedRawPhotoPixelFormatTypes(for: .dng).first {

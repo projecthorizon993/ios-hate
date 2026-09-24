@@ -39,6 +39,9 @@ final class CameraViewModel: ObservableObject {
     private let previewPipeline = ImagePipeline()
     private let previewQueue = DispatchQueue(label: "com.lumaframe.preview.processing", qos: .userInitiated)
     private var bracketFrames: [Data] = []
+    private var pendingRawData: Data?
+    private var pendingProcessedData: Data?
+    private var captureRawEnabled = false
     private var isPreviewProcessing = false
 
     init() {
@@ -55,12 +58,13 @@ final class CameraViewModel: ObservableObject {
             guard let self, !self.isPreviewProcessing else { return }
             self.isPreviewProcessing = true
             let grade = previewGrade(self.grade)
+            let enhanceLowLight = self.mode == .bracket || self.mode == .cinematic
             let previewDimension = self.performanceMonitor.recommendedPreviewDimension
             let queuedAt = DispatchTime.now().uptimeNanoseconds
             self.previewQueue.async { [weak self] in
                 guard let self else { return }
                 let queueWait = Double(DispatchTime.now().uptimeNanoseconds - queuedAt) / 1_000_000
-                let processed = self.previewPipeline.processPreview(cgImage: image, grade: grade, maxDimension: previewDimension) ?? image
+                let processed = self.previewPipeline.processPreview(cgImage: image, grade: grade, enhanceLowLight: enhanceLowLight, maxDimension: previewDimension) ?? image
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isPreviewProcessing = false
@@ -70,15 +74,15 @@ final class CameraViewModel: ObservableObject {
                 }
             }
         }
-        coordinator.onPhoto = { [weak self] data in
-            self?.receivePhoto(data)
+        coordinator.onPhoto = { [weak self] data, isRaw in
+            self?.receivePhoto(data, isRaw: isRaw)
         }
         coordinator.onConfigured = { [weak self] success in
             guard let self else { return }
             self.isConfigured = success
             if success {
                 self.capabilities = DeviceCapabilities.discover()
-                self.zoomFactor = max(self.minimumZoomFactor, min(1, self.capabilities.maximumZoomFactor))
+                self.zoomFactor = max(self.minimumZoomFactor, min(CGFloat(1), self.capabilities.maximumZoomFactor))
                 self.diagnostics.record("Camera configured", level: "info")
             } else {
                 self.errorMessage = "Camera setup was not completed."
@@ -185,10 +189,13 @@ final class CameraViewModel: ObservableObject {
         guard !isCapturing else { return }
         isCapturing = true
         isProcessing = true
+        captureRawEnabled = rawEnabled && capabilities.supportsRAW && mode != .bracket
+        pendingRawData = nil
+        pendingProcessedData = nil
         if mode == .bracket {
             captureBracket()
         } else {
-            coordinator.capturePhoto()
+            coordinator.capturePhoto(rawEnabled: captureRawEnabled)
         }
     }
 
@@ -211,13 +218,25 @@ final class CameraViewModel: ObservableObject {
                 guard let self else { return }
                 self.iso = min(max(baseISO * Float(index + 1), self.capabilities.minimumISO), self.capabilities.maximumISO)
                 self.applySettings()
-                self.coordinator.capturePhoto()
+                self.coordinator.capturePhoto(rawEnabled: false)
             }
         }
     }
 
-    private func receivePhoto(_ data: Data) {
+    private func receivePhoto(_ data: Data, isRaw: Bool) {
         isProcessing = true
+        if isRaw {
+            pendingRawData = data
+            finishRawCaptureIfReady()
+            return
+        }
+
+        if captureRawEnabled {
+            pendingProcessedData = data
+            finishRawCaptureIfReady()
+            return
+        }
+
         if mode == .bracket {
             bracketFrames.append(data)
             bracketFrameCount = bracketFrames.count
@@ -235,9 +254,22 @@ final class CameraViewModel: ObservableObject {
             }
             return
         }
-        if let enhanced = pipeline.process(data: data, grade: grade, aspectRatio: aspectRatio) {
+        if let enhanced = pipeline.process(data: data, grade: grade, aspectRatio: aspectRatio, enhanceLowLight: mode == .bracket || mode == .cinematic) {
             library.savePhoto(data: data, enhancedData: enhanced, grade: grade, metadata: metadata())
         }
+        isCapturing = false
+        isProcessing = false
+    }
+
+    private func finishRawCaptureIfReady() {
+        guard captureRawEnabled,
+              let rawData = pendingRawData,
+              let processedData = pendingProcessedData else { return }
+        if let enhanced = pipeline.process(data: processedData, grade: grade, aspectRatio: aspectRatio, enhanceLowLight: mode == .bracket || mode == .cinematic) {
+            library.savePhoto(data: rawData, enhancedData: enhanced, grade: grade, metadata: metadata(), originalExtension: "dng")
+        }
+        pendingRawData = nil
+        pendingProcessedData = nil
         isCapturing = false
         isProcessing = false
     }

@@ -654,6 +654,8 @@ struct SettingsView: View {
                     LabeledContent("Optical range", value: String(format: "%.1f×–%.1f×", viewModel.minimumZoomFactor, viewModel.capabilities.maximumZoomFactor))
                     LabeledContent("RAW", value: viewModel.capabilities.supportsRAW ? "Available" : "Unavailable")
                     LabeledContent("Aspect ratio", value: viewModel.aspectRatio.title)
+                    Toggle("Capture DNG/RAW", isOn: $viewModel.rawEnabled)
+                        .disabled(!viewModel.capabilities.supportsRAW)
                 }
                 Section("Processing") {
                     LabeledContent("Preview", value: viewModel.processedFrame == nil ? "Waiting" : "Active")
