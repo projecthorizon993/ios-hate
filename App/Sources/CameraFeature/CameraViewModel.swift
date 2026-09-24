@@ -25,6 +25,7 @@ final class CameraViewModel: ObservableObject {
     @Published var grade = GradeSettings.neutral
     @Published var showManualControls = false
     @Published var showPerformanceOverlay = false
+    @Published var aspectRatio: CaptureAspectRatio = .original
     @Published private(set) var isConfigured = false
 
     let coordinator: CameraCoordinator
@@ -122,10 +123,14 @@ final class CameraViewModel: ObservableObject {
         diagnostics.record("Mode changed to \(newMode.rawValue)", level: "info")
         if newMode == .cinematic {
             shutterDuration = 1.0 / 48.0
+            aspectRatio = .cinema
             selectedPreset = ColorGradePreset.builtIns[1]
             grade = selectedPreset.grade
-        } else if newMode == .manual {
-            shutterDuration = 1.0 / 60.0
+        } else {
+            aspectRatio = .original
+            if newMode == .manual {
+                shutterDuration = 1.0 / 60.0
+            }
         }
         if isConfigured {
             applySettings()
@@ -205,7 +210,7 @@ final class CameraViewModel: ObservableObject {
             bracketFrames.append(data)
             bracketFrameCount = bracketFrames.count
             if bracketFrames.count == 3 {
-                if let enhanced = pipeline.merge(data: bracketFrames, grade: grade) {
+                if let enhanced = pipeline.merge(data: bracketFrames, grade: grade, aspectRatio: aspectRatio) {
                     library.saveBracket(originals: bracketFrames, enhancedData: enhanced, grade: grade, metadata: metadata())
                 } else {
                     errorMessage = "The bracket could not be merged."
@@ -218,7 +223,7 @@ final class CameraViewModel: ObservableObject {
             }
             return
         }
-        if let enhanced = pipeline.process(data: data, grade: grade) {
+        if let enhanced = pipeline.process(data: data, grade: grade, aspectRatio: aspectRatio) {
             library.savePhoto(data: data, enhancedData: enhanced, grade: grade, metadata: metadata())
         }
         isCapturing = false
@@ -233,7 +238,8 @@ final class CameraViewModel: ObservableObject {
             "kelvin": String(format: "%.0f", kelvin),
             "tint": String(format: "%.1f", tint),
             "lens": activeLensName,
-            "zoom": String(format: "%.2f", zoomFactor)
+            "zoom": String(format: "%.2f", zoomFactor),
+            "aspect_ratio": aspectRatio.title
         ]
     }
 }

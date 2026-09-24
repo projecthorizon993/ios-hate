@@ -73,6 +73,7 @@ struct CameraView: View {
 
                 ViewfinderOverlay(
                     mode: viewModel.mode,
+                    aspectRatio: viewModel.aspectRatio,
                     isFocusLocked: viewModel.focusLocked,
                     bracketFrameCount: viewModel.bracketFrameCount,
                     isProcessing: viewModel.isProcessing
@@ -133,7 +134,7 @@ struct CameraView: View {
             } label: {
                 Image(systemName: "tuning.2")
                     .font(.headline.weight(.semibold))
-                    .frame(width: 40, height: 40)
+                    .frame(width: 46, height: 46)
                     .background(.black.opacity(0.34), in: Circle())
             }
             .accessibilityLabel("Manual controls")
@@ -142,7 +143,7 @@ struct CameraView: View {
             } label: {
                 Image(systemName: "camera.filters")
                     .font(.headline.weight(.semibold))
-                    .frame(width: 40, height: 40)
+                    .frame(width: 46, height: 46)
                     .background(.black.opacity(0.34), in: Circle())
             }
             .accessibilityLabel("Color presets")
@@ -151,7 +152,7 @@ struct CameraView: View {
             } label: {
                 Image(systemName: "gearshape")
                     .font(.headline.weight(.semibold))
-                    .frame(width: 40, height: 40)
+                    .frame(width: 46, height: 46)
                     .background(.black.opacity(0.34), in: Circle())
             }
             .accessibilityLabel("Camera settings")
@@ -208,6 +209,22 @@ struct CameraView: View {
                     .foregroundStyle(.white.opacity(0.58))
             }
 
+            HStack(spacing: 6) {
+                ForEach(CaptureAspectRatio.allCases) { ratio in
+                    Button {
+                        viewModel.aspectRatio = ratio
+                    } label: {
+                        Text(ratio.title)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(viewModel.aspectRatio == ratio ? .black : .white)
+                            .frame(width: 44, height: 34)
+                            .background(viewModel.aspectRatio == ratio ? lumaAccent : Color.white.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
             HStack(spacing: 5) {
                 ForEach([CGFloat(0.5), 1, 2], id: \.self) { factor in
                     Button {
@@ -216,7 +233,7 @@ struct CameraView: View {
                         Text(factor == 0.5 ? "0.5" : factor == 1 ? "1×" : "2×")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(viewModel.zoomFactor == factor ? .black : .white)
-                            .frame(width: 38, height: 30)
+                            .frame(width: 44, height: 34)
                             .background(viewModel.zoomFactor == factor ? lumaAccent : Color.white.opacity(0.12), in: Capsule())
                     }
                     .buttonStyle(.plain)
@@ -240,7 +257,7 @@ struct CameraView: View {
                                 .foregroundStyle(.white)
                         }
                     }
-                    .frame(width: 44, height: 44)
+                    .frame(width: 52, height: 52)
                     .background(.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
@@ -252,10 +269,10 @@ struct CameraView: View {
                     ZStack {
                         Circle()
                             .stroke(lumaAccent, lineWidth: 3)
-                            .frame(width: 82, height: 82)
+                            .frame(width: 96, height: 96)
                         Circle()
                             .fill(.white)
-                            .frame(width: viewModel.isCapturing ? 48 : 64, height: viewModel.isCapturing ? 48 : 64)
+                            .frame(width: viewModel.isCapturing ? 58 : 76, height: viewModel.isCapturing ? 58 : 76)
                         if viewModel.mode == .bracket {
                             Image(systemName: "moon.stars.fill")
                                 .font(.headline.weight(.bold))
@@ -272,7 +289,7 @@ struct CameraView: View {
                 } label: {
                     Image(systemName: "circle.lefthalf.filled")
                         .font(.headline.weight(.semibold))
-                        .frame(width: 48, height: 48)
+                        .frame(width: 52, height: 52)
                         .background(.black.opacity(0.34), in: Circle())
                 }
                 .accessibilityLabel("Open live grade")
@@ -316,14 +333,15 @@ struct CameraView: View {
 
 private struct ViewfinderOverlay: View {
     let mode: CaptureMode
+    let aspectRatio: CaptureAspectRatio
     let isFocusLocked: Bool
     let bracketFrameCount: Int
     let isProcessing: Bool
 
     var body: some View {
         ZStack {
-            if mode == .cinematic {
-                cinematicGuides
+            if aspectRatio != .original {
+                aspectGuides
             }
             if mode == .bracket {
                 bracketGuide
@@ -336,10 +354,11 @@ private struct ViewfinderOverlay: View {
         .allowsHitTesting(false)
     }
 
-    private var cinematicGuides: some View {
+    private var aspectGuides: some View {
         GeometryReader { geometry in
-            let guideWidth = min(geometry.size.width * 0.9, geometry.size.height * 0.9 * 2.39)
-            let guideHeight = guideWidth / 2.39
+            let ratio = aspectRatio.value ?? 2.39
+            let guideWidth = min(geometry.size.width * 0.9, geometry.size.height * 0.9 * ratio)
+            let guideHeight = guideWidth / ratio
             VStack(spacing: 0) {
                 Color.clear
                     .frame(height: max((geometry.size.height - guideHeight) / 2, 0))
@@ -614,6 +633,7 @@ struct SettingsView: View {
                     LabeledContent("Lens", value: viewModel.activeLensName)
                     LabeledContent("Optical range", value: String(format: "%.1f×–%.1f×", viewModel.capabilities.minimumZoomFactor, viewModel.capabilities.maximumZoomFactor))
                     LabeledContent("RAW", value: viewModel.capabilities.supportsRAW ? "Available" : "Unavailable")
+                    LabeledContent("Aspect ratio", value: viewModel.aspectRatio.title)
                 }
                 Section("Processing") {
                     LabeledContent("Preview", value: viewModel.processedFrame == nil ? "Waiting" : "Active")

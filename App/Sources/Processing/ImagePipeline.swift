@@ -6,10 +6,11 @@ import UIKit
 struct ImagePipeline {
     private let context = CIContext(options: [.cacheIntermediates: true])
 
-    func process(data: Data, grade: GradeSettings) -> Data? {
+    func process(data: Data, grade: GradeSettings, aspectRatio: CaptureAspectRatio = .original) -> Data? {
         guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
         let enhanced = LowLightEnhancer.enhance(image)
-        guard let output = render(grade.apply(to: enhanced)) else { return nil }
+        let cropped = crop(enhanced, to: aspectRatio)
+        guard let output = render(grade.apply(to: cropped)) else { return nil }
         return UIImage(cgImage: output).jpegData(compressionQuality: 0.94)
     }
 
@@ -17,7 +18,7 @@ struct ImagePipeline {
         render(grade.apply(to: LowLightEnhancer.enhance(CIImage(cgImage: cgImage))))
     }
 
-    func merge(data: [Data], grade: GradeSettings) -> Data? {
+    func merge(data: [Data], grade: GradeSettings, aspectRatio: CaptureAspectRatio = .original) -> Data? {
         guard !data.isEmpty else { return nil }
         let images = data.compactMap { CIImage(data: $0, options: [.applyOrientationProperty: true]) }
         guard let first = images.first else { return nil }
@@ -39,8 +40,27 @@ struct ImagePipeline {
         ])
         let adjusted = average.cropped(to: extent)
         let enhanced = LowLightEnhancer.enhance(adjusted)
-        guard let output = render(grade.apply(to: enhanced)) else { return nil }
+        let cropped = crop(enhanced, to: aspectRatio)
+        guard let output = render(grade.apply(to: cropped)) else { return nil }
         return UIImage(cgImage: output).jpegData(compressionQuality: 0.94)
+    }
+
+    private func crop(_ image: CIImage, to aspectRatio: CaptureAspectRatio) -> CIImage {
+        guard let target = aspectRatio.value else { return image }
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0 else { return image }
+        let current = extent.width / extent.height
+        var cropRect = extent
+        if current > target {
+            let width = extent.height * target
+            cropRect.origin.x += (extent.width - width) / 2
+            cropRect.size.width = width
+        } else {
+            let height = extent.width / target
+            cropRect.origin.y += (extent.height - height) / 2
+            cropRect.size.height = height
+        }
+        return image.cropped(to: cropRect)
     }
 
     private func render(_ image: CIImage) -> CGImage? {
