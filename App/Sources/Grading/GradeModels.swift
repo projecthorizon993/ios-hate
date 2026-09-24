@@ -50,7 +50,7 @@ struct GradeSettings: Codable, Equatable, Hashable, Sendable {
     var saturation = 1.0
     var vibrance = 0.0
     var hue = 0.0
-    var sharpen = 0.35
+    var sharpen = 0.12
     var grain = 0.0
     var halation = 0.0
     var vignette = 0.0

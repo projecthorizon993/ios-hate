@@ -53,7 +53,7 @@ final class CameraViewModel: ObservableObject {
             let grade = previewGrade(self.grade)
             self.previewQueue.async { [weak self] in
                 guard let self else { return }
-                let processed = self.previewPipeline.process(cgImage: image, grade: grade) ?? image
+                let processed = self.previewPipeline.processPreview(cgImage: image, grade: grade) ?? image
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isPreviewProcessing = false
@@ -70,7 +70,7 @@ final class CameraViewModel: ObservableObject {
             self.isConfigured = success
             if success {
                 self.capabilities = DeviceCapabilities.discover()
-                self.zoomFactor = max(self.capabilities.minimumZoomFactor, min(1, self.capabilities.maximumZoomFactor))
+                self.zoomFactor = max(self.minimumZoomFactor, min(1, self.capabilities.maximumZoomFactor))
                 self.diagnostics.record("Camera configured", level: "info")
             } else {
                 self.errorMessage = "Camera setup was not completed."
@@ -85,6 +85,10 @@ final class CameraViewModel: ObservableObject {
 
     var isAuthorized: Bool {
         authorizationStatus == .authorized
+    }
+
+    var minimumZoomFactor: CGFloat {
+        capabilities.lenses.contains { $0.name.contains("Ultra") } ? 0.5 : capabilities.minimumZoomFactor
     }
 
     var activeLensName: String {
@@ -139,7 +143,7 @@ final class CameraViewModel: ObservableObject {
 
     func setZoom(_ value: CGFloat) {
         guard isConfigured else { return }
-        zoomFactor = min(max(value, capabilities.minimumZoomFactor), capabilities.maximumZoomFactor)
+        zoomFactor = min(max(value, minimumZoomFactor), capabilities.maximumZoomFactor)
         coordinator.setZoomFactor(zoomFactor)
         applySettings()
     }

@@ -10,6 +10,7 @@ struct CameraView: View {
     @State private var showingPresets = false
     @State private var showingSettings = false
     @State private var showingGradeControls = false
+    @State private var pinchStartZoom: CGFloat?
 
     var body: some View {
         ZStack {
@@ -62,6 +63,17 @@ struct CameraView: View {
             ZStack {
                 CameraPreviewView(session: viewModel.coordinator.session, image: viewModel.processedFrame)
                     .ignoresSafeArea()
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                let startZoom = pinchStartZoom ?? viewModel.zoomFactor
+                                pinchStartZoom = startZoom
+                                viewModel.setZoom(startZoom * value)
+                            }
+                            .onEnded { _ in
+                                pinchStartZoom = nil
+                            }
+                    )
 
                 LinearGradient(
                     colors: [.black.opacity(0.65), .clear, .black.opacity(0.8)],
@@ -631,7 +643,7 @@ struct SettingsView: View {
             Form {
                 Section("Capture") {
                     LabeledContent("Lens", value: viewModel.activeLensName)
-                    LabeledContent("Optical range", value: String(format: "%.1f×–%.1f×", viewModel.capabilities.minimumZoomFactor, viewModel.capabilities.maximumZoomFactor))
+                    LabeledContent("Optical range", value: String(format: "%.1f×–%.1f×", viewModel.minimumZoomFactor, viewModel.capabilities.maximumZoomFactor))
                     LabeledContent("RAW", value: viewModel.capabilities.supportsRAW ? "Available" : "Unavailable")
                     LabeledContent("Aspect ratio", value: viewModel.aspectRatio.title)
                 }
@@ -662,6 +674,11 @@ struct SettingsView: View {
                         }
                         Button("Clear log", role: .destructive) {
                             viewModel.diagnostics.clear()
+                        }
+                    }
+                    if let logURL = viewModel.diagnostics.exportURL() {
+                        ShareLink(item: logURL) {
+                            Label("Share diagnostics log", systemImage: "square.and.arrow.up")
                         }
                     }
                 }

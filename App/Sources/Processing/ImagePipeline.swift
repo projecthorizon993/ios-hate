@@ -11,7 +11,26 @@ struct ImagePipeline {
         let enhanced = LowLightEnhancer.enhance(image)
         let cropped = crop(enhanced, to: aspectRatio)
         guard let output = render(grade.apply(to: cropped)) else { return nil }
-        return UIImage(cgImage: output).jpegData(compressionQuality: 0.94)
+        return UIImage(cgImage: output).jpegData(compressionQuality: 0.98)
+    }
+
+    func processPreview(cgImage: CGImage, grade: GradeSettings) -> CGImage? {
+        let source = CIImage(cgImage: cgImage)
+        let scale = min(1, 1280 / max(source.extent.width, source.extent.height))
+        let resized = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        var image = resized.applyingFilter("CINoiseReduction", parameters: [
+            "inputNoiseLevel": 0.035,
+            "inputSharpness": 0.12
+        ])
+        image = image.applyingFilter("CIColorControls", parameters: [
+            kCIInputContrastKey: grade.contrast,
+            kCIInputSaturationKey: grade.saturation,
+            kCIInputBrightnessKey: 0
+        ])
+        if grade.exposure != 0 {
+            image = image.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: grade.exposure])
+        }
+        return render(image)
     }
 
     func process(cgImage: CGImage, grade: GradeSettings) -> CGImage? {
@@ -42,7 +61,7 @@ struct ImagePipeline {
         let enhanced = LowLightEnhancer.enhance(adjusted)
         let cropped = crop(enhanced, to: aspectRatio)
         guard let output = render(grade.apply(to: cropped)) else { return nil }
-        return UIImage(cgImage: output).jpegData(compressionQuality: 0.94)
+        return UIImage(cgImage: output).jpegData(compressionQuality: 0.98)
     }
 
     private func crop(_ image: CIImage, to aspectRatio: CaptureAspectRatio) -> CIImage {

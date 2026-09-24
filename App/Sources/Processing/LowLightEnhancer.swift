@@ -4,8 +4,8 @@ import Foundation
 struct LowLightEnhancer {
     static func enhance(_ image: CIImage) -> CIImage {
         let denoised = image.applyingFilter("CINoiseReduction", parameters: [
-            "inputNoiseLevel": 0.03,
-            "inputSharpness": 0.22
+            "inputNoiseLevel": 0.04,
+            "inputSharpness": 0.12
         ])
         return denoised.applyingFilter("CIHighlightShadowAdjust", parameters: [
             "inputHighlightAmount": 0.5,

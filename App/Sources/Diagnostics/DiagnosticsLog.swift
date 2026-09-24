@@ -36,6 +36,19 @@ final class DiagnosticsLog: ObservableObject {
         persist()
     }
 
+    func exportURL() -> URL? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("LumaFrame-Diagnostics-\(UUID().uuidString).log")
+        let content = events.reversed().map { event in
+            "[\(ISO8601DateFormatter().string(from: event.date))] [\(event.level.uppercased())] \(event.message)"
+        }.joined(separator: "\n")
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
     func clear() {
         events.removeAll()
         UserDefaults.standard.removeObject(forKey: storageKey)

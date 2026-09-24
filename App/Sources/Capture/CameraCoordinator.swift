@@ -14,9 +14,10 @@ final class CameraCoordinator: NSObject {
     private let logger = Logger(subsystem: "com.lumaframe", category: "camera")
     private let frameScheduler = FrameScheduler()
     private var cameraDevice: AVCaptureDevice?
+    private var primaryDevice: AVCaptureDevice?
+    private var videoInput: AVCaptureDeviceInput?
     private var configured = false
     private var videoRotationConfigured = false
-    private var videoSampleCount = 0
 
     var onFrame: ((CGImage) -> Void)?
     var onPhoto: ((Data) -> Void)?
@@ -62,6 +63,8 @@ final class CameraCoordinator: NSObject {
                 }
 
                 self.session.addInput(input)
+                self.videoInput = input
+                self.primaryDevice = device
                 self.session.addOutput(self.photoOutput)
                 self.session.addOutput(self.videoOutput)
                 self.videoOutput.videoSettings = [
@@ -69,8 +72,8 @@ final class CameraCoordinator: NSObject {
                 ]
                 self.videoOutput.alwaysDiscardsLateVideoFrames = true
                 self.videoOutput.setSampleBufferDelegate(self, queue: self.videoQueue)
-                if let connection = self.videoOutput.connection(with: .video), connection.isVideoRotationAngleSupported(270) {
-                    connection.videoRotationAngle = 270
+                if let connection = self.videoOutput.connection(with: .video), connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
                 }
                 self.cameraDevice = device
                 self.configured = true
@@ -102,7 +105,12 @@ final class CameraCoordinator: NSObject {
                 if device.isExposureModeSupported(.custom) {
                     device.setExposureTargetBias(settings.exposureCompensation, completionHandler: nil)
                 }
-                let zoomFactor = min(max(settings.zoomFactor, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
+                let zoomFactor: CGFloat
+                if device.deviceType == .builtInUltraWideCamera || device.deviceType == .builtInTelephotoCamera {
+                    zoomFactor = 1
+                } else {
+                    zoomFactor = min(max(settings.zoomFactor, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
+                }
                 device.videoZoomFactor = zoomFactor
                 device.unlockForConfiguration()
             } catch {
@@ -113,11 +121,33 @@ final class CameraCoordinator: NSObject {
 
     func setZoomFactor(_ factor: CGFloat) {
         sessionQueue.async { [weak self] in
-            guard let self, let device = self.cameraDevice else { return }
+            guard let self, self.configured else { return }
+            let requestedFactor = max(0.5, factor)
+            if requestedFactor < 0.8,
+               let ultraWide = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back),
+               self.cameraDevice?.deviceType != .builtInUltraWideCamera {
+                self.switchInput(to: ultraWide)
+            } else if requestedFactor >= 1.8,
+                      let telephoto = AVCaptureDevice.default(.builtInTelephotoCamera, for: .video, position: .back),
+                      self.cameraDevice?.deviceType != .builtInTelephotoCamera {
+                self.switchInput(to: telephoto)
+            } else if requestedFactor >= 0.8,
+                      self.cameraDevice?.deviceType == .builtInUltraWideCamera,
+                      let primary = self.primaryDevice {
+                self.switchInput(to: primary)
+            } else if requestedFactor < 1.8,
+                      self.cameraDevice?.deviceType == .builtInTelephotoCamera,
+                      let primary = self.primaryDevice {
+                self.switchInput(to: primary)
+            }
+
+            guard let device = self.cameraDevice else { return }
             do {
                 try device.lockForConfiguration()
-                let factor = min(max(factor, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
-                device.videoZoomFactor = factor
+                let deviceFactor = device.deviceType == .builtInUltraWideCamera || device.deviceType == .builtInTelephotoCamera
+                    ? 1
+                    : min(max(requestedFactor, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
+                device.videoZoomFactor = deviceFactor
                 device.unlockForConfiguration()
             } catch {
                 self.notifyError("Zoom could not be changed.")
@@ -143,6 +173,27 @@ final class CameraCoordinator: NSObject {
         }
     }
 
+    private func switchInput(to device: AVCaptureDevice) {
+        guard let replacement = try? AVCaptureDeviceInput(device: device) else {
+            notifyError("The selected lens could not be activated.")
+            return
+        }
+
+        session.beginConfiguration()
+        if let videoInput {
+            session.removeInput(videoInput)
+        }
+        if session.canAddInput(replacement) {
+            session.addInput(replacement)
+            videoInput = replacement
+            cameraDevice = device
+        } else if let videoInput {
+            session.addInput(videoInput)
+            notifyError("The selected lens is not available.")
+        }
+        session.commitConfiguration()
+    }
+
     private func applyExposure(to device: AVCaptureDevice, settings: CaptureSettings) {
         switch settings.mode {
         case .manual, .cinematic:
@@ -162,19 +213,9 @@ final class CameraCoordinator: NSObject {
     }
 
     private func applyWhiteBalance(to device: AVCaptureDevice, settings: CaptureSettings) {
-        guard settings.mode == .manual else {
-            if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
-                device.whiteBalanceMode = .continuousAutoWhiteBalance
-            }
-            return
+        if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+            device.whiteBalanceMode = .continuousAutoWhiteBalance
         }
-
-        guard device.isWhiteBalanceModeSupported(.locked) else { return }
-        let temperature = min(max(settings.kelvin, 2500), 8000)
-        let tint = min(max(settings.tint, -150), 150)
-        let values = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: temperature, tint: tint)
-        let gains = device.deviceWhiteBalanceGains(for: values)
-        device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
     }
 
     private func notifyConfigured(_ value: Bool) {
@@ -207,18 +248,18 @@ extension CameraCoordinator: AVCapturePhotoCaptureDelegate {
 
 extension CameraCoordinator: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        if !videoRotationConfigured, connection.isVideoRotationAngleSupported(270) {
-            connection.videoRotationAngle = 270
+        if !videoRotationConfigured, connection.isVideoRotationAngleSupported(90) {
+            connection.videoRotationAngle = 90
             videoRotationConfigured = true
         }
-        videoSampleCount += 1
-        guard videoSampleCount.isMultiple(of: 2) else { return }
         frameScheduler.submit { [weak self] in
             guard let self, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
             let image = CIImage(cvPixelBuffer: pixelBuffer)
             let extent = image.extent
             let normalized = image.transformed(by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
-            return self.imageContext.createCGImage(normalized, from: normalized.extent)
+            let scale = min(1, 1280 / max(normalized.extent.width, normalized.extent.height))
+            let preview = normalized.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            return self.imageContext.createCGImage(preview, from: preview.extent)
         } completion: { [weak self] image in
             guard let image else { return }
             DispatchQueue.main.async {
