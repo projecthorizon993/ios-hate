@@ -25,7 +25,7 @@ final class CameraCoordinator: NSObject {
     var onError: ((String) -> Void)?
     var onFrameTiming: ((FrameTiming) -> Void)?
 
-    init() {
+    override init() {
         super.init()
         frameScheduler.onTiming = { [weak self] timing in
             DispatchQueue.main.async {

@@ -190,6 +190,7 @@ struct CameraView: View {
                         .foregroundStyle(viewModel.mode == mode ? .white : .white.opacity(0.45))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
+                        .overlay(alignment: .bottom) {
                             if viewModel.mode == mode {
                                 Capsule()
                                     .fill(lumaAccent)
