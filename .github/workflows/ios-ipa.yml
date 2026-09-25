@@ -25,7 +25,11 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -version
-          xcodebuild -list -project LumaFrame.xcodeproj
+          set +e
+          xcodebuild -list -project LumaFrame.xcodeproj 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+          LIST_STATUS=${PIPESTATUS[0]}
+          set -e
+          test "$LIST_STATUS" -eq 0
 
       - name: Compile unsigned iOS application
         run: |
