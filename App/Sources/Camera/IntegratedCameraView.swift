@@ -13,7 +13,7 @@ struct IntegratedCameraView: View {
                 Color.black
                     .ignoresSafeArea()
 
-                NativeCameraPreview(session: cameraManager.session)
+                NativeCameraPreview(cameraManager: cameraManager)
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .clipped()
                     .overlay {
