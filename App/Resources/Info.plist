@@ -22,6 +22,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>LumaFrame uses the camera to capture photos.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>LumaFrame saves captured photos to your photo library.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>LumaFrame uses the microphone only when video capture is enabled.</string>
 	<key>UIApplicationSceneManifest</key>

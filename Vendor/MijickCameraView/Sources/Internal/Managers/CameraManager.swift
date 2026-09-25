@@ -15,6 +15,7 @@ import MetalKit
 import CoreMotion
 import MijickTimer
 import OSLog
+import Photos
 
 public class CameraManager: NSObject, ObservableObject { init(_ attributes: Attributes) { self.initialAttributes = attributes; self.attributes = attributes }
     private let logger = Logger(subsystem: "LumaFrame", category: "CameraManager")
@@ -681,7 +682,7 @@ private extension CameraManager {
 // MARK: - Capturing Output
 extension CameraManager {
     func captureOutput() { if !isChanging {
-        logger.notice("Capture requested in \(String(describing: attributes.outputType), privacy: .public) mode")
+        logger.notice("Capture requested in \(String(describing: self.attributes.outputType), privacy: .public) mode")
         switch attributes.outputType {
         case .photo: capturePhoto()
         case .video: toggleVideoRecording()
@@ -737,8 +738,37 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
             logger.error("Photo capture failed: \(error.localizedDescription, privacy: .public)")
         } else {
             logger.notice("Photo capture completed")
+            savePhotoToLibrary(photo)
         }
         attributes.capturedMedia = .create(imageData: photo, orientation: fixedFrameOrientation(), filters: attributes.cameraFilters)
+    }
+}
+private extension CameraManager {
+    func savePhotoToLibrary(_ photo: AVCapturePhoto) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
+            guard let self else { return }
+            self.logger.notice("Photo library authorization: \(String(describing: status), privacy: .public)")
+            guard status == .authorized || status == .limited else {
+                self.logger.error("Photo library save skipped: authorization denied")
+                return
+            }
+            guard let data = photo.fileDataRepresentation() else {
+                self.logger.error("Photo library save skipped: missing image data")
+                return
+            }
+            PHPhotoLibrary.shared().performChanges({
+                let request = PHAssetCreationRequest.forAsset()
+                request.addResource(with: .photo, data: data, options: nil)
+            }, completionHandler: { success, changeError in
+                if success {
+                    self.logger.notice("Photo saved to library")
+                } else if let changeError {
+                    self.logger.error("Photo library save failed: \(changeError.localizedDescription, privacy: .public)")
+                } else {
+                    self.logger.error("Photo library save failed")
+                }
+            })
+        }
     }
 }
 private extension CameraManager {
@@ -1026,7 +1056,7 @@ public extension CameraManager {
         guard attributes.cameraPosition == .back, activeLens != lens, captureSession != nil, let device = device(for: lens) else { return }
         let replacement: AVCaptureDeviceInput
         let requestID = UUID()
-        logger.notice("Lens switch requested \(requestID, privacy: .public): \(activeLens.rawValue, privacy: .public) -> \(lens.rawValue, privacy: .public)")
+        logger.notice("Lens switch requested \(requestID, privacy: .public): \(self.activeLens.rawValue, privacy: .public) -> \(lens.rawValue, privacy: .public)")
         do {
             replacement = try AVCaptureDeviceInput(device: device)
         } catch {
