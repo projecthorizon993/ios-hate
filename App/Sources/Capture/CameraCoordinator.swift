@@ -10,6 +10,7 @@ final class CameraCoordinator: NSObject {
     private let videoQueue = DispatchQueue(label: "com.lumaframe.camera.video", qos: .userInitiated)
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
+    private let imageContext = CIContext(options: [.cacheIntermediates: false])
     private let logger = Logger(subsystem: "com.lumaframe", category: "camera")
     private let frameScheduler = FrameScheduler()
     private let stateLock = NSLock()
@@ -20,7 +21,7 @@ final class CameraCoordinator: NSObject {
     private var configured = false
     private var videoRotationConfigured = false
 
-    var onFrame: ((CIImage) -> Void)?
+    var onFrame: ((CGImage) -> Void)?
     var onPhoto: ((Data, Bool) -> Void)?
     var onConfigured: ((Bool) -> Void)?
     var onError: ((String) -> Void)?
@@ -296,7 +297,8 @@ extension CameraCoordinator: AVCaptureVideoDataOutputSampleBufferDelegate {
             let extent = image.extent
             let normalized = image.transformed(by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
             let scale = min(1, 1280 / max(normalized.extent.width, normalized.extent.height))
-            return normalized.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            let preview = normalized.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            return self.imageContext.createCGImage(preview, from: preview.extent)
         } completion: { [weak self] image in
             guard let image else { return }
             DispatchQueue.main.async {

@@ -14,7 +14,7 @@ final class FrameScheduler {
     private var isProcessing = false
     var onTiming: ((FrameTiming) -> Void)?
 
-    func submit(_ operation: @escaping () -> CIImage?, completion: @escaping (CIImage?) -> Void) {
+    func submit(_ operation: @escaping () -> CGImage?, completion: @escaping (CGImage?) -> Void) {
         lock.lock()
         guard !isProcessing else {
             lock.unlock()

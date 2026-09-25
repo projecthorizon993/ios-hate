@@ -63,7 +63,7 @@ struct CameraView: View {
             ZStack {
                 CameraPreviewView(
                     session: viewModel.coordinator.session,
-                    image: viewModel.processedImage,
+                    image: viewModel.processedFrame,
                     showsProcessedImage: viewModel.showLiveEnhancement
                 )
                     .ignoresSafeArea()
@@ -683,7 +683,7 @@ struct SettingsView: View {
                         .disabled(!viewModel.capabilities.supportsRAW)
                 }
                 Section("Processing") {
-                    LabeledContent("Preview", value: viewModel.processedImage == nil ? "Native preview" : "Live enhanced")
+                    LabeledContent("Preview", value: viewModel.processedFrame == nil ? "Native preview" : "Live enhanced")
                     LabeledContent("Enhancement", value: "Core Image")
                     Toggle("Live viewfinder enhancement", isOn: Binding(
                         get: { viewModel.showLiveEnhancement },
