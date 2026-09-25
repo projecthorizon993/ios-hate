@@ -278,7 +278,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 try device.lockForConfiguration()
                 device.iso = clamped
                 device.unlockForConfiguration()
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
                     self.iso = clamped
                 }
             } catch {
@@ -300,7 +301,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 try device.lockForConfiguration()
                 device.exposureDuration = clamped
                 device.unlockForConfiguration()
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
                     self.exposureDuration = clamped
                 }
             } catch {
