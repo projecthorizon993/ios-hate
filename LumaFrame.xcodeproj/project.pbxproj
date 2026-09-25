@@ -71,6 +71,9 @@
 			dependencies = (
 			);
 			name = LumaFrame;
+			packageProductDependencies = (
+				A10000000000000000000062
+			);
 			productName = LumaFrame;
 			productReference = A10000000000000000000024;
 			productType = "com.apple.product-type.application";
