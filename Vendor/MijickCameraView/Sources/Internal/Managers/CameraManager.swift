@@ -14,8 +14,11 @@ import AVKit
 import MetalKit
 import CoreMotion
 import MijickTimer
+import OSLog
 
 public class CameraManager: NSObject, ObservableObject { init(_ attributes: Attributes) { self.initialAttributes = attributes; self.attributes = attributes }
+    private let logger = Logger(subsystem: "LumaFrame", category: "CameraManager")
+
     // MARK: Attributes
     struct Attributes {
         var capturedMedia: MCameraMedia? = nil
@@ -141,6 +144,7 @@ extension CameraManager {
 // MARK: - Initialising Camera
 extension CameraManager {
     func setup(in cameraView: UIView) {
+        logger.notice("Camera setup started")
         do {
             makeCameraViewInvisible(cameraView)
             checkPermissions()
@@ -162,7 +166,10 @@ extension CameraManager {
             try setupFrameRate()
 
             startCaptureSession()
-        } catch { print("CANNOT SETUP CAMERA: \(error)") }
+            logger.notice("Camera setup completed")
+        } catch {
+            logger.error("Camera setup failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }
 private extension CameraManager {
@@ -266,7 +273,11 @@ private extension CameraManager {
         try updateFrameRate(attributes.frameRate, device)
     }}
     func startCaptureSession() { captureSessionQueue.async { [self] in
+        logger.notice("Starting AVCaptureSession")
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         captureSession.startRunning()
+        let elapsedMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+        logger.notice("AVCaptureSession started in \(elapsedMilliseconds, privacy: .public)ms")
     }}
 }
 private extension CameraManager {
@@ -320,16 +331,23 @@ extension CameraManager {
 extension CameraManager {
     func changeOutputType(_ newOutputType: CameraOutputType) throws { if newOutputType != attributes.outputType && !isChanging {
         let oldOutputType = attributes.outputType
+        let requestID = UUID()
+        logger.notice("Output switch requested \(requestID, privacy: .public): \(String(describing: oldOutputType), privacy: .public) -> \(String(describing: newOutputType), privacy: .public)")
         captureCurrentFrameAndDelay(.blur) { [self] in
+            let startedAt = DispatchTime.now().uptimeNanoseconds
+            logger.notice("Output switch session work started \(requestID, privacy: .public)")
             do {
                 removeCameraOutput(oldOutputType)
                 try setupCameraOutput(newOutputType)
+                let elapsedMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+                logger.notice("Output switch session work completed \(requestID, privacy: .public) in \(elapsedMilliseconds, privacy: .public)ms")
                 Task { @MainActor [self] in
                     updateCameraOutputType(newOutputType)
                     updateTorchMode(.off)
                     removeBlur()
                 }
             } catch {
+                logger.error("Output switch session work failed \(requestID, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 Task { @MainActor [self] in
                     metalAnimation = .none
                 }
@@ -356,16 +374,23 @@ private extension CameraManager {
 extension CameraManager {
     func changeCamera(_ newPosition: CameraPosition) throws { if newPosition != attributes.cameraPosition && !isChanging {
         let oldPosition = attributes.cameraPosition
+        let requestID = UUID()
+        logger.notice("Camera switch requested \(requestID, privacy: .public): \(String(describing: oldPosition), privacy: .public) -> \(String(describing: newPosition), privacy: .public)")
         captureCurrentFrameAndDelay(.blurAndFlip) { [self] in
+            let startedAt = DispatchTime.now().uptimeNanoseconds
+            logger.notice("Camera switch session work started \(requestID, privacy: .public)")
             do {
                 removeCameraInput(oldPosition)
                 try setupCameraInput(newPosition)
+                let elapsedMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+                logger.notice("Camera switch session work completed \(requestID, privacy: .public) in \(elapsedMilliseconds, privacy: .public)ms")
                 Task { @MainActor [self] in
                     updateCameraPosition(newPosition)
                     updateTorchMode(.off)
                     removeBlur()
                 }
             } catch {
+                logger.error("Camera switch session work failed \(requestID, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 Task { @MainActor [self] in
                     metalAnimation = .none
                 }
@@ -655,10 +680,13 @@ private extension CameraManager {
 
 // MARK: - Capturing Output
 extension CameraManager {
-    func captureOutput() { if !isChanging { switch attributes.outputType {
+    func captureOutput() { if !isChanging {
+        logger.notice("Capture requested in \(String(describing: attributes.outputType), privacy: .public) mode")
+        switch attributes.outputType {
         case .photo: capturePhoto()
         case .video: toggleVideoRecording()
-    }}}
+        }
+    }}
 }
 
 // MARK: Photo
@@ -666,6 +694,7 @@ private extension CameraManager {
     func capturePhoto() {
         let settings = getPhotoOutputSettings()
 
+        logger.notice("Photo capture started")
         configureOutput(photoOutput)
         photoOutput?.capturePhoto(with: settings, delegate: self)
         performCaptureAnimation()
@@ -704,6 +733,11 @@ private extension CameraManager {
 
 extension CameraManager: AVCapturePhotoCaptureDelegate {
     public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: (any Swift.Error)?) {
+        if let error {
+            logger.error("Photo capture failed: \(error.localizedDescription, privacy: .public)")
+        } else {
+            logger.notice("Photo capture completed")
+        }
         attributes.capturedMedia = .create(imageData: photo, orientation: fixedFrameOrientation(), filters: attributes.cameraFilters)
     }
 }
@@ -732,6 +766,7 @@ private extension CameraManager {
 }
 private extension CameraManager {
     func startRecording() { if let url = prepareUrlForVideoRecording() {
+        logger.notice("Video recording started")
         configureOutput(videoOutput)
         videoOutput?.startRecording(to: url, recordingDelegate: self)
         storeLastFrame()
@@ -739,6 +774,7 @@ private extension CameraManager {
         startRecordingTimer()
     }}
     func stopRecording() {
+        logger.notice("Video recording stopping")
         presentLastFrame()
         videoOutput?.stopRecording()
         updateIsRecording(false)
@@ -775,6 +811,11 @@ private extension CameraManager {
 
 extension CameraManager: AVCaptureFileOutputRecordingDelegate {
     public func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: (any Swift.Error)?) { Task { @MainActor in
+        if let error {
+            logger.error("Video recording failed: \(error.localizedDescription, privacy: .public)")
+        } else {
+            logger.notice("Video recording completed")
+        }
         attributes.capturedMedia = await .create(videoData: outputFileURL, filters: attributes.cameraFilters)
     }}
 }
@@ -984,13 +1025,18 @@ public extension CameraManager {
     func setLens(_ lens: CameraLens) {
         guard attributes.cameraPosition == .back, activeLens != lens, captureSession != nil, let device = device(for: lens) else { return }
         let replacement: AVCaptureDeviceInput
+        let requestID = UUID()
+        logger.notice("Lens switch requested \(requestID, privacy: .public): \(activeLens.rawValue, privacy: .public) -> \(lens.rawValue, privacy: .public)")
         do {
             replacement = try AVCaptureDeviceInput(device: device)
         } catch {
+            logger.error("Lens switch input creation failed \(requestID, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return
         }
 
         captureCurrentFrameAndDelay(.blur) { [self] in
+            let startedAt = DispatchTime.now().uptimeNanoseconds
+            logger.notice("Lens switch session work started \(requestID, privacy: .public)")
             captureSession.beginConfiguration()
             if let currentInput = backCameraInput {
                 captureSession.removeInput(currentInput)
@@ -1003,6 +1049,8 @@ public extension CameraManager {
                 try? withLockingDeviceForConfiguration(device) { configuredDevice in
                     configuredDevice.videoZoomFactor = 1
                 }
+                let elapsedMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+                logger.notice("Lens switch session work completed \(requestID, privacy: .public) in \(elapsedMilliseconds, privacy: .public)ms")
                 Task { @MainActor [self] in
                     activeLens = lens
                     attributes.zoomFactor = 1
@@ -1013,6 +1061,7 @@ public extension CameraManager {
                     captureSession.addInput(currentInput)
                 }
                 captureSession.commitConfiguration()
+                logger.error("Lens switch session work rejected \(requestID, privacy: .public)")
                 Task { @MainActor [self] in
                     metalAnimation = .none
                 }
