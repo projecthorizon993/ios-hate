@@ -75,9 +75,6 @@ struct IntegratedCameraView: MCameraView {
                 selectedZoom = defaultZoom(for: lens)
             }
         }
-        .sheet(isPresented: $professionalControlsVisible) {
-            settingsSheet
-        }
     }
 
     private var topBar: some View {
