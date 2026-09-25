@@ -133,7 +133,12 @@ struct IntegratedCameraView: View {
 
                 Spacer()
 
-                shutterButton
+                VStack(spacing: 4) {
+                    shutterButton
+                    if cameraManager.isRecording {
+                        recordingTimeLabel
+                    }
+                }
 
                 Spacer()
 
@@ -241,7 +246,7 @@ struct IntegratedCameraView: View {
         } label: {
             ZStack {
                 Circle()
-                    .stroke(.white, lineWidth: 4)
+                    .stroke(cameraManager.isRecording ? Color.red : .white, lineWidth: 4)
                     .frame(width: 76, height: 76)
                 Circle()
                     .fill(cameraManager.outputType == .video ? Color.red : Color.white)
@@ -252,6 +257,20 @@ struct IntegratedCameraView: View {
         .buttonStyle(.plain)
         .disabled(!cameraManager.isRunning || cameraManager.isReconfiguring)
         .opacity(cameraManager.isRunning ? 1 : 0.45)
+    }
+
+    private var recordingTimeLabel: some View {
+        TimelineView(.periodic(from: .now, by: 0.2)) { context in
+            Text(recordingDuration(at: context.date))
+                .font(.caption2.weight(.bold).monospacedDigit())
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func recordingDuration(at date: Date) -> String {
+        guard let start = cameraManager.recordingStartedAt else { return "00:00" }
+        let seconds = max(0, Int(date.timeIntervalSince(start)))
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 
     private var cameraZoomGesture: some Gesture {

@@ -79,6 +79,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
     @Published private(set) var activeLens: NativeCameraLens = .wide
     @Published private(set) var isRunning = false
     @Published private(set) var isRecording = false
+    @Published private(set) var recordingStartedAt: Date?
     @Published private(set) var isReconfiguring = false
     @Published private(set) var lastCapture: UIImage?
     @Published var colorSettings = NativeColorSettings.natural
@@ -153,6 +154,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
             }
             DispatchQueue.main.async {
                 self.isRunning = false
+                self.isRecording = false
+                self.recordingStartedAt = nil
             }
         }
     }
@@ -585,6 +588,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 self?.movieOutput.stopRecording()
             }
             isRecording = false
+            recordingStartedAt = nil
         } else {
             requestAudioPermissionAndRecord()
         }
@@ -629,6 +633,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
             self.movieOutput.startRecording(to: url, recordingDelegate: self)
             DispatchQueue.main.async {
                 self.isRecording = self.movieOutput.isRecording
+                self.recordingStartedAt = self.movieOutput.isRecording ? Date() : nil
             }
         }
     }
@@ -735,6 +740,7 @@ extension NativeCameraManager: AVCaptureFileOutputRecordingDelegate {
         }
         DispatchQueue.main.async { [weak self] in
             self?.isRecording = false
+            self?.recordingStartedAt = nil
         }
     }
 }
