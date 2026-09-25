@@ -19,7 +19,6 @@
 			);
 			mainGroup = A10000000000000000000003;
 			packageReferences = (
-				A10000000000000000000060
 			);
 			productRefGroup = A10000000000000000000004;
 			projectDirPath = "";
@@ -74,7 +73,6 @@
 			);
 			name = LumaFrame;
 			packageProductDependencies = (
-				A10000000000000000000062
 			);
 			productName = LumaFrame;
 			productReference = A10000000000000000000024;
@@ -221,7 +219,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000000000000000000061
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -339,19 +336,6 @@
 			lastKnownFileType = folder.assetcatalog;
 			path = "App/Resources/Assets.xcassets";
 			sourceTree = "<group>";
-		};
-		A10000000000000000000060 = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Vendor/MijickCameraView;
-		};
-		A10000000000000000000061 = {
-			isa = PBXBuildFile;
-			productRef = A10000000000000000000062;
-		};
-		A10000000000000000000062 = {
-			isa = XCSwiftPackageProductDependency;
-			package = A10000000000000000000060;
-			productName = MijickCameraView;
 		};
 	};
 	rootObject = A10000000000000000000001;
