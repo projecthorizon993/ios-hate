@@ -34,6 +34,9 @@ jobs:
               echo "### xcodebuild -project validation"
               cat "$RUNNER_TEMP/xcodebuild.log"
             } >> "$GITHUB_STEP_SUMMARY"
+            while IFS= read -r diagnostic; do
+              printf '::error title=Xcode validation::%s\n' "$diagnostic"
+            done < "$RUNNER_TEMP/xcodebuild.log"
             exit "$LIST_STATUS"
           fi
 
