@@ -47,6 +47,7 @@ public class CameraManager: NSObject, ObservableObject { init(_ attributes: Attr
 
     // MARK: Input
     private var captureSession: AVCaptureSession!
+    private let captureSessionQueue = DispatchQueue(label: "cameraSession.configuration")
     private var frontCameraInput: AVCaptureDeviceInput?
     private var backCameraInput: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
@@ -264,7 +265,7 @@ private extension CameraManager {
         try checkNewFrameRate(attributes.frameRate, device)
         try updateFrameRate(attributes.frameRate, device)
     }}
-    func startCaptureSession() { DispatchQueue(label: "cameraSession").async { [self] in
+    func startCaptureSession() { captureSessionQueue.async { [self] in
         captureSession.startRunning()
     }}
 }
@@ -318,13 +319,21 @@ extension CameraManager {
 // MARK: - Changing Output Type
 extension CameraManager {
     func changeOutputType(_ newOutputType: CameraOutputType) throws { if newOutputType != attributes.outputType && !isChanging {
+        let oldOutputType = attributes.outputType
         captureCurrentFrameAndDelay(.blur) { [self] in
-            removeCameraOutput(attributes.outputType)
-            try setupCameraOutput(newOutputType)
-            updateCameraOutputType(newOutputType)
-
-            updateTorchMode(.off)
-            removeBlur()
+            do {
+                removeCameraOutput(oldOutputType)
+                try setupCameraOutput(newOutputType)
+                Task { @MainActor [self] in
+                    updateCameraOutputType(newOutputType)
+                    updateTorchMode(.off)
+                    removeBlur()
+                }
+            } catch {
+                Task { @MainActor [self] in
+                    metalAnimation = .none
+                }
+            }
         }
     }}
 }
@@ -346,14 +355,24 @@ private extension CameraManager {
 // MARK: - Changing Camera Position
 extension CameraManager {
     func changeCamera(_ newPosition: CameraPosition) throws { if newPosition != attributes.cameraPosition && !isChanging {
+        let oldPosition = attributes.cameraPosition
         captureCurrentFrameAndDelay(.blurAndFlip) { [self] in
-            removeCameraInput(attributes.cameraPosition)
-            try setupCameraInput(newPosition)
-             updateCameraPosition(newPosition)
-             updateTorchMode(.off)
-            removeBlur()
+            do {
+                removeCameraInput(oldPosition)
+                try setupCameraInput(newPosition)
+                Task { @MainActor [self] in
+                    updateCameraPosition(newPosition)
+                    updateTorchMode(.off)
+                    removeBlur()
+                }
+            } catch {
+                Task { @MainActor [self] in
+                    metalAnimation = .none
+                }
+            }
         }
     }}
+
 }
 private extension CameraManager {
     func removeCameraInput(_ position: CameraPosition) { if let input = getInput(position) {
@@ -980,18 +999,23 @@ public extension CameraManager {
                 captureSession.addInput(replacement)
                 backCameraInput = replacement
                 backCamera = device
-                activeLens = lens
-                attributes.zoomFactor = 1
                 captureSession.commitConfiguration()
                 try? withLockingDeviceForConfiguration(device) { configuredDevice in
                     configuredDevice.videoZoomFactor = 1
                 }
-                removeBlur()
+                Task { @MainActor [self] in
+                    activeLens = lens
+                    attributes.zoomFactor = 1
+                    removeBlur()
+                }
             } else {
                 if let currentInput = backCameraInput {
                     captureSession.addInput(currentInput)
                 }
                 captureSession.commitConfiguration()
+                Task { @MainActor [self] in
+                    metalAnimation = .none
+                }
             }
         }
     }
@@ -1021,12 +1045,14 @@ public extension CameraManager {
 
 // MARK: - Helpers
 private extension CameraManager {
-    func captureCurrentFrameAndDelay(_ type: MetalAnimation, _ action: @escaping () throws -> ()) { Task { @MainActor in
+    func captureCurrentFrameAndDelay(_ type: MetalAnimation, _ action: @escaping () throws -> ()) { Task { @MainActor [self] in
         metalAnimation = type
-        try await Task.sleep(nanoseconds: 50_000_000)
-
-        try action()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        captureSessionQueue.async {
+            try? action()
+        }
     }}
+
     func configureOutput(_ output: AVCaptureOutput?) { if let connection = output?.connection(with: .video), connection.isVideoMirroringSupported {
         connection.isVideoMirrored = attributes.mirrorOutput ? attributes.cameraPosition != .front : attributes.cameraPosition == .front
         connection.videoOrientation = attributes.deviceOrientation
