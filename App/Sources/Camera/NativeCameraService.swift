@@ -1,7 +1,6 @@
 import AVFoundation
 import CoreImage
 import Foundation
-import MetalKit
 import OSLog
 import Photos
 import SwiftUI
@@ -82,10 +81,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isReconfiguring = false
     @Published private(set) var lastCapture: UIImage?
-    @Published var colorSettings = NativeColorSettings.natural
 
     let session = AVCaptureSession()
-    let previewRenderer = NativeColorRenderer()
     let availableLenses: [NativeCameraLens] = [
         .ultraWide, .wide, .telephoto
     ].filter { lens in
@@ -100,10 +97,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private let sessionQueue = DispatchQueue(label: "com.lumaframe.camera.session", qos: .userInitiated)
-    private let videoQueue = DispatchQueue(label: "com.lumaframe.camera.preview", qos: .userInteractive)
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
-    private let videoDataOutput = AVCaptureVideoDataOutput()
     private let logger = Logger(subsystem: "LumaFrame", category: "NativeCamera")
     private var currentInput: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
@@ -127,7 +122,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
 
     func start() {
         wantsRunning = true
-        previewRenderer.setActive(true)
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             configureAndStart()
@@ -149,8 +143,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
 
     func stop() {
         wantsRunning = false
-        previewRenderer.setActive(false)
-        previewRenderer.clear()
         sessionQueue.async { [weak self] in
             guard let self else { return }
             if self.session.isRunning {
@@ -166,14 +158,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
         guard newOutputType != outputType else { return }
         logger.notice("Output mode changed to \(String(describing: newOutputType), privacy: .public)")
         outputType = newOutputType
-    }
-
-    func setColorPreset(_ preset: NativeColorPreset) {
-        colorSettings.preset = preset
-    }
-
-    func updateColorSettings(_ settings: NativeColorSettings) {
-        colorSettings = settings
     }
 
     func changeCamera(_ newPosition: NativeCameraPosition) throws {
@@ -433,16 +417,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
             } else {
                 logger.error("Movie output rejected")
             }
-            videoDataOutput.alwaysDiscardsLateVideoFrames = true
-            videoDataOutput.videoSettings = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-            ]
-            videoDataOutput.setSampleBufferDelegate(self, queue: videoQueue)
-            if session.canAddOutput(videoDataOutput) {
-                session.addOutput(videoDataOutput)
-            } else {
-                logger.error("Video data output rejected")
-            }
             configureConnections()
         } catch {
             logger.error("Camera session setup failed: \(error.localizedDescription, privacy: .public)")
@@ -507,7 +481,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private func configureConnections() {
-        for output in [photoOutput, movieOutput, videoDataOutput] {
+        for output in [photoOutput, movieOutput] {
             guard let connection = output.connection(with: .video) else { continue }
             if connection.isVideoMirroringSupported {
                 connection.isVideoMirrored = mirrorOutput ? currentPosition != .front : currentPosition == .front
@@ -663,14 +637,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 }
 
-extension NativeCameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let image = CIImage(cvPixelBuffer: pixelBuffer)
-        previewRenderer.submit(image, settings: colorSettings)
-    }
-}
-
 extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: (any Swift.Error)?) {
         if let error {
@@ -705,23 +671,33 @@ extension NativeCameraManager: AVCaptureFileOutputRecordingDelegate {
 }
 
 struct NativeCameraPreview: UIViewRepresentable {
-    @ObservedObject var cameraManager: NativeCameraManager
+    let session: AVCaptureSession
 
-    func makeUIView(context: Context) -> MTKView {
-        let view = MTKView(frame: .zero)
-        cameraManager.previewRenderer.configure(view)
-        cameraManager.previewRenderer.setActive(cameraManager.isRunning)
-        view.isPaused = !cameraManager.isRunning
+    func makeUIView(context: Context) -> NativeCameraPreviewView {
+        let view = NativeCameraPreviewView()
+        view.previewLayer.session = session
+        view.previewLayer.videoGravity = .resizeAspectFill
         return view
     }
 
-    func updateUIView(_ uiView: MTKView, context: Context) {
-        cameraManager.previewRenderer.setActive(cameraManager.isRunning)
-        uiView.isPaused = !cameraManager.isRunning
+    func updateUIView(_ uiView: NativeCameraPreviewView, context: Context) {
+        if uiView.previewLayer.session !== session {
+            uiView.previewLayer.session = session
+        }
+        uiView.previewLayer.videoGravity = .resizeAspectFill
     }
 
-    static func dismantleUIView(_ uiView: MTKView, coordinator: ()) {
-        uiView.isPaused = true
-        uiView.delegate = nil
+    static func dismantleUIView(_ uiView: NativeCameraPreviewView, coordinator: ()) {
+        uiView.previewLayer.session = nil
+    }
+}
+
+final class NativeCameraPreviewView: UIView {
+    override class var layerClass: AnyClass {
+        AVCaptureVideoPreviewLayer.self
+    }
+
+    var previewLayer: AVCaptureVideoPreviewLayer {
+        layer as! AVCaptureVideoPreviewLayer
     }
 }
