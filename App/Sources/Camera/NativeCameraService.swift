@@ -382,9 +382,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
             do {
                 try device.lockForConfiguration()
                 if device.isFocusModeSupported(.locked) {
-                    device.focusMode = .locked
+                    device.setFocusModeLocked(lensPosition: clamped)
                 }
-                device.lensPosition = clamped
                 device.unlockForConfiguration()
                 DispatchQueue.main.async { [weak self] in
                     self?.focusPosition = clamped
