@@ -21,9 +21,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>LumaFrame uses the camera to capture photos and video with live low-light enhancement.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>LumaFrame uses the microphone only when you choose to record audio.</string>
+	<string>LumaFrame uses the camera to capture photos.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

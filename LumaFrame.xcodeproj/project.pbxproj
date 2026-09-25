@@ -18,6 +18,9 @@
 				Base
 			);
 			mainGroup = A10000000000000000000003;
+			packageReferences = (
+				A10000000000000000000060
+			);
 			productRefGroup = A10000000000000000000004;
 			projectDirPath = "";
 			projectRoot = "";
@@ -40,22 +43,8 @@
 			children = (
 				A10000000000000000000010,
 				A10000000000000000000011,
-				A10000000000000000000012,
-				A10000000000000000000013,
-				A10000000000000000000014,
-				A10000000000000000000015,
-				A10000000000000000000016,
-				A10000000000000000000017,
-				A10000000000000000000018,
-				A10000000000000000000019,
-				A10000000000000000000020,
-				A10000000000000000000021,
-				A10000000000000000000022,
 				A10000000000000000000023,
-				A10000000000000000000058,
-				A10000000000000000000059,
-				A10000000000000000000061,
-				A10000000000000000000063
+				A10000000000000000000058
 			);
 			name = LumaFrame;
 			sourceTree = "<group>";
@@ -174,73 +163,7 @@
 		A10000000000000000000011 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/CameraFeature/CameraView.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000012 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/CameraFeature/CameraViewModel.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000013 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/CameraFeature/CameraPreviewView.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000014 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Capture/CameraCoordinator.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000015 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Capture/CaptureSettings.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000016 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Capture/DeviceCapabilities.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000017 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Processing/ImagePipeline.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000018 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Processing/FrameScheduler.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000019 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Grading/GradeModels.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000020 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Grading/PresetStore.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000021 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Media/MediaLibrary.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000022 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Diagnostics/PerformanceMonitor.swift";
+			path = "App/Sources/Camera/CameraScreen.swift";
 			sourceTree = "<group>";
 		};
 		A10000000000000000000023 = {
@@ -277,21 +200,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000040,
-				A10000000000000000000041,
-				A10000000000000000000042,
-				A10000000000000000000043,
-				A10000000000000000000044,
-				A10000000000000000000045,
-				A10000000000000000000046,
-				A10000000000000000000047,
-				A10000000000000000000048,
-				A10000000000000000000049,
-				A10000000000000000000050,
-				A10000000000000000000051,
-				A10000000000000000000052,
-				A10000000000000000000060,
-				A10000000000000000000062,
-				A10000000000000000000064
+				A10000000000000000000041
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -299,6 +208,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000061
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -354,50 +264,6 @@
 			isa = PBXBuildFile;
 			fileRef = A10000000000000000000011;
 		};
-		A10000000000000000000042 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000012;
-		};
-		A10000000000000000000043 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000013;
-		};
-		A10000000000000000000044 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000014;
-		};
-		A10000000000000000000045 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000015;
-		};
-		A10000000000000000000046 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000016;
-		};
-		A10000000000000000000047 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000017;
-		};
-		A10000000000000000000048 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000018;
-		};
-		A10000000000000000000049 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000019;
-		};
-		A10000000000000000000050 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000020;
-		};
-		A10000000000000000000051 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000021;
-		};
-		A10000000000000000000052 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000022;
-		};
 		A10000000000000000000053 = {
 			isa = PBXBuildFile;
 			fileRef = A10000000000000000000058;
@@ -447,35 +313,22 @@
 			path = "App/Resources/Assets.xcassets";
 			sourceTree = "<group>";
 		};
-		A10000000000000000000059 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/CameraFeature/GradeControlsView.swift";
-			sourceTree = "<group>";
-		};
 		A10000000000000000000060 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000059;
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Mijick/Camera.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
 		};
 		A10000000000000000000061 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Processing/LowLightEnhancer.swift";
-			sourceTree = "<group>";
+			isa = PBXBuildFile;
+			productRef = A10000000000000000000062;
 		};
 		A10000000000000000000062 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000061;
-		};
-		A10000000000000000000063 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Diagnostics/DiagnosticsLog.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000064 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000063;
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000060;
+			productName = MijickCamera;
 		};
 	};
 	rootObject = A10000000000000000000001;
