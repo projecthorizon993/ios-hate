@@ -14,6 +14,7 @@ struct IntegratedCameraView: MCameraView {
     @State private var selectedShutter: Double = 1.0 / 60.0
     @State private var selectedBias: Float = 0
     @State private var selectedZoom: CGFloat = 1
+    @State private var standardLensMode = false
 
     var body: some View {
         ZStack {
@@ -41,6 +42,7 @@ struct IntegratedCameraView: MCameraView {
         }
         .onChange(of: zoomFactor) { _, value in
             selectedZoom = value
+            standardLensMode = abs(value - (35.0 / 24.0)) < 0.02
         }
     }
 
@@ -125,11 +127,37 @@ struct IntegratedCameraView: MCameraView {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12), lineWidth: 1))
     }
 
+    private var zoomControl: some View {
+        HStack(spacing: 10) {
+            Text(zoomLabel)
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundStyle(.yellow)
+                .frame(width: 42)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2, perform: toggleStandardLens)
+            Slider(value: $selectedZoom, in: 1...3, step: 0.1) { editing in
+                if !editing {
+                    try? changeZoomFactor(selectedZoom)
+                }
+            }
+            .tint(.yellow)
+            Text(focalLengthLabel)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.72))
+                .frame(width: 48, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(.white.opacity(0.08), in: Capsule())
+    }
+
     private var bottomBar: some View {
         VStack(spacing: 12) {
             if professionalControlsVisible {
                 professionalPanel
             }
+
+            zoomControl
 
             HStack(spacing: 8) {
                 modeButton("PHOTO", systemImage: "camera", isActive: outputType == .photo) {
@@ -232,6 +260,23 @@ struct IntegratedCameraView: MCameraView {
                 .frame(width: 32, height: 32)
         }
         .foregroundStyle(.white)
+    }
+
+    private func toggleStandardLens() {
+        standardLensMode.toggle()
+        let target: CGFloat = standardLensMode ? 35.0 / 24.0 : 1
+        selectedZoom = target
+        try? changeZoomFactor(target)
+    }
+
+    private var zoomLabel: String {
+        if standardLensMode { return "1×" }
+        return String(format: "%.1f×", zoomFactor)
+    }
+
+    private var focalLengthLabel: String {
+        if standardLensMode { return "35mm" }
+        return String(format: "%.0fmm", 24 * max(1, zoomFactor))
     }
 
     private var flashSymbol: String {
