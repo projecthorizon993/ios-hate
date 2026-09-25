@@ -98,6 +98,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private let sessionQueue = DispatchQueue(label: "com.lumaframe.camera.session", qos: .userInitiated)
+    private let photoProcessingQueue = DispatchQueue(label: "com.lumaframe.camera.photo-processing", qos: .userInitiated)
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
     private let logger = Logger(subsystem: "LumaFrame", category: "NativeCamera")
@@ -703,12 +704,24 @@ extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
             logger.error("Photo capture returned no data")
             return
         }
-        let image = UIImage(data: data)
-        DispatchQueue.main.async { [weak self] in
-            self?.lastCapture = image
+        let settings = colorSettings
+        photoProcessingQueue.async { [weak self] in
+            guard let self else { return }
+            let processedData: Data
+            if settings == .natural {
+                processedData = data
+            } else if let sourceImage = UIImage(data: data) {
+                processedData = NativeColorEngine.processedJPEGData(from: sourceImage, settings: settings) ?? data
+            } else {
+                processedData = data
+            }
+            let image = UIImage(data: processedData)
+            DispatchQueue.main.async { [weak self] in
+                self?.lastCapture = image
+            }
+            self.savePhotoData(processedData)
+            self.logger.notice("Photo capture completed")
         }
-        savePhotoData(data)
-        logger.notice("Photo capture completed")
     }
 }
 
