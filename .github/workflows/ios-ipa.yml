@@ -29,7 +29,13 @@ jobs:
           xcodebuild -list -project LumaFrame.xcodeproj 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
           LIST_STATUS=${PIPESTATUS[0]}
           set -e
-          test "$LIST_STATUS" -eq 0
+          if [ "$LIST_STATUS" -ne 0 ]; then
+            {
+              echo "### xcodebuild -project validation"
+              cat "$RUNNER_TEMP/xcodebuild.log"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$LIST_STATUS"
+          fi
 
       - name: Compile unsigned iOS application
         run: |
