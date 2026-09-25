@@ -5,8 +5,8 @@ on:
   push:
     branches:
       - "main"
-       - "fresh-rewrite"
-       - "avfoundation-core"
+      - "fresh-rewrite"
+      - "avfoundation-core"
 
     tags:
       - "v*"
