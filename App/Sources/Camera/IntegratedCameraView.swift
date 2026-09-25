@@ -50,6 +50,12 @@ struct IntegratedCameraView: MCameraView {
                 bottomBar
                     .background(Color.black)
             }
+
+            if professionalControlsVisible {
+                settingsPage
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
         }
         .ignoresSafeArea()
         .statusBarHidden()
@@ -74,9 +80,6 @@ struct IntegratedCameraView: MCameraView {
             } else {
                 selectedZoom = defaultZoom(for: lens)
             }
-        }
-        .sheet(isPresented: $professionalControlsVisible) {
-            settingsSheet
         }
     }
 
@@ -111,140 +114,209 @@ struct IntegratedCameraView: MCameraView {
         .padding(.top, 10)
     }
 
-    private var settingsSheet: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Toggle("Professional Mode", isOn: $professionalMode)
-                        .tint(.yellow)
-                        .onChange(of: professionalMode) { _, enabled in
-                            applyProfessionalMode(enabled)
-                        }
-                    Text("Uses a higher-resolution capture profile and a cinematic color profile.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    Text("Camera Profile")
-                }
+    private var settingsPage: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
 
-                Section("Color Preset") {
-                    ForEach(ColorPreset.allCases) { preset in
-                        Button {
-                            applyPreset(preset)
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: preset.icon)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(preset.title)
-                                        .foregroundStyle(.primary)
-                                    Text(preset.subtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("SETTINGS")
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                            Text("LUMA FRAME CAMERA")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                        Spacer()
+                        Button("Done") {
+                            professionalControlsVisible = false
+                        }
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.yellow)
+                    }
+                    .foregroundStyle(.white)
+
+                    settingsCard("CAMERA PROFILE") {
+                        Toggle("Professional Mode", isOn: $professionalMode)
+                            .tint(.yellow)
+                            .onChange(of: professionalMode) { _, enabled in
+                                applyProfessionalMode(enabled)
+                            }
+                        Text("Higher-resolution profile with a cinematic color preset.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+
+                    settingsCard("COLOR PRESET") {
+                        ForEach(ColorPreset.allCases) { preset in
+                            Button {
+                                applyPreset(preset)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: preset.icon)
+                                        .frame(width: 24)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(preset.title)
+                                            .foregroundStyle(.white)
+                                        Text(preset.subtitle)
+                                            .font(.caption)
+                                            .foregroundStyle(.white.opacity(0.55))
+                                    }
+                                    Spacer()
+                                    if selectedPreset == preset {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(.yellow)
+                                    }
                                 }
-                                Spacer()
-                                if selectedPreset == preset {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(.yellow)
+                            }
+                        }
+                    }
+
+                    settingsCard("IMAGE QUALITY") {
+                        settingChoice("Resolution", value: quality.title, isActive: quality == .fullHD) {
+                            quality = .fullHD
+                            applyQuality()
+                        }
+                        settingChoice("Ultra HD", value: quality == .ultraHD ? "ON" : "OFF", isActive: quality == .ultraHD) {
+                            quality = .ultraHD
+                            applyQuality()
+                        }
+                        settingChoice("24 FPS", value: selectedFrameRate == 24 ? "ON" : "", isActive: selectedFrameRate == 24) {
+                            selectedFrameRate = 24
+                            applyQuality()
+                        }
+                        settingChoice("30 FPS", value: selectedFrameRate == 30 ? "ON" : "", isActive: selectedFrameRate == 30) {
+                            selectedFrameRate = 30
+                            applyQuality()
+                        }
+                        settingChoice("60 FPS", value: selectedFrameRate == 60 ? "ON" : "", isActive: selectedFrameRate == 60) {
+                            selectedFrameRate = 60
+                            applyQuality()
+                        }
+                        settingChoice("HDR Auto", value: selectedHDRMode == .auto ? "ON" : "", isActive: selectedHDRMode == .auto) {
+                            selectedHDRMode = .auto
+                            applyQuality()
+                        }
+                        settingChoice("HDR On", value: selectedHDRMode == .on ? "ON" : "", isActive: selectedHDRMode == .on) {
+                            selectedHDRMode = .on
+                            applyQuality()
+                        }
+                        settingChoice("HDR Off", value: selectedHDRMode == .off ? "ON" : "", isActive: selectedHDRMode == .off) {
+                            selectedHDRMode = .off
+                            applyQuality()
+                        }
+                    }
+
+                    settingsCard("EXPOSURE") {
+                        Toggle("Manual Exposure", isOn: $manualExposure)
+                            .tint(.yellow)
+                            .onChange(of: manualExposure) { _, enabled in
+                                try? changeExposureMode(enabled ? .custom : .continuousAutoExposure)
+                            }
+                        if manualExposure {
+                            settingSlider(title: "ISO", value: String(format: "%.0f", selectedISO), binding: Binding(
+                                get: { Double(selectedISO) },
+                                set: { value in
+                                    selectedISO = Float(value)
+                                    try? changeISO(selectedISO)
                                 }
-                            }
+                            ), range: 50...6400)
+                            settingSlider(title: "Shutter", value: "1/\(Int((1 / selectedShutter).rounded()))", binding: Binding(
+                                get: { selectedShutter },
+                                set: { value in
+                                    selectedShutter = value
+                                    try? changeExposureDuration(CMTime(seconds: value, preferredTimescale: 1_000_000_000))
+                                }
+                            ), range: 0.001...0.067)
+                            settingSlider(title: "EV", value: String(format: "%+.1f", selectedBias), binding: Binding(
+                                get: { Double(selectedBias) },
+                                set: { value in
+                                    selectedBias = Float(value)
+                                    try? changeExposureTargetBias(selectedBias)
+                                }
+                            ), range: -2...2)
+                        } else {
+                            settingReadout("ISO", value: String(format: "%.0f", iso))
+                            settingReadout("Shutter", value: shutterLabel)
+                            settingReadout("EV", value: String(format: "%+.1f", exposureTargetBias))
                         }
                     }
-                }
 
-                Section("Image Quality") {
-                    Picker("Resolution", selection: $quality) {
-                        ForEach(QualityPreset.allCases) { option in
-                            Text(option.title).tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: quality) { _, _ in applyQuality() }
-
-                    Picker("Frame Rate", selection: $selectedFrameRate) {
-                        Text("24 FPS").tag(Int32(24))
-                        Text("30 FPS").tag(Int32(30))
-                        Text("60 FPS").tag(Int32(60))
-                    }
-                    .onChange(of: selectedFrameRate) { _, _ in applyQuality() }
-
-                    Picker("HDR", selection: $selectedHDRMode) {
-                        Text("Auto").tag(CameraHDRMode.auto)
-                        Text("On").tag(CameraHDRMode.on)
-                        Text("Off").tag(CameraHDRMode.off)
-                    }
-                    .onChange(of: selectedHDRMode) { _, _ in applyQuality() }
-                }
-
-                Section("Exposure") {
-                    Toggle("Manual Exposure", isOn: $manualExposure)
+                    settingsCard("CAMERA TOOLS") {
+                        Toggle("Grid", isOn: Binding(
+                            get: { showGrid },
+                            set: { try? changeGridVisibility($0) }
+                        ))
                         .tint(.yellow)
-                        .onChange(of: manualExposure) { _, enabled in
-                            try? changeExposureMode(enabled ? .custom : .continuousAutoExposure)
-                        }
-                    if manualExposure {
-                        LabeledContent("ISO", value: String(format: "%.0f", selectedISO))
-                        Slider(value: Binding(
-                            get: { Double(selectedISO) },
-                            set: { value in
-                                selectedISO = Float(value)
-                                try? changeISO(selectedISO)
-                            }
-                        ), in: 50...6400)
-                        LabeledContent("Shutter", value: "1/\(Int((1 / selectedShutter).rounded()))")
-                        Slider(value: Binding(
-                            get: { selectedShutter },
-                            set: { value in
-                                selectedShutter = value
-                                try? changeExposureDuration(CMTime(seconds: value, preferredTimescale: 1_000_000_000))
-                            }
-                        ), in: 0.001...0.067)
-                        LabeledContent("EV", value: String(format: "%+.1f", selectedBias))
-                        Slider(value: Binding(
-                            get: { Double(selectedBias) },
-                            set: { value in
-                                selectedBias = Float(value)
-                                try? changeExposureTargetBias(selectedBias)
-                            }
-                        ), in: -2...2)
-                    } else {
-                        LabeledContent("ISO", value: String(format: "%.0f", iso))
-                        LabeledContent("Shutter", value: shutterLabel)
-                        LabeledContent("EV", value: String(format: "%+.1f", exposureTargetBias))
+                        Toggle("Mirror Output", isOn: Binding(
+                            get: { mirrorOutput },
+                            set: { changeMirrorOutputMode($0) }
+                        ))
+                        .tint(.yellow)
                     }
-                }
 
-                Section("Camera Tools") {
-                    Toggle("Grid", isOn: Binding(
-                        get: { showGrid },
-                        set: { try? changeGridVisibility($0) }
-                    ))
-                    .tint(.yellow)
-                    Toggle("Mirror Output", isOn: Binding(
-                        get: { mirrorOutput },
-                        set: { changeMirrorOutputMode($0) }
-                    ))
-                    .tint(.yellow)
-                }
-
-                Section {
                     Button("Reset Settings", role: .destructive) {
                         resetSettings()
                     }
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(.red.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
                 }
+                .padding(20)
             }
-            .navigationTitle("Settings")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        professionalControlsVisible = false
-                    }
-                }
-            }
+            .scrollIndicators(.hidden)
         }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-        .preferredColorScheme(.dark)
+        .foregroundStyle(.white)
+    }
+
+    private func settingsCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Text(title)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(.yellow)
+            content()
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func settingChoice(_ title: String, value: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                    .foregroundStyle(.white)
+                Spacer()
+                Text(value)
+                    .foregroundStyle(isActive ? Color.yellow : Color.white.opacity(0.35))
+            }
+            .font(.system(size: 13, weight: .medium, design: .rounded))
+            .padding(.vertical, 3)
+        }
+    }
+
+    private func settingSlider(title: String, value: String, binding: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        VStack(spacing: 5) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(value)
+            }
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            Slider(value: binding, in: range)
+                .tint(.yellow)
+        }
+    }
+
+    private func settingReadout(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value)
+        }
+        .font(.system(size: 12, weight: .medium, design: .monospaced))
     }
 
     private func applyProfessionalMode(_ enabled: Bool) {
