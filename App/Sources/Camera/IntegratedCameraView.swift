@@ -44,6 +44,13 @@ struct IntegratedCameraView: MCameraView {
             selectedZoom = value
             standardLensMode = abs(value - (35.0 / 24.0)) < 0.02
         }
+        .sheet(isPresented: $professionalControlsVisible) {
+            professionalPanel
+                .padding(20)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+                .preferredColorScheme(.dark)
+        }
     }
 
     private var topBar: some View {
@@ -153,10 +160,6 @@ struct IntegratedCameraView: MCameraView {
 
     private var bottomBar: some View {
         VStack(spacing: 12) {
-            if professionalControlsVisible {
-                professionalPanel
-            }
-
             zoomControl
 
             HStack(spacing: 8) {
