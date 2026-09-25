@@ -4,6 +4,7 @@ import SwiftUI
 struct IntegratedCameraView: View {
     @ObservedObject var cameraManager: NativeCameraManager
     @State private var showsExposure = false
+    @State private var showsColorPad = false
     @State private var standardLensMode = false
     @State private var zoomGestureStart: CGFloat?
 
@@ -16,6 +17,10 @@ struct IntegratedCameraView: View {
                 NativeCameraPreview(session: cameraManager.session)
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .clipped()
+                    .saturation(Double(cameraManager.colorSettings.saturation))
+                    .contrast(Double(cameraManager.colorSettings.contrast))
+                    .brightness(Double(cameraManager.colorSettings.exposure * 0.12))
+                    .colorMultiply(previewColor)
                     .overlay {
                         if cameraManager.showGrid {
                             cameraGrid
@@ -44,6 +49,15 @@ struct IntegratedCameraView: View {
         .onChange(of: cameraManager.activeLens) { _, _ in
             standardLensMode = false
         }
+    }
+
+    private var previewColor: Color {
+        let temperature = min(max(cameraManager.colorSettings.temperature, -1), 1)
+        let amount = abs(temperature) * 0.26
+        if temperature >= 0 {
+            return Color(red: 1, green: 1 - (amount * 0.35), blue: 1 - amount)
+        }
+        return Color(red: 1 - amount, green: 1 - (amount * 0.18), blue: 1)
     }
 
     private var cameraGrid: some View {
@@ -91,6 +105,11 @@ struct IntegratedCameraView: View {
             lensSelector
                 .opacity(cameraManager.cameraPosition == .back ? 1 : 0.35)
 
+            if showsColorPad {
+                colorPad
+                    .transition(.opacity.combined(with: .scale(scale: 0.94)))
+            }
+
             if showsExposure {
                 exposureControl
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -117,6 +136,12 @@ struct IntegratedCameraView: View {
                 shutterButton
 
                 Spacer()
+
+                controlButton("paintpalette") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showsColorPad.toggle()
+                    }
+                }
 
                 controlButton("plusminus.circle") {
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -166,6 +191,26 @@ struct IntegratedCameraView: View {
         }
         .padding(4)
         .background(.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var colorPad: some View {
+        ColorPad(
+            settings: cameraManager.colorSettings,
+            onChange: updateColorSettings,
+            onReset: resetColorPad
+        )
+        .frame(width: 190, height: 108)
+    }
+
+    private func updateColorSettings(_ settings: NativeColorSettings) {
+        cameraManager.updateColorSettings(settings)
+    }
+
+    private func resetColorPad() {
+        var settings = cameraManager.colorSettings
+        settings.temperature = 0
+        settings.contrast = 1
+        cameraManager.updateColorSettings(settings)
     }
 
     private var exposureControl: some View {
@@ -261,5 +306,83 @@ struct IntegratedCameraView: View {
                 }
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct ColorPad: View {
+    let settings: NativeColorSettings
+    let onChange: (NativeColorSettings) -> Void
+    let onReset: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                LinearGradient(
+                    colors: [Color.cyan.opacity(0.78), Color.white.opacity(0.72), Color.orange.opacity(0.82)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.42)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                Path { path in
+                    let x = proxy.size.width / 2
+                    let y = proxy.size.height / 2
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: proxy.size.height))
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: proxy.size.width, y: y))
+                }
+                .stroke(.black.opacity(0.18), lineWidth: 0.7)
+
+                Circle()
+                    .stroke(.white.opacity(0.82), lineWidth: 1.2)
+                    .frame(width: 7, height: 7)
+                    .position(point(in: proxy.size))
+
+                Circle()
+                    .fill(.white)
+                    .frame(width: 18, height: 18)
+                    .overlay {
+                        Circle().stroke(.black.opacity(0.35), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                    .position(point(in: proxy.size))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        update(with: value.location, in: proxy.size)
+                    }
+            )
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded {
+                    onReset()
+                }
+            )
+        }
+        .accessibilityLabel("Color pad")
+        .accessibilityHint("Drag horizontally for temperature and vertically for contrast. Double-tap to reset.")
+    }
+
+    private func point(in size: CGSize) -> CGPoint {
+        CGPoint(
+            x: min(max((settings.temperature + 1) / 2, 0), 1) * size.width,
+            y: min(max(1 - (settings.contrast - 0.75) / 0.5, 0), 1) * size.height
+        )
+    }
+
+    private func update(with location: CGPoint, in size: CGSize) {
+        let x = min(max(location.x / max(size.width, 1), 0), 1)
+        let y = min(max(location.y / max(size.height, 1), 0), 1)
+        var updated = settings
+        updated.temperature = (x * 2) - 1
+        updated.contrast = 1.25 - (y * 0.5)
+        onChange(updated)
     }
 }
