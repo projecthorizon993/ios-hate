@@ -5,7 +5,7 @@ struct IntegratedCameraView: View {
     @ObservedObject var cameraManager: NativeCameraManager
     @State private var showsExposure = false
     @State private var standardLensMode = false
-    @State private var zoomGestureStart: CGFloat = 1
+    @State private var zoomGestureStart: CGFloat?
 
     var body: some View {
         GeometryReader { proxy in
@@ -140,26 +140,32 @@ struct IntegratedCameraView: View {
     }
 
     private var lensSelector: some View {
-        HStack(spacing: 7) {
-            ForEach(cameraManager.availableLenses) { lens in
-                Button {
-                    cameraManager.setLens(lens)
-                } label: {
-                    Text(lens.title)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(cameraManager.activeLens == lens ? .black : .white.opacity(0.82))
-                        .frame(minWidth: 38, minHeight: 30)
-                        .background(
-                            cameraManager.activeLens == lens ? Color.white : Color.white.opacity(0.10),
-                            in: Capsule()
-                        )
+        VStack(spacing: 4) {
+            Text(String(format: "%.1f×", cameraManager.zoomFactor))
+                .font(.caption2.weight(.bold).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.82))
+
+            HStack(spacing: 7) {
+                ForEach(cameraManager.availableLenses) { lens in
+                    Button {
+                        cameraManager.setLens(lens)
+                    } label: {
+                        Text(lens.title)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(cameraManager.activeLens == lens ? .black : .white.opacity(0.82))
+                            .frame(minWidth: 38, minHeight: 30)
+                            .background(
+                                cameraManager.activeLens == lens ? Color.white : Color.white.opacity(0.10),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(cameraManager.isReconfiguring || cameraManager.cameraPosition != .back)
                 }
-                .buttonStyle(.plain)
-                .disabled(cameraManager.isReconfiguring || cameraManager.cameraPosition != .back)
             }
         }
         .padding(4)
-        .background(.black.opacity(0.24), in: Capsule())
+        .background(.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var exposureControl: some View {
@@ -206,13 +212,13 @@ struct IntegratedCameraView: View {
     private var cameraZoomGesture: some Gesture {
         MagnificationGesture()
             .onChanged { value in
-                if zoomGestureStart == 1 {
+                if zoomGestureStart == nil {
                     zoomGestureStart = cameraManager.zoomFactor
                 }
-                cameraManager.setProfessionalZoom(zoomGestureStart * value)
+                cameraManager.setZoom((zoomGestureStart ?? cameraManager.zoomFactor) * value)
             }
             .onEnded { _ in
-                zoomGestureStart = 1
+                zoomGestureStart = nil
             }
     }
 

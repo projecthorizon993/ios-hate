@@ -105,6 +105,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
     private var currentDevice: AVCaptureDevice?
     private var currentPosition: NativeCameraPosition = .back
     private var currentLens: NativeCameraLens = .wide
+    private var pendingZoomAfterLensChange: CGFloat?
     private var wantsRunning = false
     private var currentRecordingURL: URL?
     private var cameraFilters: [CIFilter] = []
@@ -164,6 +165,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
         guard newPosition != cameraPosition, !isReconfiguring else { return }
         let oldPosition = cameraPosition
         let oldLens = activeLens
+        let oldZoom = zoomFactor
         guard let device = Self.device(for: newPosition, lens: .wide) else {
             logger.error("Camera position unavailable: \(String(describing: newPosition), privacy: .public)")
             return
@@ -177,7 +179,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 position: newPosition,
                 lens: .wide,
                 oldPosition: oldPosition,
-                oldLens: oldLens
+                oldLens: oldLens,
+                oldZoom: oldZoom
             )
         }
     }
@@ -190,6 +193,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
         }
         let oldPosition = cameraPosition
         let oldLens = activeLens
+        let oldZoom = zoomFactor
         isReconfiguring = true
         sessionQueue.async { [weak self] in
             self?.replaceInput(
@@ -197,23 +201,58 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 position: .back,
                 lens: lens,
                 oldPosition: oldPosition,
-                oldLens: oldLens
+                oldLens: oldLens,
+                oldZoom: oldZoom
             )
         }
     }
 
     func setProfessionalZoom(_ value: CGFloat) {
-        let requestedValue = max(1, value)
+        setZoom(value)
+    }
+
+    func setZoom(_ value: CGFloat) {
+        let displayValue = min(max(value, 0.5), 3)
+        let lens = cameraPosition == .back ? preferredLens(for: displayValue) : activeLens
+        if lens != activeLens, availableLenses.contains(lens) {
+            pendingZoomAfterLensChange = displayValue
+            if !isReconfiguring {
+                setLens(lens)
+            }
+        } else {
+            applyDeviceZoom(displayValue: displayValue, lens: lens)
+        }
+    }
+
+    private func preferredLens(for displayValue: CGFloat) -> NativeCameraLens {
+        guard cameraPosition == .back else { return .wide }
+        if displayValue < 0.8, availableLenses.contains(.ultraWide) {
+            return .ultraWide
+        }
+        if displayValue > 1.6, availableLenses.contains(.telephoto) {
+            return .telephoto
+        }
+        return availableLenses.contains(.wide) ? .wide : activeLens
+    }
+
+    private func applyDeviceZoom(displayValue: CGFloat, lens: NativeCameraLens) {
+        let requestedZoom: CGFloat
+        switch lens {
+        case .ultraWide, .telephoto:
+            requestedZoom = 1
+        case .wide:
+            requestedZoom = min(max(displayValue, 1), 3)
+        }
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentDevice else { return }
             let maximum = min(3, device.maxAvailableVideoZoomFactor)
-            let zoom = min(max(requestedValue, device.minAvailableVideoZoomFactor), maximum)
+            let zoom = min(max(requestedZoom, device.minAvailableVideoZoomFactor), maximum)
             do {
                 try device.lockForConfiguration()
                 device.videoZoomFactor = zoom
                 device.unlockForConfiguration()
-                DispatchQueue.main.async {
-                    self.zoomFactor = zoom
+                DispatchQueue.main.async { [weak self] in
+                    self?.zoomFactor = displayValue
                 }
             } catch {
                 self.logger.error("Zoom configuration failed: \(error.localizedDescription, privacy: .public)")
@@ -222,7 +261,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     func changeZoomFactor(_ value: CGFloat) throws {
-        setProfessionalZoom(value)
+        setZoom(value)
     }
 
     func changeFlashMode(_ mode: NativeCameraFlashMode) throws {
@@ -428,7 +467,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
         position: NativeCameraPosition,
         lens: NativeCameraLens,
         oldPosition: NativeCameraPosition,
-        oldLens: NativeCameraLens
+        oldLens: NativeCameraLens,
+        oldZoom: CGFloat
     ) {
         let wasRunning = session.isRunning
         if wasRunning {
@@ -456,12 +496,17 @@ final class NativeCameraManager: NSObject, ObservableObject {
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                let pendingZoom = self.pendingZoomAfterLensChange
+                self.pendingZoomAfterLensChange = nil
                 self.activeLens = lens
                 self.cameraPosition = position
-                self.zoomFactor = 1
+                self.zoomFactor = pendingZoom ?? 1
                 self.isRunning = self.session.isRunning
                 self.isReconfiguring = false
                 self.publishDeviceState()
+                if let pendingZoom {
+                    self.setZoom(pendingZoom)
+                }
             }
         } catch {
             if let oldInput, session.canAddInput(oldInput) {
@@ -470,8 +515,10 @@ final class NativeCameraManager: NSObject, ObservableObject {
             session.commitConfiguration()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                self.pendingZoomAfterLensChange = nil
                 self.cameraPosition = oldPosition
                 self.activeLens = oldLens
+                self.zoomFactor = oldZoom
                 self.isRunning = self.session.isRunning
                 self.isReconfiguring = false
                 self.publishDeviceState()
