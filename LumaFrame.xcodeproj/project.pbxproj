@@ -320,8 +320,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/Mijick/Camera.git";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = exactVersion;
+				version = 2.1.1;
 			};
 		};
 		A10000000000000000000061 = {
@@ -331,7 +331,7 @@
 		A10000000000000000000062 = {
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000060;
-			productName = MijickCamera;
+			productName = MijickCameraView;
 		};
 	};
 	rootObject = A10000000000000000000001;
