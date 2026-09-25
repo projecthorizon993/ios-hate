@@ -37,9 +37,10 @@ public class CameraManager: NSObject, ObservableObject { init(_ attributes: Attr
         var deviceOrientation: AVCaptureVideoOrientation = .portrait
         var userBlockedScreenRotation: Bool = false
     }
-    @Published private(set) var attributes: Attributes
+     @Published private(set) var attributes: Attributes
+     @Published public private(set) var activeLens: CameraLens = .wide
 
-    // MARK: Devices
+     // MARK: Devices
     private var frontCamera: AVCaptureDevice?
     private var backCamera: AVCaptureDevice?
     private var microphone: AVCaptureDevice?
@@ -209,11 +210,20 @@ private extension CameraManager {
         cameraGridView.alpha = attributes.isGridVisible ? 1 : 0
         cameraGridView.addToParent(cameraView)
     }
-    func initialiseDevices() {
-        frontCamera = .default(.builtInWideAngleCamera, for: .video, position: .front)
-        backCamera = .default(for: .video)
-        microphone = .default(for: .audio)
-    }
+     func initialiseDevices() {
+         frontCamera = .default(.builtInWideAngleCamera, for: .video, position: .front)
+         if let wideCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
+             backCamera = wideCamera
+             activeLens = .wide
+         } else if let ultraWideCamera = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) {
+             backCamera = ultraWideCamera
+             activeLens = .ultraWide
+         } else if let fallbackCamera = AVCaptureDevice.default(for: .video) {
+             backCamera = fallbackCamera
+             activeLens = lens(for: fallbackCamera)
+         }
+         microphone = .default(for: .audio)
+     }
     func initialiseInputs() {
         frontCameraInput = .init(frontCamera)
         backCameraInput = .init(backCamera)
@@ -934,16 +944,85 @@ private extension CameraManager {
 }
 
 // MARK: - Modifiers
-extension CameraManager {
+public extension CameraManager {
     var hasFlash: Bool { getDevice(attributes.cameraPosition)?.hasFlash ?? false }
     var hasTorch: Bool { getDevice(attributes.cameraPosition)?.hasTorch ?? false }
+    var availableLenses: [CameraLens] {
+        let candidates: [(CameraLens, AVCaptureDevice.DeviceType)] = [
+            (.ultraWide, .builtInUltraWideCamera),
+            (.wide, .builtInWideAngleCamera),
+            (.telephoto, .builtInTelephotoCamera)
+        ]
+        return candidates.compactMap { lens, type in
+            AVCaptureDevice.default(type, for: .video, position: .back) == nil ? nil : lens
+        }
+    }
+    var professionalMaxZoom: CGFloat { max(1, min(getDevice(.back)?.maxAvailableVideoZoomFactor ?? 3, 3)) }
+    var professionalEquivalentFocalLength: Int {
+        Int((CGFloat(activeLens.baseFocalLength) * max(1, attributes.zoomFactor)).rounded())
+    }
+
+    func setLens(_ lens: CameraLens) {
+        guard attributes.cameraPosition == .back, activeLens != lens, captureSession != nil, let device = device(for: lens) else { return }
+        let replacement: AVCaptureDeviceInput
+        do {
+            replacement = try AVCaptureDeviceInput(device: device)
+        } catch {
+            return
+        }
+
+        captureCurrentFrameAndDelay(.blur) { [self] in
+            captureSession.beginConfiguration()
+            if let currentInput = backCameraInput {
+                captureSession.removeInput(currentInput)
+            }
+            if captureSession.canAddInput(replacement) {
+                captureSession.addInput(replacement)
+                backCameraInput = replacement
+                backCamera = device
+                activeLens = lens
+                attributes.zoomFactor = 1
+                captureSession.commitConfiguration()
+                try? withLockingDeviceForConfiguration(device) { configuredDevice in
+                    configuredDevice.videoZoomFactor = 1
+                }
+            } else {
+                if let currentInput = backCameraInput {
+                    captureSession.addInput(currentInput)
+                }
+                captureSession.commitConfiguration()
+            }
+        }
+    }
+
+    func setProfessionalZoom(_ value: CGFloat) {
+        try? changeZoomFactor(value)
+    }
+
+    private func device(for lens: CameraLens) -> AVCaptureDevice? {
+        let type: AVCaptureDevice.DeviceType
+        switch lens {
+        case .ultraWide: type = .builtInUltraWideCamera
+        case .wide: type = .builtInWideAngleCamera
+        case .telephoto: type = .builtInTelephotoCamera
+        }
+        return AVCaptureDevice.default(type, for: .video, position: .back)
+    }
+
+    private func lens(for device: AVCaptureDevice) -> CameraLens {
+        switch device.deviceType {
+        case .builtInUltraWideCamera: .ultraWide
+        case .builtInTelephotoCamera: .telephoto
+        default: .wide
+        }
+    }
 }
 
 // MARK: - Helpers
 private extension CameraManager {
     func captureCurrentFrameAndDelay(_ type: MetalAnimation, _ action: @escaping () throws -> ()) { Task { @MainActor in
         metalAnimation = type
-         try await Task.sleep(nanoseconds: 50_000_000)
+        try await Task.sleep(nanoseconds: 50_000_000)
 
         try action()
     }}
