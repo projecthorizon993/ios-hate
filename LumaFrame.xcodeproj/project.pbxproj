@@ -43,7 +43,6 @@
 			children = (
 				A10000000000000000000010,
 				A10000000000000000000011,
-				A10000000000000000000012,
 				A10000000000000000000023,
 				A10000000000000000000058
 			);
@@ -170,12 +169,6 @@
 			path = "App/Sources/Camera/CameraScreen.swift";
 			sourceTree = "<group>";
 		};
-		A10000000000000000000012 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Camera/ProfessionalCameraView.swift";
-			sourceTree = "<group>";
-		};
 		A10000000000000000000023 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -210,8 +203,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000040,
-				A10000000000000000000041,
-				A10000000000000000000042
+				A10000000000000000000041
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -275,10 +267,6 @@
 			isa = PBXBuildFile;
 			fileRef = A10000000000000000000011;
 		};
-		A10000000000000000000042 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000012;
-		};
 		A10000000000000000000053 = {
 			isa = PBXBuildFile;
 			fileRef = A10000000000000000000058;
@@ -329,8 +317,12 @@
 			sourceTree = "<group>";
 		};
 		A10000000000000000000060 = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Vendor/MijickCameraView;
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Mijick/Camera.git";
+			requirement = {
+				kind = exactVersion;
+				version = 2.1.1;
+			};
 		};
 		A10000000000000000000061 = {
 			isa = PBXBuildFile;

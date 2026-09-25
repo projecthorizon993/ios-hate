@@ -16,7 +16,6 @@ struct CameraScreen: View {
     var body: some View {
         ZStack {
             MCameraController(manager: manager)
-                .cameraScreen(ProfessionalCameraView.init)
                 .mediaPreviewScreen(nil)
                 .onImageCaptured { image in
                     withAnimation(.easeOut(duration: 0.2)) {
