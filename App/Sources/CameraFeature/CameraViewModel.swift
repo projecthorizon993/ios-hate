@@ -1,7 +1,7 @@
 import AVFoundation
 import Combine
+import CoreImage
 import Foundation
-import UIKit
 
 @MainActor
 final class CameraViewModel: ObservableObject {
@@ -15,7 +15,7 @@ final class CameraViewModel: ObservableObject {
     @Published var tint: Float = 0
     @Published var zoomFactor: CGFloat = 1
     @Published var focusLocked = false
-    @Published var processedFrame: UIImage?
+    @Published var processedImage: CIImage?
     @Published var isProcessing = false
     @Published var isCapturing = false
     @Published var isBracketCapturing = false
@@ -66,13 +66,13 @@ final class CameraViewModel: ObservableObject {
             self.previewQueue.async { [weak self] in
                 guard let self else { return }
                 let queueWait = Double(DispatchTime.now().uptimeNanoseconds - queuedAt) / 1_000_000
-                let processed = self.previewPipeline.processPreview(cgImage: image, grade: grade, enhanceLowLight: enhanceLowLight, maxDimension: previewDimension) ?? image
+                let processed = self.previewPipeline.processPreview(image: image, grade: grade, enhanceLowLight: enhanceLowLight, maxDimension: previewDimension) ?? image
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isPreviewProcessing = false
                     self.performanceMonitor.recordQueueWait(queueWait)
                     self.performanceMonitor.recordFrame()
-                    self.processedFrame = UIImage(cgImage: processed)
+                    self.processedImage = processed
                 }
             }
         }
@@ -117,7 +117,7 @@ final class CameraViewModel: ObservableObject {
         showLiveEnhancement = enabled
         coordinator.setPreviewProcessingEnabled(enabled)
         if !enabled {
-            processedFrame = nil
+            processedImage = nil
         }
     }
 

@@ -20,28 +20,26 @@ struct ImagePipeline {
         return UIImage(cgImage: output).jpegData(compressionQuality: 0.98)
     }
 
-    func processPreview(cgImage: CGImage, grade: GradeSettings, enhanceLowLight: Bool = false, maxDimension: CGFloat = 1280) -> CGImage? {
+    func processPreview(image: CIImage, grade: GradeSettings, enhanceLowLight: Bool = false, maxDimension: CGFloat = 1280) -> CIImage? {
         os_signpost(.begin, log: signpostLog, name: "Preview grade processing")
         defer { os_signpost(.end, log: signpostLog, name: "Preview grade processing") }
-        let source = CIImage(cgImage: cgImage)
-        let scale = min(1, maxDimension / max(source.extent.width, source.extent.height))
-        let resized = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        var image = resized
+        let scale = min(1, maxDimension / max(image.extent.width, image.extent.height))
+        var output = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         if enhanceLowLight {
-            image = image.applyingFilter("CINoiseReduction", parameters: [
+            output = output.applyingFilter("CINoiseReduction", parameters: [
                 "inputNoiseLevel": 0.035,
                 "inputSharpness": 0.12
             ])
         }
-        image = image.applyingFilter("CIColorControls", parameters: [
+        output = output.applyingFilter("CIColorControls", parameters: [
             kCIInputContrastKey: grade.contrast,
             kCIInputSaturationKey: grade.saturation,
             kCIInputBrightnessKey: 0
         ])
         if grade.exposure != 0 {
-            image = image.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: grade.exposure])
+            output = output.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: grade.exposure])
         }
-        return render(image)
+        return output
     }
 
     func process(cgImage: CGImage, grade: GradeSettings) -> CGImage? {
