@@ -25,6 +25,7 @@ final class CameraViewModel: ObservableObject {
     @Published var grade = GradeSettings.neutral
     @Published var showManualControls = false
     @Published var showPerformanceOverlay = false
+    @Published var showLiveEnhancement = false
     @Published var aspectRatio: CaptureAspectRatio = .original
     @Published var rawEnabled = false
     @Published private(set) var isConfigured = false
@@ -51,11 +52,12 @@ final class CameraViewModel: ObservableObject {
         diagnostics = DiagnosticsLog()
         performanceMonitor = PerformanceMonitor()
         performanceMonitor.start()
+        coordinator.setPreviewProcessingEnabled(false)
         coordinator.onFrameTiming = { [weak self] timing in
             self?.performanceMonitor.recordFrameTiming(timing)
         }
         coordinator.onFrame = { [weak self] image in
-            guard let self, !self.isPreviewProcessing else { return }
+            guard let self, self.showLiveEnhancement, !self.isPreviewProcessing else { return }
             self.isPreviewProcessing = true
             let grade = previewGrade(self.grade)
             let enhanceLowLight = self.mode == .bracket || self.mode == .cinematic
@@ -109,6 +111,14 @@ final class CameraViewModel: ObservableObject {
         if hasUltraWide && zoomFactor < 0.8 { return "0.5× Ultra Wide" }
         if hasTelephoto && zoomFactor > 1.8 { return "3× Telephoto" }
         return "1× Wide"
+    }
+
+    func setLiveEnhancement(_ enabled: Bool) {
+        showLiveEnhancement = enabled
+        coordinator.setPreviewProcessingEnabled(enabled)
+        if !enabled {
+            processedFrame = nil
+        }
     }
 
     func start() {

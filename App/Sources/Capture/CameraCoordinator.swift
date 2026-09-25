@@ -13,6 +13,8 @@ final class CameraCoordinator: NSObject {
     private let imageContext = CIContext(options: [.cacheIntermediates: false])
     private let logger = Logger(subsystem: "com.lumaframe", category: "camera")
     private let frameScheduler = FrameScheduler()
+    private let stateLock = NSLock()
+    private var previewProcessingEnabled = true
     private var cameraDevice: AVCaptureDevice?
     private var primaryDevice: AVCaptureDevice?
     private var videoInput: AVCaptureDeviceInput?
@@ -32,6 +34,18 @@ final class CameraCoordinator: NSObject {
                 self?.onFrameTiming?(timing)
             }
         }
+    }
+
+    func setPreviewProcessingEnabled(_ enabled: Bool) {
+        stateLock.lock()
+        previewProcessingEnabled = enabled
+        stateLock.unlock()
+    }
+
+    private var isPreviewProcessingEnabled: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return previewProcessingEnabled
     }
 
     func configure() {
@@ -267,6 +281,7 @@ extension CameraCoordinator: AVCapturePhotoCaptureDelegate {
 
 extension CameraCoordinator: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard isPreviewProcessingEnabled else { return }
         if !videoRotationConfigured, connection.isVideoRotationAngleSupported(90) {
             connection.videoRotationAngle = 90
             videoRotationConfigured = true

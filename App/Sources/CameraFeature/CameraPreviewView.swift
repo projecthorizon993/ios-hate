@@ -5,6 +5,7 @@ import UIKit
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
     let image: UIImage?
+    let showsProcessedImage: Bool
 
     func makeUIView(context: Context) -> PreviewContainerView {
         let view = PreviewContainerView()
@@ -17,7 +18,7 @@ struct CameraPreviewView: UIViewRepresentable {
         view.previewLayer.session = session
         view.updateConnectionOrientation()
         view.imageView.image = image
-        view.imageView.isHidden = image == nil
+        view.imageView.isHidden = image == nil || !showsProcessedImage
     }
 }
 

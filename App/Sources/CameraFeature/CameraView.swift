@@ -61,7 +61,11 @@ struct CameraView: View {
     private var cameraInterface: some View {
         GeometryReader { geometry in
             ZStack {
-                CameraPreviewView(session: viewModel.coordinator.session, image: viewModel.processedFrame)
+                CameraPreviewView(
+                    session: viewModel.coordinator.session,
+                    image: viewModel.processedFrame,
+                    showsProcessedImage: viewModel.showLiveEnhancement
+                )
                     .ignoresSafeArea()
                     .gesture(
                         MagnificationGesture()
@@ -659,8 +663,12 @@ struct SettingsView: View {
                         .disabled(!viewModel.capabilities.supportsRAW)
                 }
                 Section("Processing") {
-                    LabeledContent("Preview", value: viewModel.processedFrame == nil ? "Waiting" : "Active")
+                    LabeledContent("Preview", value: viewModel.processedFrame == nil ? "Native preview" : "Live enhanced")
                     LabeledContent("Enhancement", value: "Core Image")
+                    Toggle("Live viewfinder enhancement", isOn: Binding(
+                        get: { viewModel.showLiveEnhancement },
+                        set: { viewModel.setLiveEnhancement($0) }
+                    ))
                     LabeledContent("Storage", value: "On device")
                 }
                 Section("Developer") {
