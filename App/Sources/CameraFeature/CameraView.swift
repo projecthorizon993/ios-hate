@@ -94,6 +94,7 @@ struct CameraView: View {
                     bracketFrameCount: viewModel.bracketFrameCount,
                     isProcessing: viewModel.isProcessing
                 )
+                .padding(.bottom, 270)
 
                 if viewModel.showPerformanceOverlay {
                     PerformanceOverlayView(monitor: viewModel.performanceMonitor)
@@ -314,6 +315,7 @@ struct CameraView: View {
                 }
                 .accessibilityLabel("Open live grade")
             }
+            modePicker
         }
         .padding(.top, 4)
     }
@@ -360,6 +362,7 @@ private struct ViewfinderOverlay: View {
 
     var body: some View {
         ZStack {
+            gridOverlay
             if aspectRatio != .original {
                 aspectGuides
             }
@@ -372,6 +375,23 @@ private struct ViewfinderOverlay: View {
             }
         }
         .allowsHitTesting(false)
+    }
+
+    private var gridOverlay: some View {
+        GeometryReader { geometry in
+            ZStack {
+                ForEach([1, 2], id: \.self) { index in
+                    Rectangle()
+                        .fill(.white.opacity(0.34))
+                        .frame(width: 1)
+                        .position(x: geometry.size.width * CGFloat(index) / 3, y: geometry.size.height / 2)
+                    Rectangle()
+                        .fill(.white.opacity(0.34))
+                        .frame(height: 1)
+                        .position(x: geometry.size.width / 2, y: geometry.size.height * CGFloat(index) / 3)
+                }
+            }
+        }
     }
 
     private var aspectGuides: some View {
