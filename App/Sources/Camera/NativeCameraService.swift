@@ -272,18 +272,14 @@ final class NativeCameraManager: NSObject, ObservableObject {
 
     func changeISO(_ value: Float) throws {
         sessionQueue.async { [weak self] in
-            guard let self, let device = self.currentDevice else { return }
+            guard let self, let device = self.currentDevice, device.isExposureModeSupported(.custom) else { return }
             let clamped = min(max(value, device.activeFormat.minISO), device.activeFormat.maxISO)
-            do {
-                try device.lockForConfiguration()
-                device.iso = clamped
-                device.unlockForConfiguration()
+            let duration = device.exposureDuration
+            device.setExposureModeCustom(duration: duration, iso: clamped) { _ in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.iso = clamped
                 }
-            } catch {
-                self.logger.error("ISO configuration failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -297,16 +293,12 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 CMTimeMinimum(value, maximum),
                 minimum
             )
-            do {
-                try device.lockForConfiguration()
-                device.exposureDuration = clamped
-                device.unlockForConfiguration()
+            let iso = device.iso
+            device.setExposureModeCustom(duration: clamped, iso: iso) { _ in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.exposureDuration = clamped
                 }
-            } catch {
-                self.logger.error("Shutter configuration failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
