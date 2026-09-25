@@ -71,9 +71,9 @@ final class NativeCameraManager: NSObject, ObservableObject {
     @Published private(set) var torchMode: NativeCameraTorchMode = .off
     @Published private(set) var showGrid = true
     @Published private(set) var mirrorOutput = false
-    @Published private(set) var iso: Float = 400
-    @Published private(set) var exposureDuration = CMTime(seconds: 1.0 / 60.0, preferredTimescale: 1_000_000_000)
-    @Published private(set) var exposureTargetBias: Float = 0
+    @Published var iso: Float = 400
+    @Published var exposureDuration = CMTime(seconds: 1.0 / 60.0, preferredTimescale: 1_000_000_000)
+    @Published var exposureTargetBias: Float = 0
     @Published private(set) var hasFlash = false
     @Published private(set) var hasTorch = false
     @Published private(set) var activeLens: NativeCameraLens = .wide
@@ -343,7 +343,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
             let duration = CMTime(value: 1, timescale: CMTimeScale(frameRate))
             do {
                 try device.lockForConfiguration()
-                if let range = device.activeVideoSupportedFrameRateRanges.first,
+                if let range = device.activeFormat.videoSupportedFrameRateRanges.first,
                    duration >= range.minFrameDuration,
                    duration <= range.maxFrameDuration {
                     device.activeVideoMinFrameDuration = duration
@@ -399,7 +399,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
             return
         }
         session.sessionPreset = .photo
-        guard let device = Self.device(for: .back, lens: currentLens) ?? AVCaptureDevice.default(for: .video, position: .back) else {
+        guard let device = Self.device(for: .back, lens: currentLens) ?? AVCaptureDevice.default(for: .video) else {
             logger.error("Camera device unavailable")
             return
         }
@@ -639,7 +639,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
             type = .builtInTelephotoCamera
         }
         return AVCaptureDevice.default(type, for: .video, position: .back)
-            ?? AVCaptureDevice.default(for: .video, position: .back)
+            ?? AVCaptureDevice.default(for: .video)
     }
 }
 
