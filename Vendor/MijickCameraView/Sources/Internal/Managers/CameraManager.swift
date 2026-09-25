@@ -986,6 +986,7 @@ public extension CameraManager {
                 try? withLockingDeviceForConfiguration(device) { configuredDevice in
                     configuredDevice.videoZoomFactor = 1
                 }
+                removeBlur()
             } else {
                 if let currentInput = backCameraInput {
                     captureSession.addInput(currentInput)

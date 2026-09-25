@@ -33,13 +33,16 @@ struct IntegratedCameraView: MCameraView {
                     .frame(height: 76)
                     .background(Color.black)
 
-                createCameraView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZStack {
+                    createCameraView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                if showZoomWheel {
-                    zoomWheel
-                        .allowsHitTesting(false)
+                    if showZoomWheel {
+                        zoomWheel
+                            .allowsHitTesting(false)
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 bottomBar
                     .background(Color.black)
@@ -447,9 +450,6 @@ struct IntegratedCameraView: MCameraView {
         standardLensMode = false
         selectedZoom = value
         cameraManager.setLens(lens)
-        if lens != .ultraWide {
-            cameraManager.setProfessionalZoom(max(1, value))
-        }
     }
 
     private func defaultZoom(for lens: CameraLens) -> CGFloat {
