@@ -1,33 +1,14 @@
-import MijickCameraView
 import SwiftUI
 import UIKit
 
 struct CameraScreen: View {
-    @StateObject private var manager = CameraManager(
-        outputType: .photo,
-        cameraPosition: .back,
-        resolution: .hd1920x1080,
-        frameRate: 30,
-        flashMode: .off,
-        isGridVisible: true
-    )
-    @State private var lastCapture: UIImage?
+    @StateObject private var manager = NativeCameraManager()
 
     var body: some View {
         ZStack {
-            MCameraController(manager: manager)
-                .cameraScreen(IntegratedCameraView.init)
-                .mediaPreviewScreen(nil)
-                .onImageCaptured { image in
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        lastCapture = image
-                    }
-                }
-                .afterMediaCaptured {
-                    $0.returnToCameraView(true)
-                }
+            IntegratedCameraView(cameraManager: manager)
 
-            if let lastCapture {
+            if let lastCapture = manager.lastCapture {
                 VStack {
                     HStack {
                         Spacer()
@@ -42,9 +23,16 @@ struct CameraScreen: View {
                     }
                     Spacer()
                 }
+                .allowsHitTesting(false)
             }
         }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
+        .onAppear {
+            manager.start()
+        }
+        .onDisappear {
+            manager.stop()
+        }
     }
 }

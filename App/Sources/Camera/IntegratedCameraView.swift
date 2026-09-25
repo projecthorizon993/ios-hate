@@ -1,13 +1,10 @@
 import AVFoundation
 import CoreImage
 import Foundation
-import MijickCameraView
 import SwiftUI
 
-struct IntegratedCameraView: MCameraView {
-    @ObservedObject var cameraManager: CameraManager
-    let namespace: Namespace.ID
-    let closeControllerAction: () -> Void
+struct IntegratedCameraView: View {
+    @ObservedObject var cameraManager: NativeCameraManager
 
     @State private var professionalControlsVisible = false
     @State private var manualExposure = false
@@ -22,7 +19,7 @@ struct IntegratedCameraView: MCameraView {
     @State private var selectedPreset: ColorPreset = .natural
     @State private var quality: QualityPreset = .fullHD
     @State private var selectedFrameRate: Int32 = 30
-    @State private var selectedHDRMode: CameraHDRMode = .auto
+    @State private var selectedHDRMode: NativeCameraHDRMode = .auto
     @State private var dragStartZoom: CGFloat?
     @State private var pendingZoomAfterLensChange: CGFloat?
     @State private var isSwitchingLens = false
@@ -37,8 +34,12 @@ struct IntegratedCameraView: MCameraView {
                     .background(Color.black)
 
                 ZStack {
-                    createCameraView()
+                    NativeCameraPreview(session: cameraManager.session)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if cameraManager.showGrid {
+                        cameraGridOverlay
+                    }
 
                     if showZoomWheel {
                         zoomWheel
@@ -75,6 +76,25 @@ struct IntegratedCameraView: MCameraView {
                 selectedZoom = defaultZoom(for: lens)
             }
         }
+    }
+
+    private var cameraGridOverlay: some View {
+        GeometryReader { proxy in
+            Path { path in
+                let x = proxy.size.width / 3
+                let y = proxy.size.height / 3
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: proxy.size.height))
+                path.move(to: CGPoint(x: x * 2, y: 0))
+                path.addLine(to: CGPoint(x: x * 2, y: proxy.size.height))
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: proxy.size.width, y: y))
+                path.move(to: CGPoint(x: 0, y: y * 2))
+                path.addLine(to: CGPoint(x: proxy.size.width, y: y * 2))
+            }
+            .stroke(.white.opacity(0.5), lineWidth: 0.7)
+        }
+        .allowsHitTesting(false)
     }
 
     private var topBar: some View {
@@ -166,9 +186,9 @@ struct IntegratedCameraView: MCameraView {
                     .onChange(of: selectedFrameRate) { _, _ in applyQuality() }
 
                     Picker("HDR", selection: $selectedHDRMode) {
-                        Text("Auto").tag(CameraHDRMode.auto)
-                        Text("On").tag(CameraHDRMode.on)
-                        Text("Off").tag(CameraHDRMode.off)
+                        Text("Auto").tag(NativeCameraHDRMode.auto)
+                        Text("On").tag(NativeCameraHDRMode.on)
+                        Text("Off").tag(NativeCameraHDRMode.off)
                     }
                     .onChange(of: selectedHDRMode) { _, _ in applyQuality() }
                 }
@@ -429,7 +449,7 @@ struct IntegratedCameraView: MCameraView {
         }
     }
 
-    private func preferredLens(for value: CGFloat) -> CameraLens {
+    private func preferredLens(for value: CGFloat) -> NativeCameraLens {
         let lenses = cameraManager.availableLenses
         if value < 0.8, lenses.contains(.ultraWide) { return .ultraWide }
         if value > 1.6, lenses.contains(.telephoto) { return .telephoto }
@@ -437,7 +457,7 @@ struct IntegratedCameraView: MCameraView {
         return lenses.first ?? cameraManager.activeLens
     }
 
-    private func dialOffset(for lens: CameraLens) -> CGSize {
+    private func dialOffset(for lens: NativeCameraLens) -> CGSize {
         switch lens {
         case .ultraWide: CGSize(width: -43, height: 29)
         case .wide: CGSize(width: 0, height: -49)
@@ -499,7 +519,7 @@ struct IntegratedCameraView: MCameraView {
         .padding(.bottom, 12)
     }
 
-    private func zoomPresetButton(_ lens: CameraLens, value: CGFloat) -> some View {
+    private func zoomPresetButton(_ lens: NativeCameraLens, value: CGFloat) -> some View {
         let available = cameraManager.availableLenses.contains(lens)
         let active = cameraManager.activeLens == lens && (lens != .wide || abs(selectedZoom - 1) < 0.05)
         return Button {
@@ -520,12 +540,12 @@ struct IntegratedCameraView: MCameraView {
         })
     }
 
-    private func selectZoomPreset(_ lens: CameraLens, value: CGFloat) {
+    private func selectZoomPreset(_ lens: NativeCameraLens, value: CGFloat) {
         guard cameraManager.availableLenses.contains(lens) else { return }
         applyZoomValue(value)
     }
 
-    private func defaultZoom(for lens: CameraLens) -> CGFloat {
+    private func defaultZoom(for lens: NativeCameraLens) -> CGFloat {
         switch lens {
         case .ultraWide: 0.5
         case .wide: 1
@@ -614,7 +634,7 @@ struct IntegratedCameraView: MCameraView {
         }
     }
 
-    private var nextFlashMode: CameraFlashMode {
+    private var nextFlashMode: NativeCameraFlashMode {
         switch flashMode {
         case .off: .on
         case .on: .auto

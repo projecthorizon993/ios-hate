@@ -5,7 +5,9 @@ on:
   push:
     branches:
       - "main"
-      - "fresh-rewrite"
+       - "fresh-rewrite"
+       - "avfoundation-core"
+
     tags:
       - "v*"
   pull_request:
