@@ -81,7 +81,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isReconfiguring = false
     @Published private(set) var lastCapture: UIImage?
-    @Published var colorSettings = NativeColorSettings.natural
 
     let session = AVCaptureSession()
     let availableLenses: [NativeCameraLens] = [
@@ -98,7 +97,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private let sessionQueue = DispatchQueue(label: "com.lumaframe.camera.session", qos: .userInitiated)
-    private let photoProcessingQueue = DispatchQueue(label: "com.lumaframe.camera.photo-processing", qos: .userInitiated)
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
     private let logger = Logger(subsystem: "LumaFrame", category: "NativeCamera")
@@ -161,14 +159,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
         guard newOutputType != outputType else { return }
         logger.notice("Output mode changed to \(String(describing: newOutputType), privacy: .public)")
         outputType = newOutputType
-    }
-
-    func setColorPreset(_ preset: NativeColorPreset) {
-        colorSettings.preset = preset
-    }
-
-    func updateColorSettings(_ settings: NativeColorSettings) {
-        colorSettings = settings
     }
 
     func changeCamera(_ newPosition: NativeCameraPosition) throws {
@@ -704,19 +694,12 @@ extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
             logger.error("Photo capture returned no data")
             return
         }
-        let settings = colorSettings
-        photoProcessingQueue.async { [weak self] in
-            guard let self else { return }
-            let processedData = settings == .natural
-                ? data
-                : NativeColorEngine.processedJPEGData(from: data, settings: settings) ?? data
-            let image = UIImage(data: processedData)
-            DispatchQueue.main.async { [weak self] in
-                self?.lastCapture = image
-            }
-            self.savePhotoData(processedData)
-            self.logger.notice("Photo capture completed")
+        let image = UIImage(data: data)
+        DispatchQueue.main.async { [weak self] in
+            self?.lastCapture = image
         }
+        savePhotoData(data)
+        logger.notice("Photo capture completed")
     }
 }
 
