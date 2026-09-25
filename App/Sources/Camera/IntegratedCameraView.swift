@@ -23,6 +23,9 @@ struct IntegratedCameraView: MCameraView {
     @State private var quality: QualityPreset = .fullHD
     @State private var selectedFrameRate: Int32 = 30
     @State private var selectedHDRMode: CameraHDRMode = .auto
+    @State private var dragStartZoom: CGFloat?
+    @State private var pendingZoomAfterLensChange: CGFloat?
+    @State private var isSwitchingLens = false
 
     var body: some View {
         ZStack {
@@ -59,18 +62,18 @@ struct IntegratedCameraView: MCameraView {
         .onChange(of: zoomFactor) { _, value in
             selectedZoom = value
             standardLensMode = abs(value - (35.0 / 24.0)) < 0.02
-            showZoomWheel = true
-            zoomWheelGeneration += 1
-            let generation = zoomWheelGeneration
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                if generation == zoomWheelGeneration {
-                    showZoomWheel = false
-                }
-            }
+            presentZoomWheel()
         }
         .onChange(of: cameraManager.activeLens) { _, lens in
-            selectedZoom = defaultZoom(for: lens)
+            isSwitchingLens = false
             standardLensMode = false
+            if let pendingZoom = pendingZoomAfterLensChange {
+                pendingZoomAfterLensChange = nil
+                selectedZoom = pendingZoom
+                cameraManager.setProfessionalZoom(max(1, pendingZoom))
+            } else {
+                selectedZoom = defaultZoom(for: lens)
+            }
         }
         .sheet(isPresented: $professionalControlsVisible) {
             settingsSheet
@@ -328,20 +331,52 @@ struct IntegratedCameraView: MCameraView {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12), lineWidth: 1))
     }
 
-    private var zoomControl: some View {
-        HStack(spacing: 8) {
-            zoomPresetButton(.ultraWide, value: 0.5)
-            zoomPresetButton(.wide, value: 1)
-            zoomPresetButton(.telephoto, value: 3)
-            Spacer(minLength: 0)
-            Text(focalLengthLabel)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.72))
-                .frame(width: 48, alignment: .trailing)
+    private var zoomDial: some View {
+        ZStack {
+            Circle()
+                .stroke(.white.opacity(0.2), lineWidth: 2)
+                .frame(width: 132, height: 132)
+            Circle()
+                .fill(.black.opacity(0.52))
+                .frame(width: 112, height: 112)
+
+            VStack(spacing: 2) {
+                Text(zoomLabel)
+                    .font(.system(size: 19, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.yellow)
+                Text(focalLengthLabel)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.68))
+            }
+
+            ForEach(cameraManager.availableLenses) { lens in
+                Button {
+                    selectZoomPreset(lens, value: defaultZoom(for: lens))
+                } label: {
+                    Text(lens.title)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(cameraManager.activeLens == lens ? Color.yellow : Color.white.opacity(0.78))
+                        .frame(width: 38, height: 28)
+                        .background(.black.opacity(0.75), in: Capsule())
+                }
+                .offset(dialOffset(for: lens))
+            }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(.white.opacity(0.08), in: Capsule())
+        .frame(width: 140, height: 140)
+        .contentShape(Circle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 4)
+                .onChanged { value in
+                    if dragStartZoom == nil {
+                        dragStartZoom = selectedZoom
+                    }
+                    let start = dragStartZoom ?? selectedZoom
+                    applyZoomValue(start - value.translation.height / 100 + value.translation.width / 240)
+                }
+                .onEnded { _ in
+                    dragStartZoom = nil
+                }
+        )
     }
 
     private var zoomWheel: some View {
@@ -370,9 +405,52 @@ struct IntegratedCameraView: MCameraView {
         .transition(.opacity)
     }
 
+    private func presentZoomWheel() {
+        showZoomWheel = true
+        zoomWheelGeneration += 1
+        let generation = zoomWheelGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            if generation == zoomWheelGeneration {
+                showZoomWheel = false
+            }
+        }
+    }
+
+    private func applyZoomValue(_ value: CGFloat) {
+        let clampedValue = min(max(value, 0.5), 3)
+        let lens = preferredLens(for: clampedValue)
+        let displayValue: CGFloat = lens == .telephoto ? 3 : clampedValue
+        standardLensMode = false
+        selectedZoom = displayValue
+        presentZoomWheel()
+        if cameraManager.activeLens == lens {
+            cameraManager.setProfessionalZoom(lens == .telephoto ? 1 : max(1, clampedValue))
+        } else if !isSwitchingLens {
+            isSwitchingLens = true
+            pendingZoomAfterLensChange = displayValue
+            cameraManager.setLens(lens)
+        }
+    }
+
+    private func preferredLens(for value: CGFloat) -> CameraLens {
+        let lenses = cameraManager.availableLenses
+        if value < 0.8, lenses.contains(.ultraWide) { return .ultraWide }
+        if value > 1.6, lenses.contains(.telephoto) { return .telephoto }
+        if lenses.contains(.wide) { return .wide }
+        return lenses.first ?? cameraManager.activeLens
+    }
+
+    private func dialOffset(for lens: CameraLens) -> CGSize {
+        switch lens {
+        case .ultraWide: CGSize(width: -43, height: 29)
+        case .wide: CGSize(width: 0, height: -49)
+        case .telephoto: CGSize(width: 43, height: 29)
+        }
+    }
+
     private var bottomBar: some View {
         VStack(spacing: 12) {
-            zoomControl
+            zoomDial
 
             HStack(spacing: 8) {
                 modeButton("PHOTO", systemImage: "camera", isActive: outputType == .photo) {
@@ -447,9 +525,7 @@ struct IntegratedCameraView: MCameraView {
 
     private func selectZoomPreset(_ lens: CameraLens, value: CGFloat) {
         guard cameraManager.availableLenses.contains(lens) else { return }
-        standardLensMode = false
-        selectedZoom = value
-        cameraManager.setLens(lens)
+        applyZoomValue(value)
     }
 
     private func defaultZoom(for lens: CameraLens) -> CGFloat {
@@ -524,7 +600,7 @@ struct IntegratedCameraView: MCameraView {
     private var zoomLabel: String {
         if standardLensMode { return "1×" }
         if cameraManager.activeLens == .ultraWide { return "0.5×" }
-        if cameraManager.activeLens == .telephoto && selectedZoom < 1.8 { return "3×" }
+        if cameraManager.activeLens == .telephoto { return "3×" }
         return String(format: "%.1f×", selectedZoom)
     }
 
