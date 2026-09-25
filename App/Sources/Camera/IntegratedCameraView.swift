@@ -17,30 +17,21 @@ struct IntegratedCameraView: MCameraView {
 
     var body: some View {
         ZStack {
-            createCameraView()
-                .ignoresSafeArea()
-
-            LinearGradient(
-                colors: [.black.opacity(0.6), .clear, .black.opacity(0.78)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
+            Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 topBar
-                Spacer()
-                if professionalControlsVisible {
-                    professionalPanel
-                }
+                    .frame(height: 76)
+                    .background(Color.black)
+
+                createCameraView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
                 bottomBar
+                    .background(Color.black)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 10)
-            .padding(.bottom, 14)
         }
-        .background(Color.black)
+        .ignoresSafeArea()
         .statusBarHidden()
         .onAppear {
             selectedISO = iso
@@ -58,7 +49,7 @@ struct IntegratedCameraView: MCameraView {
             VStack(alignment: .leading, spacing: 3) {
                 Text("LUMA FRAME")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
-                Text(cameraPosition == .back ? "PHOTO · AUTO" : "SELFIE · AUTO")
+                Text("\(outputType == .photo ? "PHOTO" : "VIDEO") · AUTO")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.65))
             }
@@ -80,6 +71,8 @@ struct IntegratedCameraView: MCameraView {
                 try? changeCamera(cameraPosition == .back ? .front : .back)
             }
         }
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
     }
 
     private var professionalPanel: some View {
@@ -133,40 +126,69 @@ struct IntegratedCameraView: MCameraView {
     }
 
     private var bottomBar: some View {
-        HStack {
-            Button {
-                try? changeTorchMode(torchMode == .on ? .off : .on)
-            } label: {
-                Image(systemName: torchMode == .on ? "flashlight.on.fill" : "flashlight.off.fill")
-                    .font(.system(size: 19, weight: .semibold))
-                    .frame(width: 46, height: 46)
-                    .background(.black.opacity(0.5), in: Circle())
+        VStack(spacing: 12) {
+            if professionalControlsVisible {
+                professionalPanel
             }
-            .foregroundStyle(hasTorch ? Color.white : Color.white.opacity(0.35))
-            .disabled(!hasTorch)
 
-            Spacer()
-
-            Button {
-                captureOutput()
-            } label: {
-                ZStack {
-                    Circle().stroke(.white, lineWidth: 4).frame(width: 78, height: 78)
-                    Circle().fill(.white).frame(width: 63, height: 63)
+            HStack(spacing: 8) {
+                modeButton("PHOTO", systemImage: "camera", isActive: outputType == .photo) {
+                    try? changeOutputType(.photo)
+                }
+                modeButton("VIDEO", systemImage: "video", isActive: outputType == .video) {
+                    try? changeOutputType(.video)
                 }
             }
 
-            Spacer()
+            HStack {
+                Button {
+                    try? changeTorchMode(torchMode == .on ? .off : .on)
+                } label: {
+                    Image(systemName: torchMode == .on ? "flashlight.on.fill" : "flashlight.off.fill")
+                        .font(.system(size: 19, weight: .semibold))
+                        .frame(width: 46, height: 46)
+                        .background(.white.opacity(0.12), in: Circle())
+                }
+                .foregroundStyle(hasTorch ? Color.white : Color.white.opacity(0.35))
+                .disabled(!hasTorch)
 
-            Button {
-                professionalControlsVisible.toggle()
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 19, weight: .semibold))
-                    .frame(width: 46, height: 46)
-                    .background(.black.opacity(0.5), in: Circle())
+                Spacer()
+
+                Button {
+                    captureOutput()
+                } label: {
+                    ZStack {
+                        Circle().stroke(.white, lineWidth: 4).frame(width: 78, height: 78)
+                        Circle().fill(.white).frame(width: 63, height: 63)
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    professionalControlsVisible.toggle()
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 19, weight: .semibold))
+                        .frame(width: 46, height: 46)
+                        .background(.white.opacity(0.12), in: Circle())
+                }
+                .foregroundStyle(professionalControlsVisible ? Color.yellow : Color.white)
             }
-            .foregroundStyle(professionalControlsVisible ? Color.yellow : Color.white)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+    }
+
+    private func modeButton(_ title: String, systemImage: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(isActive ? Color.yellow : Color.white.opacity(0.72))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(.white.opacity(isActive ? 0.16 : 0.07), in: Capsule())
         }
     }
 
