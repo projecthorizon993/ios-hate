@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreImage
 import Foundation
 import MijickCameraView
 import SwiftUI
@@ -17,6 +18,11 @@ struct IntegratedCameraView: MCameraView {
     @State private var standardLensMode = false
     @State private var showZoomWheel = false
     @State private var zoomWheelGeneration = 0
+    @State private var professionalMode = false
+    @State private var selectedPreset: ColorPreset = .natural
+    @State private var quality: QualityPreset = .fullHD
+    @State private var selectedFrameRate: Int32 = 30
+    @State private var selectedHDRMode: CameraHDRMode = .auto
 
     var body: some View {
         ZStack {
@@ -64,11 +70,7 @@ struct IntegratedCameraView: MCameraView {
             standardLensMode = false
         }
         .sheet(isPresented: $professionalControlsVisible) {
-            professionalPanel
-                .padding(20)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-                .preferredColorScheme(.dark)
+            settingsSheet
         }
     }
 
@@ -101,6 +103,176 @@ struct IntegratedCameraView: MCameraView {
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)
+    }
+
+    private var settingsSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("Professional Mode", isOn: $professionalMode)
+                        .tint(.yellow)
+                        .onChange(of: professionalMode) { _, enabled in
+                            applyProfessionalMode(enabled)
+                        }
+                    Text("Uses a higher-resolution capture profile and a cinematic color profile.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Camera Profile")
+                }
+
+                Section("Color Preset") {
+                    ForEach(ColorPreset.allCases) { preset in
+                        Button {
+                            applyPreset(preset)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: preset.icon)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(preset.title)
+                                        .foregroundStyle(.primary)
+                                    Text(preset.subtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if selectedPreset == preset {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.yellow)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section("Image Quality") {
+                    Picker("Resolution", selection: $quality) {
+                        ForEach(QualityPreset.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: quality) { _, _ in applyQuality() }
+
+                    Picker("Frame Rate", selection: $selectedFrameRate) {
+                        Text("24 FPS").tag(Int32(24))
+                        Text("30 FPS").tag(Int32(30))
+                        Text("60 FPS").tag(Int32(60))
+                    }
+                    .onChange(of: selectedFrameRate) { _, _ in applyQuality() }
+
+                    Picker("HDR", selection: $selectedHDRMode) {
+                        Text("Auto").tag(CameraHDRMode.auto)
+                        Text("On").tag(CameraHDRMode.on)
+                        Text("Off").tag(CameraHDRMode.off)
+                    }
+                    .onChange(of: selectedHDRMode) { _, _ in applyQuality() }
+                }
+
+                Section("Exposure") {
+                    Toggle("Manual Exposure", isOn: $manualExposure)
+                        .tint(.yellow)
+                        .onChange(of: manualExposure) { _, enabled in
+                            try? changeExposureMode(enabled ? .custom : .continuousAutoExposure)
+                        }
+                    if manualExposure {
+                        LabeledContent("ISO", value: String(format: "%.0f", selectedISO))
+                        Slider(value: Binding(
+                            get: { Double(selectedISO) },
+                            set: { value in
+                                selectedISO = Float(value)
+                                try? changeISO(selectedISO)
+                            }
+                        ), in: 50...6400)
+                        LabeledContent("Shutter", value: "1/\(Int((1 / selectedShutter).rounded()))")
+                        Slider(value: Binding(
+                            get: { selectedShutter },
+                            set: { value in
+                                selectedShutter = value
+                                try? changeExposureDuration(CMTime(seconds: value, preferredTimescale: 1_000_000_000))
+                            }
+                        ), in: 0.001...0.067)
+                        LabeledContent("EV", value: String(format: "%+.1f", selectedBias))
+                        Slider(value: Binding(
+                            get: { Double(selectedBias) },
+                            set: { value in
+                                selectedBias = Float(value)
+                                try? changeExposureTargetBias(selectedBias)
+                            }
+                        ), in: -2...2)
+                    } else {
+                        LabeledContent("ISO", value: String(format: "%.0f", iso))
+                        LabeledContent("Shutter", value: shutterLabel)
+                        LabeledContent("EV", value: String(format: "%+.1f", exposureTargetBias))
+                    }
+                }
+
+                Section("Camera Tools") {
+                    Toggle("Grid", isOn: Binding(
+                        get: { showGrid },
+                        set: { try? changeGridVisibility($0) }
+                    ))
+                    .tint(.yellow)
+                    Toggle("Mirror Output", isOn: Binding(
+                        get: { mirrorOutput },
+                        set: { changeMirrorOutputMode($0) }
+                    ))
+                    .tint(.yellow)
+                }
+
+                Section {
+                    Button("Reset Settings", role: .destructive) {
+                        resetSettings()
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        professionalControlsVisible = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .preferredColorScheme(.dark)
+    }
+
+    private func applyProfessionalMode(_ enabled: Bool) {
+        quality = enabled ? .ultraHD : .fullHD
+        selectedFrameRate = 30
+        selectedHDRMode = .auto
+        applyQuality()
+        applyPreset(enabled ? .cinematic : .natural)
+    }
+
+    private func applyPreset(_ preset: ColorPreset) {
+        selectedPreset = preset
+        try? changeCameraFilters(preset.filters)
+    }
+
+    private func applyQuality() {
+        try? changeResolution(quality.sessionPreset)
+        try? changeFrameRate(selectedFrameRate)
+        try? changeHDRMode(selectedHDRMode)
+    }
+
+    private func resetSettings() {
+        professionalMode = false
+        selectedFrameRate = 30
+        selectedHDRMode = .auto
+        quality = .fullHD
+        manualExposure = false
+        selectedISO = 400
+        selectedShutter = 1.0 / 60.0
+        selectedBias = 0
+        applyQuality()
+        applyPreset(.natural)
+        changeMirrorOutputMode(false)
+        try? changeGridVisibility(true)
     }
 
     private var professionalPanel: some View {
@@ -283,7 +455,8 @@ struct IntegratedCameraView: MCameraView {
     private func defaultZoom(for lens: CameraLens) -> CGFloat {
         switch lens {
         case .ultraWide: 0.5
-        case .wide, .telephoto: 1
+        case .wide: 1
+        case .telephoto: 3
         }
     }
 
@@ -379,5 +552,76 @@ struct IntegratedCameraView: MCameraView {
     private var shutterLabel: String {
         let seconds = max(exposureDuration.seconds, 0.001)
         return "1/\(Int((1 / seconds).rounded()))"
+    }
+
+    private enum QualityPreset: String, CaseIterable, Identifiable {
+        case fullHD
+        case ultraHD
+
+        var id: String { rawValue }
+        var title: String { self == .fullHD ? "HD" : "4K" }
+        var sessionPreset: AVCaptureSession.Preset {
+            self == .fullHD ? .hd1920x1080 : .hd4K3840x2160
+        }
+    }
+
+    private enum ColorPreset: String, CaseIterable, Identifiable {
+        case natural
+        case cinematic
+        case mono
+        case warm
+        case cool
+
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .natural: "Natural"
+            case .cinematic: "Cinematic"
+            case .mono: "Mono"
+            case .warm: "Warm"
+            case .cool: "Cool"
+            }
+        }
+        var subtitle: String {
+            switch self {
+            case .natural: "Balanced color"
+            case .cinematic: "Contrast and muted color"
+            case .mono: "Black and white"
+            case .warm: "Golden highlights"
+            case .cool: "Clean blue tone"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .natural: "circle.lefthalf.filled"
+            case .cinematic: "film"
+            case .mono: "circle.righthalf.filled"
+            case .warm: "sun.max"
+            case .cool: "snowflake"
+            }
+        }
+        var filters: [CIFilter] {
+            switch self {
+            case .natural:
+                return []
+            case .cinematic:
+                let controls = CIFilter(name: "CIColorControls")
+                controls?.setValue(1.12, forKey: kCIInputContrastKey)
+                controls?.setValue(0.88, forKey: kCIInputSaturationKey)
+                return controls.map { [$0] } ?? []
+            case .mono:
+                return CIFilter(name: "CIPhotoEffectMono").map { [$0] } ?? []
+            case .warm:
+                let temperature = CIFilter(name: "CITemperatureAndTint")
+                temperature?.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+                temperature?.setValue(CIVector(x: 5000, y: 0), forKey: "inputTargetNeutral")
+                return temperature.map { [$0] } ?? []
+            case .cool:
+                let temperature = CIFilter(name: "CITemperatureAndTint")
+                temperature?.setValue(CIVector(x: 4500, y: 0), forKey: "inputNeutral")
+                temperature?.setValue(CIVector(x: 6500, y: 0), forKey: "inputTargetNeutral")
+                return temperature.map { [$0] } ?? []
+            }
+        }
     }
 }
