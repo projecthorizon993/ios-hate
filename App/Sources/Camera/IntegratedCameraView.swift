@@ -5,6 +5,7 @@ struct IntegratedCameraView: View {
     @ObservedObject var cameraManager: NativeCameraManager
     @State private var showsExposure = false
     @State private var showsColorPad = false
+    @State private var proMode = false
     @State private var standardLensMode = false
     @State private var zoomGestureStart: CGFloat?
 
@@ -89,6 +90,12 @@ struct IntegratedCameraView: View {
 
             Spacer()
 
+            controlButton("slider.horizontal.3", active: proMode) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proMode.toggle()
+                }
+            }
+
             controlButton(cameraManager.showGrid ? "grid" : "square") {
                 try? cameraManager.changeGridVisibility(!cameraManager.showGrid)
             }
@@ -108,6 +115,11 @@ struct IntegratedCameraView: View {
             if showsColorPad {
                 colorPad
                     .transition(.opacity.combined(with: .scale(scale: 0.94)))
+            }
+
+            if proMode {
+                proPanel
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
             if showsExposure {
@@ -196,6 +208,108 @@ struct IntegratedCameraView: View {
         }
         .padding(4)
         .background(.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var proPanel: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Label("PRO MODE", systemImage: "slider.horizontal.3")
+                    .font(.caption2.weight(.bold))
+                Spacer()
+                Text("\(cameraManager.frameRate) FPS · HD / 4K")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                proSlider(
+                    "ISO",
+                    value: Binding(
+                        get: { Double(cameraManager.iso) },
+                        set: { try? cameraManager.changeISO(Float($0)) }
+                    ),
+                    range: 50...6400
+                ) { String(format: "%.0f", $0) }
+
+                proSlider(
+                    "EV",
+                    value: Binding(
+                        get: { Double(cameraManager.exposureTargetBias) },
+                        set: { try? cameraManager.changeExposureTargetBias(Float($0)) }
+                    ),
+                    range: -2...2
+                ) { String(format: "%+.1f", $0) }
+
+                proSlider(
+                    "FOCUS",
+                    value: Binding(
+                        get: { Double(cameraManager.focusPosition) },
+                        set: { cameraManager.changeFocusPosition(Float($0)) }
+                    ),
+                    range: 0...1
+                ) { String(format: "%.2f", $0) }
+            }
+
+            HStack(spacing: 10) {
+                proSlider(
+                    "SHUTTER",
+                    value: Binding(
+                        get: { cameraManager.exposureDuration.seconds },
+                        set: {
+                            try? cameraManager.changeExposureDuration(
+                                CMTime(seconds: $0, preferredTimescale: 1_000_000_000)
+                            )
+                        }
+                    ),
+                    range: 0.001...0.067
+                ) { String(format: "1/%.0f", 1 / max($0, 0.001)) }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("FPS")
+                        .font(.caption2.weight(.bold))
+                    HStack(spacing: 4) {
+                        ForEach([Int32(24), 30, 60], id: \.self) { value in
+                            Button {
+                                try? cameraManager.changeFrameRate(value)
+                            } label: {
+                                Text("\(value)")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(cameraManager.frameRate == value ? .black : .white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 5)
+                                    .background(
+                                        cameraManager.frameRate == value ? Color.white : Color.white.opacity(0.10),
+                                        in: Capsule()
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(12)
+        .background(.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func proSlider(
+        _ title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        label: @escaping (Double) -> String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(label(value.wrappedValue))
+                    .monospacedDigit()
+            }
+            .font(.caption2.weight(.bold))
+            Slider(value: value, in: range)
+                .tint(.yellow)
+        }
     }
 
     private var colorPad: some View {
@@ -312,11 +426,11 @@ struct IntegratedCameraView: View {
         .buttonStyle(.plain)
     }
 
-    private func controlButton(_ systemImage: String, action: @escaping () -> Void) -> some View {
+    private func controlButton(_ systemImage: String, active: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(active ? Color.yellow : .white)
                 .frame(width: 40, height: 40)
                 .background(.black.opacity(0.32), in: Circle())
                 .overlay {

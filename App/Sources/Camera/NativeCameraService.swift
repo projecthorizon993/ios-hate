@@ -80,6 +80,9 @@ final class NativeCameraManager: NSObject, ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var isRecording = false
     @Published private(set) var recordingStartedAt: Date?
+    @Published private(set) var focusPosition: Float = 0.5
+    @Published private(set) var frameRate: Int32 = 30
+    @Published private(set) var resolution: AVCaptureSession.Preset = .photo
     @Published private(set) var isReconfiguring = false
     @Published private(set) var lastCapture: UIImage?
     @Published var colorSettings = NativeColorSettings.natural
@@ -372,6 +375,26 @@ final class NativeCameraManager: NSObject, ObservableObject {
         }
     }
 
+    func changeFocusPosition(_ value: Float) {
+        let clamped = min(max(value, 0), 1)
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.currentDevice else { return }
+            do {
+                try device.lockForConfiguration()
+                if device.isFocusModeSupported(.locked) {
+                    device.focusMode = .locked
+                }
+                device.lensPosition = clamped
+                device.unlockForConfiguration()
+                DispatchQueue.main.async { [weak self] in
+                    self?.focusPosition = clamped
+                }
+            } catch {
+                self.logger.error("Focus configuration failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     func changeCameraFilters(_ filters: [CIFilter]) throws {
         cameraFilters = filters
     }
@@ -380,6 +403,9 @@ final class NativeCameraManager: NSObject, ObservableObject {
         sessionQueue.async { [weak self] in
             guard let self, self.session.canSetSessionPreset(preset) else { return }
             self.session.sessionPreset = preset
+            DispatchQueue.main.async { [weak self] in
+                self?.resolution = preset
+            }
         }
     }
 
@@ -394,6 +420,9 @@ final class NativeCameraManager: NSObject, ObservableObject {
                    duration <= range.maxFrameDuration {
                     device.activeVideoMinFrameDuration = duration
                     device.activeVideoMaxFrameDuration = duration
+                    DispatchQueue.main.async { [weak self] in
+                        self?.frameRate = frameRate
+                    }
                 }
                 device.unlockForConfiguration()
             } catch {
@@ -557,6 +586,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
         let newISO = device.iso
         let newExposureDuration = device.exposureDuration
         let newExposureTargetBias = device.exposureTargetBias
+        let newFocusPosition = device.lensPosition
         let newHasFlash = device.hasFlash
         let newHasTorch = device.hasTorch
         DispatchQueue.main.async { [weak self] in
@@ -564,6 +594,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
             self.iso = newISO
             self.exposureDuration = newExposureDuration
             self.exposureTargetBias = newExposureTargetBias
+            self.focusPosition = newFocusPosition
             self.hasFlash = newHasFlash
             self.hasTorch = newHasTorch
         }
