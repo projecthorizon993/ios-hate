@@ -329,12 +329,8 @@
 			sourceTree = "<group>";
 		};
 		A10000000000000000000060 = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Mijick/Camera.git";
-			requirement = {
-				kind = exactVersion;
-				version = 2.1.1;
-			};
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/MijickCameraView;
 		};
 		A10000000000000000000061 = {
 			isa = PBXBuildFile;
