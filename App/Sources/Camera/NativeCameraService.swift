@@ -33,6 +33,11 @@ enum NativeCameraHDRMode: CaseIterable {
     case auto
 }
 
+enum NativeCaptureFormat: Equatable {
+    case processed
+    case raw
+}
+
 enum NativeCameraLens: String, CaseIterable, Identifiable {
     case ultraWide
     case wide
@@ -65,6 +70,8 @@ enum NativeCameraError: Error {
 
 final class NativeCameraManager: NSObject, ObservableObject {
     @Published private(set) var outputType: NativeCameraOutputType = .photo
+    @Published private(set) var captureFormat: NativeCaptureFormat = .processed
+    @Published private(set) var isRawAvailable = false
     @Published private(set) var cameraPosition: NativeCameraPosition = .back
     @Published private(set) var zoomFactor: CGFloat = 1
     @Published private(set) var flashMode: NativeCameraFlashMode = .off
@@ -105,6 +112,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
     private let photoProcessingQueue = DispatchQueue(label: "com.lumaframe.camera.photo-processing", qos: .userInitiated)
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
+    private var rawPixelFormatType: OSType?
     private let logger = Logger(subsystem: "LumaFrame", category: "NativeCamera")
     private var currentInput: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
@@ -167,6 +175,11 @@ final class NativeCameraManager: NSObject, ObservableObject {
         guard newOutputType != outputType else { return }
         logger.notice("Output mode changed to \(String(describing: newOutputType), privacy: .public)")
         outputType = newOutputType
+    }
+
+    func setCaptureFormat(_ format: NativeCaptureFormat) {
+        if format == .raw && !isRawAvailable { return }
+        captureFormat = format
     }
 
     func setColorPreset(_ preset: NativeColorPreset) {
@@ -465,6 +478,18 @@ final class NativeCameraManager: NSObject, ObservableObject {
         }
     }
 
+    private func refreshRawAvailability() {
+        let available = !photoOutput.availableRawPhotoPixelFormatTypes.isEmpty
+        rawPixelFormatType = photoOutput.availableRawPhotoPixelFormatTypes.first
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isRawAvailable = available
+            if !available, self.captureFormat == .raw {
+                self.captureFormat = .processed
+            }
+        }
+    }
+
     private func configureSession() {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
@@ -498,6 +523,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 logger.error("Movie output rejected")
             }
             configureConnections()
+            refreshRawAvailability()
         } catch {
             logger.error("Camera session setup failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -532,6 +558,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
             currentLens = lens
             configureConnections()
             session.commitConfiguration()
+            refreshRawAvailability()
             if wasRunning || wantsRunning {
                 session.startRunning()
             }
@@ -600,7 +627,16 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private func capturePhoto() {
-        let settings = AVCapturePhotoSettings()
+        let settings: AVCapturePhotoSettings
+        if captureFormat == .raw, let rawType = rawPixelFormatType {
+            let codec: AVVideoCodecType = photoOutput.availablePhotoCodecTypes.contains(.hevc) ? .hevc : .jpeg
+            settings = AVCapturePhotoSettings(
+                rawPixelFormatType: rawType,
+                processedFormat: [AVVideoCodecKey: codec]
+            )
+        } else {
+            settings = AVCapturePhotoSettings()
+        }
         settings.photoQualityPrioritization = .quality
         if hasFlash {
             settings.flashMode = switch flashMode {
@@ -665,6 +701,42 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 self.isRecording = self.movieOutput.isRecording
                 self.recordingStartedAt = self.movieOutput.isRecording ? Date() : nil
             }
+        }
+    }
+
+    private func saveRawPhotoData(_ data: Data) {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumaFrame-RAW-\(UUID().uuidString).dng")
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            logger.error("RAW file creation failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
+            guard let self else {
+                try? FileManager.default.removeItem(at: url)
+                return
+            }
+            guard status == .authorized || status == .limited else {
+                try? FileManager.default.removeItem(at: url)
+                self.logger.error("RAW save skipped: authorization denied")
+                return
+            }
+            PHPhotoLibrary.shared().performChanges({
+                let request = PHAssetCreationRequest.forAsset()
+                let options = PHAssetResourceCreationOptions()
+                options.originalFilename = url.lastPathComponent
+                options.shouldMoveFile = false
+                request.addResource(with: .photo, fileURL: url, options: options)
+            }, completionHandler: { [weak self] success, error in
+                try? FileManager.default.removeItem(at: url)
+                if success {
+                    self?.logger.notice("RAW saved to library")
+                } else if let error {
+                    self?.logger.error("RAW library save failed: \(error.localizedDescription, privacy: .public)")
+                }
+            })
         }
     }
 
@@ -739,9 +811,18 @@ extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
             logger.error("Photo capture returned no data")
             return
         }
+        let isRaw = photo.isRawPhoto
         let settings = colorSettings
         photoProcessingQueue.async { [weak self] in
             guard let self else { return }
+            if isRaw {
+                DispatchQueue.main.async { [weak self] in
+                    self?.lastCapture = UIImage(data: data)
+                }
+                self.saveRawPhotoData(data)
+                self.logger.notice("RAW photo capture completed")
+                return
+            }
             let processedData: Data
             if settings == .natural {
                 processedData = data

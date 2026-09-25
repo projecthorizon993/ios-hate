@@ -287,6 +287,15 @@ struct IntegratedCameraView: View {
                     }
                 }
             }
+
+            HStack(spacing: 6) {
+                Text("FORMAT")
+                    .font(.caption2.weight(.bold))
+                captureFormatButton("PROCESSED", format: .processed)
+                captureFormatButton("RAW", format: .raw)
+                    .disabled(!cameraManager.isRawAvailable)
+                    .opacity(cameraManager.isRawAvailable ? 1 : 0.35)
+            }
         }
         .foregroundStyle(.white)
         .padding(12)
@@ -310,6 +319,23 @@ struct IntegratedCameraView: View {
             Slider(value: value, in: range)
                 .tint(.yellow)
         }
+    }
+
+    private func captureFormatButton(_ title: String, format: NativeCaptureFormat) -> some View {
+        Button {
+            cameraManager.setCaptureFormat(format)
+        } label: {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(cameraManager.captureFormat == format ? .black : .white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(
+                    cameraManager.captureFormat == format ? Color.white : Color.white.opacity(0.10),
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var colorPad: some View {
