@@ -90,6 +90,11 @@ final class CameraCoordinator: NSObject {
                 self.videoInput = input
                 self.primaryDevice = device
                 self.session.addOutput(self.photoOutput)
+                if let maxPhotoDimensions = device.activeFormat.supportedMaxPhotoDimensions.max(by: { lhs, rhs in
+                    Int(lhs.width) * Int(lhs.height) < Int(rhs.width) * Int(rhs.height)
+                }) {
+                    self.photoOutput.maxPhotoDimensions = maxPhotoDimensions
+                }
                 self.session.addOutput(self.videoOutput)
                 self.videoOutput.videoSettings = [
                     kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
