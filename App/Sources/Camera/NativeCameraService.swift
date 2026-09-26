@@ -420,18 +420,17 @@ final class NativeCameraManager: NSObject, ObservableObject {
         _ value: CMTime,
         in format: AVCaptureDevice.Format
     ) -> CMTime? {
-        let minimum = format.minExposureDuration
-        let maximum = format.maxExposureDuration
+        let minimum: CMTime = format.minExposureDuration
+        let maximum: CMTime = format.maxExposureDuration
         guard minimum.isValid, maximum.isValid else { return nil }
-        guard CMTimeCompare(minimum, maximum) != .orderedDescending else { return nil }
-        let requested = CMTimeGetSeconds(value)
+        guard CMTimeCompare(minimum, maximum) <= 0 else { return nil }
+        let requested: Double = CMTimeGetSeconds(value)
         guard requested.isFinite, requested > 0 else { return nil }
-        let nearest = standardShutterSpeeds
-            .map { 1 / $0 }
-            .min { abs($0 - requested) < abs($1 - requested) } ?? requested
-        let lowerBound = CMTimeGetSeconds(minimum)
-        let upperBound = CMTimeGetSeconds(maximum)
-        let bounded = min(max(nearest, lowerBound), upperBound)
+        let candidates: [Double] = standardShutterSpeeds.map { 1 / $0 }
+        let nearest: Double = candidates.min { abs($0 - requested) < abs($1 - requested) } ?? requested
+        let lowerBound: Double = CMTimeGetSeconds(minimum)
+        let upperBound: Double = CMTimeGetSeconds(maximum)
+        let bounded: Double = min(max(nearest, lowerBound), upperBound)
         return CMTime(seconds: bounded, preferredTimescale: 1_000_000_000)
     }
 
