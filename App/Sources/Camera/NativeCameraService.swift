@@ -958,11 +958,12 @@ extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
                 }
                 var processedData = data
                 if settings != .natural, let source = UIImage(data: data) {
-                    let graded = self.performSafely("color-engine") {
-                        NativeColorEngine.processedJPEGData(from: source, settings: settings)
+                    var rendered: Data?
+                    let engineFailure = self.performSafely("color-engine") {
+                        rendered = NativeColorEngine.processedJPEGData(from: source, settings: settings)
                     }
-                    if graded == nil, let graded {
-                        processedData = graded
+                    if engineFailure == nil, let rendered {
+                        processedData = rendered
                     }
                 }
                 let image = UIImage(data: processedData)
