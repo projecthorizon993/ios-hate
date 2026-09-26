@@ -315,12 +315,10 @@ final class NativeCameraManager: NSObject, ObservableObject {
         torchMode = mode
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentDevice, device.hasTorch else { return }
-            do {
-                try device.lockForConfiguration()
+            self.performSafely("torch") {
+                try? device.lockForConfiguration()
                 device.torchMode = mode == .on ? .on : .off
                 device.unlockForConfiguration()
-            } catch {
-                self.logger.error("Torch configuration failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -350,6 +348,25 @@ final class NativeCameraManager: NSObject, ObservableObject {
         }
     }
 
+    @discardableResult
+    private func performSafely(_ operation: String, _ block: () -> Void) -> String? {
+        let failure = LumaFrameSafety.perform(block)
+        if let failure {
+            logger.error("Camera operation \(operation, privacy: .public) raised \(failure, privacy: .public)")
+        }
+        return failure
+    }
+
+    private func resetExposureToAutomatic(_ device: AVCaptureDevice) {
+        performSafely("exposure-reset") {
+            try? device.lockForConfiguration()
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            device.unlockForConfiguration()
+        }
+    }
+
     func changeISO(_ value: Float) throws {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentDevice, device.isExposureModeSupported(.custom) else { return }
@@ -363,12 +380,20 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 ?? device.exposureDuration
             self.lastAppliedISO = iso
             self.lastAppliedDuration = duration
-            device.setExposureModeCustom(duration: duration, iso: iso) { _ in
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.iso = iso
-                    self.exposureDuration = duration
+            let applied = performSafely("exposure-custom-iso") {
+                device.setExposureModeCustom(duration: duration, iso: iso) { _ in
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.iso = iso
+                        self.exposureDuration = duration
+                    }
                 }
+            }
+            if applied != nil {
+                self.lastAppliedISO = -1
+                self.lastAppliedDuration = .invalid
+                self.resetExposureToAutomatic(device)
+                self.publishDeviceState()
             }
         }
     }
@@ -388,12 +413,20 @@ final class NativeCameraManager: NSObject, ObservableObject {
             }
             self.lastAppliedDuration = duration
             self.lastAppliedISO = iso
-            device.setExposureModeCustom(duration: duration, iso: iso) { _ in
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.exposureDuration = duration
-                    self.iso = iso
+            let applied = performSafely("exposure-custom-shutter") {
+                device.setExposureModeCustom(duration: duration, iso: iso) { _ in
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.exposureDuration = duration
+                        self.iso = iso
+                    }
                 }
+            }
+            if applied != nil {
+                self.lastAppliedISO = -1
+                self.lastAppliedDuration = .invalid
+                self.resetExposureToAutomatic(device)
+                self.publishDeviceState()
             }
         }
     }
@@ -438,15 +471,14 @@ final class NativeCameraManager: NSObject, ObservableObject {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentDevice else { return }
             let clamped = min(max(value, device.minExposureTargetBias), device.maxExposureTargetBias)
-            do {
-                try device.lockForConfiguration()
+            let failure = self.performSafely("exposure-bias") {
+                try? device.lockForConfiguration()
                 device.setExposureTargetBias(clamped)
                 device.unlockForConfiguration()
-                DispatchQueue.main.async {
-                    self.exposureTargetBias = clamped
-                }
-            } catch {
-                self.logger.error("Exposure bias configuration failed: \(error.localizedDescription, privacy: .public)")
+            }
+            guard failure == nil else { return }
+            DispatchQueue.main.async {
+                self.exposureTargetBias = clamped
             }
         }
     }
@@ -455,17 +487,16 @@ final class NativeCameraManager: NSObject, ObservableObject {
         let clamped = min(max(value, 0), 1)
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentDevice else { return }
-            do {
-                try device.lockForConfiguration()
+            let failure = self.performSafely("focus-locked") {
+                try? device.lockForConfiguration()
                 if device.isFocusModeSupported(.locked) {
                     device.setFocusModeLocked(lensPosition: clamped)
                 }
                 device.unlockForConfiguration()
-                DispatchQueue.main.async { [weak self] in
-                    self?.focusPosition = clamped
-                }
-            } catch {
-                self.logger.error("Focus configuration failed: \(error.localizedDescription, privacy: .public)")
+            }
+            guard failure == nil else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.focusPosition = clamped
             }
         }
     }
@@ -477,7 +508,10 @@ final class NativeCameraManager: NSObject, ObservableObject {
     func changeResolution(_ preset: AVCaptureSession.Preset) throws {
         sessionQueue.async { [weak self] in
             guard let self, self.session.canSetSessionPreset(preset) else { return }
-            self.session.sessionPreset = preset
+            let failure = self.performSafely("session-preset") {
+                self.session.sessionPreset = preset
+            }
+            guard failure == nil else { return }
             DispatchQueue.main.async { [weak self] in
                 self?.resolution = preset
             }
@@ -486,26 +520,27 @@ final class NativeCameraManager: NSObject, ObservableObject {
 
     func changeFrameRate(_ frameRate: Int32) throws {
         sessionQueue.async { [weak self] in
-            guard let self, let device = self.currentDevice else { return }
+            guard let self, let device = self.currentDevice, frameRate > 0 else { return }
             let duration = CMTime(value: 1, timescale: CMTimeScale(frameRate))
-            do {
-                try device.lockForConfiguration()
+            let failure = self.performSafely("frame-rate") {
+                try? device.lockForConfiguration()
                 let isSupported = device.activeFormat.videoSupportedFrameRateRanges.contains { range in
                     duration >= range.minFrameDuration && duration <= range.maxFrameDuration
                 }
                 if isSupported {
                     device.activeVideoMinFrameDuration = duration
                     device.activeVideoMaxFrameDuration = duration
-                    DispatchQueue.main.async { [weak self] in
-                        self?.frameRate = frameRate
-                    }
-                } else {
-                    self.logger.error("Frame rate \(frameRate, privacy: .public) unsupported by active format")
                 }
                 device.unlockForConfiguration()
-            } catch {
-                self.logger.error("Frame rate configuration failed: \(error.localizedDescription, privacy: .public)")
+                guard isSupported else {
+                    self.logger.error("Frame rate \(frameRate, privacy: .public) unsupported by active format")
+                    return
+                }
+                DispatchQueue.main.async { [weak self] in
+                    self?.frameRate = frameRate
+                }
             }
+            _ = failure
         }
     }
 
@@ -699,25 +734,35 @@ final class NativeCameraManager: NSObject, ObservableObject {
             guard let self else { return }
             let wantsRaw = self.captureFormat == .raw
             let rawTypes = wantsRaw ? self.photoOutput.availableRawPhotoPixelFormatTypes : []
-            let settings: AVCapturePhotoSettings
+            var settings = AVCapturePhotoSettings()
+            var usesRaw = false
             if let rawType = rawTypes.first {
                 let codec: AVVideoCodecType = self.photoOutput.availablePhotoCodecTypes.contains(.hevc)
                     ? .hevc
                     : .jpeg
-                settings = AVCapturePhotoSettings(
-                    rawPixelFormatType: rawType,
-                    processedFormat: [AVVideoCodecKey: codec]
-                )
-                self.logger.notice("RAW capture using pixel format \(rawType, privacy: .public)")
-            } else {
-                if wantsRaw {
-                    self.logger.error("RAW pixel format unavailable at capture time; using processed")
+                var rawSettings: AVCapturePhotoSettings?
+                let failure = self.performSafely("raw-photo-settings") {
+                    rawSettings = AVCapturePhotoSettings(
+                        rawPixelFormatType: rawType,
+                        processedFormat: [AVVideoCodecKey: codec]
+                    )
+                }
+                if failure == nil, let rawSettings {
+                    settings = rawSettings
+                    usesRaw = true
+                    self.logger.notice("RAW capture using pixel format \(rawType, privacy: .public)")
+                } else {
+                    self.logger.error("RAW settings rejected; using processed capture")
                     DispatchQueue.main.async {
                         self.captureFormat = .processed
-                        self.isRawAvailable = false
                     }
                 }
-                settings = AVCapturePhotoSettings()
+            } else if wantsRaw {
+                self.logger.error("RAW pixel format unavailable at capture time; using processed")
+                DispatchQueue.main.async {
+                    self.captureFormat = .processed
+                    self.isRawAvailable = false
+                }
             }
             settings.photoQualityPrioritization = .quality
             if flashAvailable {
@@ -727,7 +772,14 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 case .auto: .auto
                 }
             }
-            self.photoOutput.capturePhoto(with: settings, delegate: self)
+            let failure = self.performSafely("photo-capture") {
+                self.photoOutput.capturePhoto(with: settings, delegate: self)
+            }
+            if failure != nil {
+                self.logger.error("Capture request rejected")
+            } else {
+                self.logger.notice("Capture requested raw=\(usesRaw, privacy: .public)")
+            }
         }
     }
 

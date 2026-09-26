@@ -46,6 +46,9 @@
 				A10000000000000000000063,
 				A10000000000000000000067,
 				A10000000000000000000069,
+				C10000000000000000000001,
+				C10000000000000000000002,
+				C10000000000000000000003,
 				A10000000000000000000023,
 				A10000000000000000000058
 			);
@@ -135,6 +138,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.LumaFrame;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Sources/Camera/LumaFrame-Bridging-Header.h";
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
@@ -155,6 +159,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.LumaFrame;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Sources/Camera/LumaFrame-Bridging-Header.h";
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
@@ -215,7 +220,8 @@
 				A10000000000000000000042,
 				A10000000000000000000064,
 				A10000000000000000000068,
-				A10000000000000000000070
+				A10000000000000000000070,
+				C10000000000000000000004
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -311,6 +317,28 @@
 		A10000000000000000000070 = {
 			isa = PBXBuildFile;
 			fileRef = A10000000000000000000069;
+		};
+		C10000000000000000000001 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.c.h;
+			path = "App/Sources/Camera/LumaFrameSafety.h";
+			sourceTree = "<group>";
+		};
+		C10000000000000000000002 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.c.objc;
+			path = "App/Sources/Camera/LumaFrameSafety.m";
+			sourceTree = "<group>";
+		};
+		C10000000000000000000003 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.c.h;
+			path = "App/Sources/Camera/LumaFrame-Bridging-Header.h";
+			sourceTree = "<group>";
+		};
+		C10000000000000000000004 = {
+			isa = PBXBuildFile;
+			fileRef = C10000000000000000000002;
 		};
 		A10000000000000000000053 = {
 			isa = PBXBuildFile;
