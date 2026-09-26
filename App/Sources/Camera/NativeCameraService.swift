@@ -123,6 +123,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
     private var wantsRunning = false
     private var currentRecordingURL: URL?
     private var cameraFilters: [CIFilter] = []
+    private var lastAppliedISO: Float = -1
+    private var lastAppliedDuration = CMTime.invalid
 
     override init() {
         super.init()
@@ -180,6 +182,19 @@ final class NativeCameraManager: NSObject, ObservableObject {
     func setCaptureFormat(_ format: NativeCaptureFormat) {
         if format == .raw && !isRawAvailable { return }
         captureFormat = format
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let rawTypes = self.photoOutput.availableRawPhotoPixelFormatTypes
+            let wantsRaw = format == .raw && !rawTypes.isEmpty
+            self.photoOutput.isRawImageEnabled = wantsRaw
+            if !wantsRaw {
+                self.logger.notice("RAW capture disabled: no supported pixel format")
+                DispatchQueue.main.async {
+                    self.captureFormat = .processed
+                    self.isRawAvailable = false
+                }
+            }
+        }
     }
 
     func setColorPreset(_ preset: NativeColorPreset) {
@@ -341,12 +356,19 @@ final class NativeCameraManager: NSObject, ObservableObject {
     func changeISO(_ value: Float) throws {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentDevice, device.isExposureModeSupported(.custom) else { return }
-            let clamped = min(max(value, device.activeFormat.minISO), device.activeFormat.maxISO)
-            let duration = device.exposureDuration
-            device.setExposureModeCustom(duration: duration, iso: clamped) { _ in
+            let format = device.activeFormat
+            guard let iso = Self.nearestSupportedISO(value, in: format) else {
+                self.logger.error("ISO change skipped: device reported no supported ISO values")
+                return
+            }
+            guard iso != self.lastAppliedISO else { return }
+            let duration = Self.nearestSupportedDuration(device.exposureDuration, in: format)
+                ?? device.exposureDuration
+            self.lastAppliedISO = iso
+            device.setExposureModeCustom(duration: duration, iso: iso) { _ in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    self.iso = clamped
+                    self.iso = iso
                 }
             }
         }
@@ -355,20 +377,39 @@ final class NativeCameraManager: NSObject, ObservableObject {
     func changeExposureDuration(_ value: CMTime) throws {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentDevice, device.isExposureModeSupported(.custom) else { return }
-            let minimum = device.activeFormat.minExposureDuration
-            let maximum = device.activeFormat.maxExposureDuration
-            let clamped = CMTimeMaximum(
-                CMTimeMinimum(value, maximum),
-                minimum
-            )
-            let iso = device.iso
-            device.setExposureModeCustom(duration: clamped, iso: iso) { _ in
+            let format = device.activeFormat
+            guard let duration = Self.nearestSupportedDuration(value, in: format) else {
+                self.logger.error("Shutter change skipped: device reported no supported exposure durations")
+                return
+            }
+            guard duration != self.lastAppliedDuration else { return }
+            let iso = Self.nearestSupportedISO(device.iso, in: format) ?? device.iso
+            self.lastAppliedDuration = duration
+            self.lastAppliedISO = iso
+            device.setExposureModeCustom(duration: duration, iso: iso) { _ in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    self.exposureDuration = clamped
+                    self.exposureDuration = duration
+                    self.iso = iso
                 }
             }
         }
+    }
+
+    private static func nearestSupportedISO(_ value: Float, in format: AVCaptureDevice.Format) -> Float? {
+        let supported = format.supportedISOs
+        guard !supported.isEmpty else { return nil }
+        return supported.min { abs($0 - value) < abs($1 - value) }
+    }
+
+    private static func nearestSupportedDuration(
+        _ value: CMTime,
+        in format: AVCaptureDevice.Format
+    ) -> CMTime? {
+        let supported = format.supportedExposureDurations
+        guard !supported.isEmpty else { return nil }
+        let target = CMTimeGetSeconds(value)
+        return supported.min { abs(CMTimeGetSeconds($0) - target) < abs(CMTimeGetSeconds($1) - target) }
     }
 
     func changeExposureTargetBias(_ value: Float) throws {
@@ -427,14 +468,17 @@ final class NativeCameraManager: NSObject, ObservableObject {
             let duration = CMTime(value: 1, timescale: CMTimeScale(frameRate))
             do {
                 try device.lockForConfiguration()
-                if let range = device.activeFormat.videoSupportedFrameRateRanges.first,
-                   duration >= range.minFrameDuration,
-                   duration <= range.maxFrameDuration {
+                let isSupported = device.activeFormat.videoSupportedFrameRateRanges.contains { range in
+                    duration >= range.minFrameDuration && duration <= range.maxFrameDuration
+                }
+                if isSupported {
                     device.activeVideoMinFrameDuration = duration
                     device.activeVideoMaxFrameDuration = duration
                     DispatchQueue.main.async { [weak self] in
                         self?.frameRate = frameRate
                     }
+                } else {
+                    self.logger.error("Frame rate \(frameRate) unsupported by active format")
                 }
                 device.unlockForConfiguration()
             } catch {
@@ -627,25 +671,44 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private func capturePhoto() {
-        let settings: AVCapturePhotoSettings
-        if captureFormat == .raw, let rawType = rawPixelFormatType {
-            let codec: AVVideoCodecType = photoOutput.availablePhotoCodecTypes.contains(.hevc) ? .hevc : .jpeg
-            settings = AVCapturePhotoSettings(
-                rawPixelFormatType: rawType,
-                processedFormat: [AVVideoCodecKey: codec]
-            )
-        } else {
-            settings = AVCapturePhotoSettings()
-        }
-        settings.photoQualityPrioritization = .quality
-        if hasFlash {
-            settings.flashMode = switch flashMode {
-            case .off: .off
-            case .on: .on
-            case .auto: .auto
+        let requestedFlash = flashMode
+        let flashAvailable = hasFlash
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let wantsRaw = self.captureFormat == .raw
+            let rawTypes = wantsRaw ? self.photoOutput.availableRawPhotoPixelFormatTypes : []
+            let settings: AVCapturePhotoSettings
+            if let rawType = rawTypes.first {
+                let codec: AVVideoCodecType = self.photoOutput.availablePhotoCodecTypes.contains(.hevc)
+                    ? .hevc
+                    : .jpeg
+                settings = AVCapturePhotoSettings(
+                    rawPixelFormatType: rawType,
+                    processedFormat: [AVVideoCodecKey: codec]
+                )
+                self.photoOutput.isRawImageEnabled = true
+                self.logger.notice("RAW capture using pixel format \(rawType)")
+            } else {
+                if wantsRaw {
+                    self.logger.error("RAW pixel format unavailable at capture time; using processed")
+                    DispatchQueue.main.async {
+                        self.captureFormat = .processed
+                        self.isRawAvailable = false
+                    }
+                }
+                self.photoOutput.isRawImageEnabled = false
+                settings = AVCapturePhotoSettings()
             }
+            settings.photoQualityPrioritization = .quality
+            if flashAvailable {
+                settings.flashMode = switch requestedFlash {
+                case .off: .off
+                case .on: .on
+                case .auto: .auto
+                }
+            }
+            self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
-        photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
     private func toggleVideoRecording() {
@@ -816,9 +879,6 @@ extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
         photoProcessingQueue.async { [weak self] in
             guard let self else { return }
             if isRaw {
-                DispatchQueue.main.async { [weak self] in
-                    self?.lastCapture = UIImage(data: data)
-                }
                 self.saveRawPhotoData(data)
                 self.logger.notice("RAW photo capture completed")
                 return
