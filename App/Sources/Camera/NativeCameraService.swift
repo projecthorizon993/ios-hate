@@ -184,11 +184,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
         captureFormat = format
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            let rawTypes = self.photoOutput.availableRawPhotoPixelFormatTypes
-            let wantsRaw = format == .raw && !rawTypes.isEmpty
-            self.photoOutput.isRawImageEnabled = wantsRaw
-            if !wantsRaw {
-                self.logger.notice("RAW capture disabled: no supported pixel format")
+            if format == .raw, self.photoOutput.availableRawPhotoPixelFormatTypes.isEmpty {
+                self.logger.notice("RAW capture unavailable: no supported pixel format")
                 DispatchQueue.main.async {
                     self.captureFormat = .processed
                     self.isRawAvailable = false
@@ -357,18 +354,20 @@ final class NativeCameraManager: NSObject, ObservableObject {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentDevice, device.isExposureModeSupported(.custom) else { return }
             let format = device.activeFormat
-            guard let iso = Self.nearestSupportedISO(value, in: format) else {
-                self.logger.error("ISO change skipped: device reported no supported ISO values")
+            guard let iso = Self.normalizedISO(value, in: format) else {
+                self.logger.error("ISO change skipped: active format reports no usable ISO range")
                 return
             }
             guard iso != self.lastAppliedISO else { return }
-            let duration = Self.nearestSupportedDuration(device.exposureDuration, in: format)
+            let duration = Self.normalizedDuration(device.exposureDuration, in: format)
                 ?? device.exposureDuration
             self.lastAppliedISO = iso
+            self.lastAppliedDuration = duration
             device.setExposureModeCustom(duration: duration, iso: iso) { _ in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.iso = iso
+                    self.exposureDuration = duration
                 }
             }
         }
@@ -378,12 +377,15 @@ final class NativeCameraManager: NSObject, ObservableObject {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentDevice, device.isExposureModeSupported(.custom) else { return }
             let format = device.activeFormat
-            guard let duration = Self.nearestSupportedDuration(value, in: format) else {
-                self.logger.error("Shutter change skipped: device reported no supported exposure durations")
+            guard let duration = Self.normalizedDuration(value, in: format) else {
+                self.logger.error("Shutter change skipped: active format reports no usable duration range")
                 return
             }
             guard duration != self.lastAppliedDuration else { return }
-            let iso = Self.nearestSupportedISO(device.iso, in: format) ?? device.iso
+            guard let iso = Self.normalizedISO(device.iso, in: format) else {
+                self.logger.error("Shutter change skipped: active format reports no usable ISO range")
+                return
+            }
             self.lastAppliedDuration = duration
             self.lastAppliedISO = iso
             device.setExposureModeCustom(duration: duration, iso: iso) { _ in
@@ -396,20 +398,41 @@ final class NativeCameraManager: NSObject, ObservableObject {
         }
     }
 
-    private static func nearestSupportedISO(_ value: Float, in format: AVCaptureDevice.Format) -> Float? {
-        let supported = format.supportedISOs
-        guard !supported.isEmpty else { return nil }
-        return supported.min { abs($0 - value) < abs($1 - value) }
+    private static let standardISOs: [Float] = [
+        25, 32, 40, 50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640,
+        800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000,
+        10000, 12800, 16000, 20000, 25600
+    ]
+
+    private static let standardShutterSpeeds: [Double] = [
+        8000, 4000, 2000, 1000, 500, 250, 125, 60, 30, 24, 15, 8, 4, 2, 1
+    ]
+
+    private static func normalizedISO(_ value: Float, in format: AVCaptureDevice.Format) -> Float? {
+        let lower = format.minISO
+        let upper = format.maxISO
+        guard lower.isFinite, upper.isFinite, upper > 0 else { return nil }
+        let nearest = standardISOs.min { abs($0 - value) < abs($1 - value) } ?? value
+        return min(max(nearest, lower), upper)
     }
 
-    private static func nearestSupportedDuration(
+    private static func normalizedDuration(
         _ value: CMTime,
         in format: AVCaptureDevice.Format
     ) -> CMTime? {
-        let supported = format.supportedExposureDurations
-        guard !supported.isEmpty else { return nil }
-        let target = CMTimeGetSeconds(value)
-        return supported.min { abs(CMTimeGetSeconds($0) - target) < abs(CMTimeGetSeconds($1) - target) }
+        let minimum = format.minExposureDuration
+        let maximum = format.maxExposureDuration
+        guard minimum.isValid, maximum.isValid else { return nil }
+        guard CMTimeCompare(minimum, maximum) != .orderedDescending else { return nil }
+        let requested = CMTimeGetSeconds(value)
+        guard requested.isFinite, requested > 0 else { return nil }
+        let nearest = standardShutterSpeeds
+            .map { 1 / $0 }
+            .min { abs($0 - requested) < abs($1 - requested) } ?? requested
+        let lowerBound = CMTimeGetSeconds(minimum)
+        let upperBound = CMTimeGetSeconds(maximum)
+        let bounded = min(max(nearest, lowerBound), upperBound)
+        return CMTime(seconds: bounded, preferredTimescale: 1_000_000_000)
     }
 
     func changeExposureTargetBias(_ value: Float) throws {
@@ -686,7 +709,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
                     rawPixelFormatType: rawType,
                     processedFormat: [AVVideoCodecKey: codec]
                 )
-                self.photoOutput.isRawImageEnabled = true
                 self.logger.notice("RAW capture using pixel format \(rawType, privacy: .public)")
             } else {
                 if wantsRaw {
@@ -696,7 +718,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
                         self.isRawAvailable = false
                     }
                 }
-                self.photoOutput.isRawImageEnabled = false
                 settings = AVCapturePhotoSettings()
             }
             settings.photoQualityPrioritization = .quality
