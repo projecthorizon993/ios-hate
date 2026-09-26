@@ -478,7 +478,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
                         self?.frameRate = frameRate
                     }
                 } else {
-                    self.logger.error("Frame rate \(frameRate) unsupported by active format")
+                    self.logger.error("Frame rate \(frameRate, privacy: .public) unsupported by active format")
                 }
                 device.unlockForConfiguration()
             } catch {
@@ -687,7 +687,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
                     processedFormat: [AVVideoCodecKey: codec]
                 )
                 self.photoOutput.isRawImageEnabled = true
-                self.logger.notice("RAW capture using pixel format \(rawType)")
+                self.logger.notice("RAW capture using pixel format \(rawType, privacy: .public)")
             } else {
                 if wantsRaw {
                     self.logger.error("RAW pixel format unavailable at capture time; using processed")
