@@ -576,6 +576,9 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 self.isRunning = self.session.isRunning
                 self.publishDeviceState()
             }
+            if self.session.isRunning {
+                self.refreshRawAvailability()
+            }
         }
     }
 
@@ -612,7 +615,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
             session.addInput(input)
             currentInput = input
             currentDevice = device
-            photoOutput.maxPhotoQualityPrioritization = .quality
             if session.canAddOutput(photoOutput) {
                 session.addOutput(photoOutput)
             } else {
@@ -624,7 +626,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 logger.error("Movie output rejected")
             }
             configureConnections()
-            refreshRawAvailability()
         } catch {
             logger.error("Camera session setup failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -659,9 +660,11 @@ final class NativeCameraManager: NSObject, ObservableObject {
             currentLens = lens
             configureConnections()
             session.commitConfiguration()
-            refreshRawAvailability()
             if wasRunning || wantsRunning {
                 session.startRunning()
+            }
+            if session.isRunning {
+                refreshRawAvailability()
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -728,58 +731,47 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private func capturePhoto() {
-        let requestedFlash = flashMode
-        let flashAvailable = hasFlash
-        sessionQueue.async { [weak self] in
-            guard let self else { return }
-            let wantsRaw = self.captureFormat == .raw
-            let rawTypes = wantsRaw ? self.photoOutput.availableRawPhotoPixelFormatTypes : []
-            var settings = AVCapturePhotoSettings()
-            var usesRaw = false
-            if let rawType = rawTypes.first {
-                let codec: AVVideoCodecType = self.photoOutput.availablePhotoCodecTypes.contains(.hevc)
-                    ? .hevc
-                    : .jpeg
-                var rawSettings: AVCapturePhotoSettings?
-                let failure = self.performSafely("raw-photo-settings") {
-                    rawSettings = AVCapturePhotoSettings(
-                        rawPixelFormatType: rawType,
-                        processedFormat: [AVVideoCodecKey: codec]
-                    )
-                }
-                if failure == nil, let rawSettings {
-                    settings = rawSettings
-                    usesRaw = true
-                    self.logger.notice("RAW capture using pixel format \(rawType, privacy: .public)")
-                } else {
-                    self.logger.error("RAW settings rejected; using processed capture")
-                    DispatchQueue.main.async {
-                        self.captureFormat = .processed
-                    }
-                }
-            } else if wantsRaw {
-                self.logger.error("RAW pixel format unavailable at capture time; using processed")
-                DispatchQueue.main.async {
-                    self.captureFormat = .processed
-                    self.isRawAvailable = false
-                }
+        let wantsRaw = captureFormat == .raw
+        let rawTypes = wantsRaw ? photoOutput.availableRawPhotoPixelFormatTypes : []
+        var settings = AVCapturePhotoSettings()
+        var usesRaw = false
+        if let rawType = rawTypes.first {
+            let codec: AVVideoCodecType = photoOutput.availablePhotoCodecTypes.contains(.hevc) ? .hevc : .jpeg
+            var rawSettings: AVCapturePhotoSettings?
+            let failure = performSafely("raw-photo-settings") {
+                rawSettings = AVCapturePhotoSettings(
+                    rawPixelFormatType: rawType,
+                    processedFormat: [AVVideoCodecKey: codec]
+                )
             }
-            settings.photoQualityPrioritization = .quality
-            if flashAvailable {
-                settings.flashMode = switch requestedFlash {
-                case .off: .off
-                case .on: .on
-                case .auto: .auto
-                }
-            }
-            let failure = self.performSafely("photo-capture") {
-                self.photoOutput.capturePhoto(with: settings, delegate: self)
-            }
-            if failure != nil {
-                self.logger.error("Capture request rejected")
+            if failure == nil, let rawSettings {
+                settings = rawSettings
+                usesRaw = true
+                logger.notice("RAW capture using pixel format \(rawType, privacy: .public)")
             } else {
-                self.logger.notice("Capture requested raw=\(usesRaw, privacy: .public)")
+                logger.error("RAW settings rejected; using processed capture")
+                captureFormat = .processed
             }
+        } else if wantsRaw {
+            logger.error("RAW pixel format unavailable at capture time; using processed")
+            captureFormat = .processed
+            isRawAvailable = false
+        }
+        settings.photoQualityPrioritization = usesRaw ? .balanced : .quality
+        if hasFlash {
+            settings.flashMode = switch flashMode {
+            case .off: .off
+            case .on: .on
+            case .auto: .auto
+            }
+        }
+        let failure = performSafely("photo-capture") {
+            photoOutput.capturePhoto(with: settings, delegate: self)
+        }
+        if failure != nil {
+            logger.error("Capture request rejected")
+        } else {
+            logger.notice("Capture requested raw=\(usesRaw, privacy: .public)")
         }
     }
 
@@ -942,7 +934,15 @@ extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
             logger.error("Photo capture failed: \(error.localizedDescription, privacy: .public)")
             return
         }
-        guard let data = photo.fileDataRepresentation() else {
+        var payload: Data?
+        let readFailure = performSafely("photo-data") {
+            payload = photo.fileDataRepresentation()
+        }
+        if readFailure != nil {
+            logger.error("Photo data unavailable")
+            return
+        }
+        guard let data = payload else {
             logger.error("Photo capture returned no data")
             return
         }
@@ -950,25 +950,28 @@ extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
         let settings = colorSettings
         photoProcessingQueue.async { [weak self] in
             guard let self else { return }
-            if isRaw {
-                self.saveRawPhotoData(data)
-                self.logger.notice("RAW photo capture completed")
-                return
+            self.performSafely("photo-processing") {
+                if isRaw {
+                    self.saveRawPhotoData(data)
+                    self.logger.notice("RAW photo capture completed")
+                    return
+                }
+                var processedData = data
+                if settings != .natural, let source = UIImage(data: data) {
+                    let graded = self.performSafely("color-engine") {
+                        NativeColorEngine.processedJPEGData(from: source, settings: settings)
+                    }
+                    if graded == nil, let graded {
+                        processedData = graded
+                    }
+                }
+                let image = UIImage(data: processedData)
+                DispatchQueue.main.async { [weak self] in
+                    self?.lastCapture = image
+                }
+                self.savePhotoData(processedData)
+                self.logger.notice("Photo capture completed")
             }
-            let processedData: Data
-            if settings == .natural {
-                processedData = data
-            } else if let sourceImage = UIImage(data: data) {
-                processedData = NativeColorEngine.processedJPEGData(from: sourceImage, settings: settings) ?? data
-            } else {
-                processedData = data
-            }
-            let image = UIImage(data: processedData)
-            DispatchQueue.main.async { [weak self] in
-                self?.lastCapture = image
-            }
-            self.savePhotoData(processedData)
-            self.logger.notice("Photo capture completed")
         }
     }
 }
