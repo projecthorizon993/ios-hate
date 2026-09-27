@@ -876,8 +876,12 @@ final class NativeCameraManager: NSObject, ObservableObject {
         let directory = documents.appendingPathComponent("RAW", isDirectory: true)
         let url = directory.appendingPathComponent("LumaFrame-\(UUID().uuidString).dng")
         let failure = performSafely("raw-file-write") {
-            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try data.write(to: url, options: .atomic)
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                logger.error("RAW write error: \(error.localizedDescription, privacy: .public)")
+            }
         }
         if failure != nil {
             logger.error("RAW file creation failed")
