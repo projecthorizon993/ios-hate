@@ -224,7 +224,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     func setColorPreset(_ preset: NativeColorPreset) {
-        colorSettings.preset = preset
+        colorSettings = NativeColorSettings(preset: preset)
     }
 
     func updateColorSettings(_ settings: NativeColorSettings) {
@@ -843,6 +843,10 @@ final class NativeCameraManager: NSObject, ObservableObject {
     private func beginRecording() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            guard self.session.outputs.contains(where: { $0 === self.movieOutput }) else {
+                self.logger.error("Recording skipped: movie output not attached")
+                return
+            }
             if self.audioInput == nil,
                let microphone = AVCaptureDevice.default(for: .audio) {
                 do {
@@ -860,7 +864,13 @@ final class NativeCameraManager: NSObject, ObservableObject {
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("LumaFrame-Video-\(UUID().uuidString).mov")
             self.currentRecordingURL = url
-            self.movieOutput.startRecording(to: url, recordingDelegate: self)
+            let failure = self.performSafely("start-recording") {
+                self.movieOutput.startRecording(to: url, recordingDelegate: self)
+            }
+            if failure != nil {
+                self.logger.error("Recording request rejected")
+                return
+            }
             DispatchQueue.main.async {
                 self.isRecording = self.movieOutput.isRecording
                 self.recordingStartedAt = self.movieOutput.isRecording ? Date() : nil
@@ -1013,6 +1023,18 @@ extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
 }
 
 extension NativeCameraManager: AVCaptureFileOutputRecordingDelegate {
+    func fileOutput(
+        _ output: AVCaptureFileOutput,
+        didStartRecordingTo outputFileURL: URL,
+        from connections: [AVCaptureConnection]
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isRecording = true
+            self.recordingStartedAt = Date()
+        }
+    }
+
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: (any Swift.Error)?) {
         if let error {
             logger.error("Video capture failed: \(error.localizedDescription, privacy: .public)")

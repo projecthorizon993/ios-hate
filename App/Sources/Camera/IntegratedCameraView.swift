@@ -18,9 +18,9 @@ struct IntegratedCameraView: View {
                 NativeCameraPreview(session: cameraManager.session)
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .clipped()
-                    .saturation(Double(cameraManager.colorSettings.saturation))
-                    .contrast(Double(cameraManager.colorSettings.contrast))
-                    .brightness(Double(cameraManager.colorSettings.exposure * 0.12))
+                    .saturation(previewSaturation)
+                    .contrast(previewContrast)
+                    .brightness(previewBrightness)
                     .colorMultiply(previewColor)
                     .overlay {
                         if cameraManager.showGrid {
@@ -41,6 +41,22 @@ struct IntegratedCameraView: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
 
+                if cameraManager.isRecording {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 7, height: 7)
+                        Text("RECORDING")
+                            .font(.caption2.weight(.heavy))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.red.opacity(0.85), in: Capsule())
+                    .padding(.top, 58)
+                    .transition(.opacity)
+                }
+
                 bottomBar
                     .frame(maxHeight: .infinity, alignment: .bottom)
             }
@@ -52,13 +68,29 @@ struct IntegratedCameraView: View {
         }
     }
 
+    private var resolvedColor: NativeColorSettings.ResolvedColor {
+        cameraManager.colorSettings.resolved()
+    }
+
+    private var previewSaturation: Double {
+        Double(resolvedColor.saturation)
+    }
+
+    private var previewContrast: Double {
+        Double(resolvedColor.contrast)
+    }
+
+    private var previewBrightness: Double {
+        Double(resolvedColor.exposure * 0.12)
+    }
+
     private var previewColor: Color {
-        let temperature = min(max(cameraManager.colorSettings.temperature, -1), 1)
-        let amount = abs(temperature) * 0.26
+        let temperature = min(max(resolvedColor.temperature, -1), 1)
+        let amount = abs(temperature) * 0.34
         if temperature >= 0 {
-            return Color(red: 1, green: 1 - (amount * 0.35), blue: 1 - amount)
+            return Color(red: 1, green: 1 - (amount * 0.32), blue: 1 - amount)
         }
-        return Color(red: 1 - amount, green: 1 - (amount * 0.18), blue: 1)
+        return Color(red: 1 - amount, green: 1 - (amount * 0.16), blue: 1)
     }
 
     private var cameraGrid: some View {
@@ -109,6 +141,10 @@ struct IntegratedCameraView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 14) {
+            if cameraManager.outputType == .photo {
+                colorPresetRow
+            }
+
             lensSelector
                 .opacity(cameraManager.cameraPosition == .back ? 1 : 0.35)
 
@@ -147,9 +183,7 @@ struct IntegratedCameraView: View {
 
                 VStack(spacing: 4) {
                     shutterButton
-                    if cameraManager.isRecording {
-                        recordingTimeLabel
-                    }
+                    recordingBadge
                 }
 
                 Spacer()
@@ -179,6 +213,38 @@ struct IntegratedCameraView: View {
                         .stroke(.white.opacity(0.14), lineWidth: 0.7)
                 }
         }
+    }
+
+    private var colorPresetRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(NativeColorPreset.allCases) { preset in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            cameraManager.setColorPreset(preset)
+                        }
+                    } label: {
+                        Text(preset.title)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(
+                                cameraManager.colorSettings.preset == preset ? Color.black : .white.opacity(0.82)
+                            )
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 26)
+                            .background(
+                                cameraManager.colorSettings.preset == preset
+                                    ? Color.white
+                                    : Color.white.opacity(0.12),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 4)
+        }
+        .background(.black.opacity(0.42), in: Capsule())
     }
 
     private var lensSelector: some View {
@@ -399,6 +465,27 @@ struct IntegratedCameraView: View {
         .opacity(cameraManager.isRunning ? 1 : 0.45)
     }
 
+    private var recordingBadge: some View {
+        Group {
+            if cameraManager.isRecording {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                    Text("REC")
+                        .font(.caption2.weight(.heavy))
+                    recordingTimeLabel
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.black.opacity(0.72), in: Capsule())
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: cameraManager.isRecording)
+    }
+
     private var recordingTimeLabel: some View {
         TimelineView(.periodic(from: .now, by: 0.2)) { context in
             Text(recordingDuration(at: context.date))
@@ -540,8 +627,9 @@ private struct ColorPad: View {
         let x = min(max(location.x / max(size.width, 1), 0), 1)
         let y = min(max(location.y / max(size.height, 1), 0), 1)
         var updated = settings
+        updated.preset = .natural
         updated.temperature = (x * 2) - 1
-        updated.contrast = 1.25 - (y * 0.5)
+        updated.contrast = 1.40 - (y * 0.80)
         onChange(updated)
     }
 }
