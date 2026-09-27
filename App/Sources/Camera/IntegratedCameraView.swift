@@ -6,6 +6,7 @@ struct IntegratedCameraView: View {
     @State private var showsExposure = false
     @State private var showsColorPad = false
     @State private var proMode = false
+    @State private var showsDiagnostics = false
     @State private var standardLensMode = false
     @State private var zoomGestureStart: CGFloat?
 
@@ -55,6 +56,8 @@ struct IntegratedCameraView: View {
                     .background(.red.opacity(0.85), in: Capsule())
                     .padding(.top, 58)
                     .transition(.opacity)
+                } else if showsDiagnostics {
+                    diagnosticsPanel
                 }
 
                 bottomBar
@@ -132,11 +135,41 @@ struct IntegratedCameraView: View {
                 try? cameraManager.changeGridVisibility(!cameraManager.showGrid)
             }
 
+            controlButton("info.circle", active: showsDiagnostics) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showsDiagnostics.toggle()
+                    if !showsDiagnostics {
+                        cameraManager.clearDiagnostics()
+                    }
+                }
+            }
+
             controlButton("arrow.triangle.2.circlepath.camera") {
                 try? cameraManager.changeCamera(cameraManager.cameraPosition == .back ? .front : .back)
             }
             .disabled(cameraManager.isReconfiguring)
         }
+    }
+
+    private var diagnosticsPanel: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("CAMERA ENGINE")
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundStyle(.yellow)
+            ForEach(Array(cameraManager.diagnostics.enumerated()), id: \.offset) { _, entry in
+                Text(entry)
+                    .font(.system(size: 9, weight: .regular).monospaced())
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.black.opacity(0.80), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.top, 58)
     }
 
     private var bottomBar: some View {

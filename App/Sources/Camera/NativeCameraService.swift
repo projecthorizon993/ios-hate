@@ -93,6 +93,21 @@ final class NativeCameraManager: NSObject, ObservableObject {
     @Published private(set) var isReconfiguring = false
     @Published private(set) var lastCapture: UIImage?
     @Published var colorSettings = NativeColorSettings.natural
+    @Published private(set) var diagnostics: [String] = []
+
+    func clearDiagnostics() {
+        diagnostics = []
+    }
+
+    private func note(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.diagnostics.append(message)
+            if self.diagnostics.count > 8 {
+                self.diagnostics.removeFirst(self.diagnostics.count - 8)
+            }
+        }
+    }
 
     let session = AVCaptureSession()
     let availableLenses: [NativeCameraLens] = [
@@ -382,6 +397,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
         let failure = LumaFrameSafety.perform(block)
         if let failure {
             logger.error("Camera operation \(operation, privacy: .public) raised \(failure, privacy: .public)")
+            note("EXC \(operation): \(failure)")
         }
         return failure
     }
@@ -398,10 +414,17 @@ final class NativeCameraManager: NSObject, ObservableObject {
 
     func changeISO(_ value: Float) throws {
         sessionQueue.async { [weak self] in
-            guard let self, let device = self.currentDevice, device.isExposureModeSupported(.custom) else { return }
+            guard let self, let device = self.currentDevice else {
+                self?.note("iso skipped: no device")
+                return
+            }
+            guard device.isExposureModeSupported(.custom) else {
+                self.note("iso skipped: custom exposure unsupported")
+                return
+            }
             let format = device.activeFormat
             guard let iso = Self.normalizedISO(value, in: format) else {
-                self.logger.error("ISO change skipped: active format reports no usable ISO range")
+                self.note("iso skipped: iso range \(format.minISO)-\(format.maxISO)")
                 return
             }
             guard iso != self.lastAppliedISO else { return }
@@ -409,7 +432,7 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 ?? device.exposureDuration
             self.lastAppliedISO = iso
             self.lastAppliedDuration = duration
-            let applied = performSafely("exposure-custom-iso") {
+            let applied = self.performSafely("exposure-custom-iso") {
                 device.setExposureModeCustom(duration: duration, iso: iso) { _ in
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
@@ -423,26 +446,35 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 self.lastAppliedDuration = .invalid
                 self.resetExposureToAutomatic(device)
                 self.publishDeviceState()
+            } else {
+                self.note("iso applied \(iso) with \(duration.seconds)s")
             }
         }
     }
 
     func changeExposureDuration(_ value: CMTime) throws {
         sessionQueue.async { [weak self] in
-            guard let self, let device = self.currentDevice, device.isExposureModeSupported(.custom) else { return }
+            guard let self, let device = self.currentDevice else {
+                self?.note("shutter skipped: no device")
+                return
+            }
+            guard device.isExposureModeSupported(.custom) else {
+                self.note("shutter skipped: custom exposure unsupported")
+                return
+            }
             let format = device.activeFormat
             guard let duration = Self.normalizedDuration(value, in: format) else {
-                self.logger.error("Shutter change skipped: active format reports no usable duration range")
+                self.note("shutter skipped: duration range invalid")
                 return
             }
             guard duration != self.lastAppliedDuration else { return }
             guard let iso = Self.normalizedISO(device.iso, in: format) else {
-                self.logger.error("Shutter change skipped: active format reports no usable ISO range")
+                self.note("shutter skipped: iso range invalid")
                 return
             }
             self.lastAppliedDuration = duration
             self.lastAppliedISO = iso
-            let applied = performSafely("exposure-custom-shutter") {
+            let applied = self.performSafely("exposure-custom-shutter") {
                 device.setExposureModeCustom(duration: duration, iso: iso) { _ in
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
@@ -456,6 +488,8 @@ final class NativeCameraManager: NSObject, ObservableObject {
                 self.lastAppliedDuration = .invalid
                 self.resetExposureToAutomatic(device)
                 self.publishDeviceState()
+            } else {
+                self.note("shutter applied \(duration.seconds)s iso \(iso)")
             }
         }
     }
@@ -612,8 +646,10 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private func refreshRawAvailability() {
-        let available = !photoOutput.availableRawPhotoPixelFormatTypes.isEmpty
-        rawPixelFormatType = photoOutput.availableRawPhotoPixelFormatTypes.first
+        let rawTypes = photoOutput.availableRawPhotoPixelFormatTypes
+        let available = !rawTypes.isEmpty
+        rawPixelFormatType = rawTypes.first
+        note("raw formats=\(rawTypes.count) preset=\(session.sessionPreset.rawValue) running=\(session.isRunning)")
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.isRawAvailable = available
@@ -808,8 +844,14 @@ final class NativeCameraManager: NSObject, ObservableObject {
         if failure != nil {
             logger.error("Capture request rejected")
         } else {
-            logger.notice("Capture requested raw=\(usesRaw, privacy: .public)")
+            note("capture raw=\(usesRaw) iso=\(iso) shutter=\(shutterLabel)")
         }
+    }
+
+    private var shutterLabel: String {
+        let seconds = exposureDuration.seconds
+        guard seconds.isFinite, seconds > 0 else { return "auto" }
+        return String(format: "1/%.0f", 1 / seconds)
     }
 
     private func toggleVideoRecording() {
@@ -993,6 +1035,7 @@ extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
         }
         let isRaw = photo.isRawPhoto
         let settings = colorSettings
+        note("delivered raw=\(isRaw) bytes=\(data.count) sat=\(settings.resolved().saturation)")
         photoProcessingQueue.async { [weak self] in
             guard let self else { return }
             self.performSafely("photo-processing") {
