@@ -177,6 +177,35 @@ final class NativeCameraManager: NSObject, ObservableObject {
         guard newOutputType != outputType else { return }
         logger.notice("Output mode changed to \(String(describing: newOutputType), privacy: .public)")
         outputType = newOutputType
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.applyOutputMode(wantsVideo: newOutputType == .video)
+        }
+    }
+
+    private func applyOutputMode(wantsVideo: Bool) {
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+        let hasMovieOutput = session.outputs.contains { $0 === movieOutput }
+        if wantsVideo {
+            if !hasMovieOutput, session.canAddOutput(movieOutput) {
+                session.addOutput(movieOutput)
+            }
+            if session.canSetSessionPreset(.high) {
+                session.sessionPreset = .high
+            }
+        } else {
+            if hasMovieOutput {
+                session.removeOutput(movieOutput)
+            }
+            if session.canSetSessionPreset(.photo) {
+                session.sessionPreset = .photo
+            }
+        }
+        configureConnections()
+        if session.isRunning {
+            refreshRawAvailability()
+        }
     }
 
     func setCaptureFormat(_ format: NativeCaptureFormat) {
@@ -620,11 +649,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
             } else {
                 logger.error("Photo output rejected")
             }
-            if session.canAddOutput(movieOutput) {
-                session.addOutput(movieOutput)
-            } else {
-                logger.error("Movie output rejected")
-            }
             configureConnections()
         } catch {
             logger.error("Camera session setup failed: \(error.localizedDescription, privacy: .public)")
@@ -700,7 +724,11 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private func configureConnections() {
-        for output in [photoOutput, movieOutput] {
+        var outputs: [AVCaptureOutput] = [photoOutput]
+        if session.outputs.contains(where: { $0 === movieOutput }) {
+            outputs.append(movieOutput)
+        }
+        for output in outputs {
             guard let connection = output.connection(with: .video) else { continue }
             if connection.isVideoMirroringSupported {
                 connection.isVideoMirrored = mirrorOutput ? currentPosition != .front : currentPosition == .front
