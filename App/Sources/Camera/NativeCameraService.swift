@@ -759,6 +759,16 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private func capturePhoto() {
+        guard session.isRunning else {
+            logger.error("Capture skipped: session not running")
+            return
+        }
+        if photoOutput.connection(with: .video) == nil {
+            logger.notice("Reapplying photo connection before capture")
+            sessionQueue.async { [weak self] in
+                self?.configureConnections()
+            }
+        }
         let wantsRaw = captureFormat == .raw
         let rawTypes = wantsRaw ? photoOutput.availableRawPhotoPixelFormatTypes : []
         var settings = AVCapturePhotoSettings()
@@ -785,7 +795,6 @@ final class NativeCameraManager: NSObject, ObservableObject {
             captureFormat = .processed
             isRawAvailable = false
         }
-        settings.photoQualityPrioritization = usesRaw ? .balanced : .quality
         if hasFlash {
             settings.flashMode = switch flashMode {
             case .off: .off
@@ -860,39 +869,21 @@ final class NativeCameraManager: NSObject, ObservableObject {
     }
 
     private func saveRawPhotoData(_ data: Data) {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("LumaFrame-RAW-\(UUID().uuidString).dng")
-        do {
-            try data.write(to: url, options: .atomic)
-        } catch {
-            logger.error("RAW file creation failed: \(error.localizedDescription, privacy: .public)")
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            logger.error("RAW save failed: no documents directory")
             return
         }
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
-            guard let self else {
-                try? FileManager.default.removeItem(at: url)
-                return
-            }
-            guard status == .authorized || status == .limited else {
-                try? FileManager.default.removeItem(at: url)
-                self.logger.error("RAW save skipped: authorization denied")
-                return
-            }
-            PHPhotoLibrary.shared().performChanges({
-                let request = PHAssetCreationRequest.forAsset()
-                let options = PHAssetResourceCreationOptions()
-                options.originalFilename = url.lastPathComponent
-                options.shouldMoveFile = false
-                request.addResource(with: .photo, fileURL: url, options: options)
-            }, completionHandler: { [weak self] success, error in
-                try? FileManager.default.removeItem(at: url)
-                if success {
-                    self?.logger.notice("RAW saved to library")
-                } else if let error {
-                    self?.logger.error("RAW library save failed: \(error.localizedDescription, privacy: .public)")
-                }
-            })
+        let directory = documents.appendingPathComponent("RAW", isDirectory: true)
+        let url = directory.appendingPathComponent("LumaFrame-\(UUID().uuidString).dng")
+        let failure = performSafely("raw-file-write") {
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
         }
+        if failure != nil {
+            logger.error("RAW file creation failed")
+            return
+        }
+        logger.notice("RAW saved to app documents")
     }
 
     private func savePhotoData(_ data: Data) {
@@ -957,6 +948,18 @@ final class NativeCameraManager: NSObject, ObservableObject {
 }
 
 extension NativeCameraManager: AVCapturePhotoCaptureDelegate {
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+        error: (any Swift.Error)?
+    ) {
+        if let error {
+            logger.error("Capture did not finish: \(error.localizedDescription, privacy: .public)")
+        } else {
+            logger.notice("Capture finished")
+        }
+    }
+
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: (any Swift.Error)?) {
         if let error {
             logger.error("Photo capture failed: \(error.localizedDescription, privacy: .public)")
