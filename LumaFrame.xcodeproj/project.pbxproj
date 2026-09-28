@@ -48,9 +48,11 @@
 				A9D674D8CE54183D05A72EBF,
 				A4B1482221086C475487BED0,
 				A08A456D717FF17BE38E7044,
+				A2BC5DF28691877740BD0EF6,
 				A986C89EE8122E2C72D79F88,
 				ACEC5D6A97BE2B90FE24678A,
 				A6351A4D6FD7C5F3DE6C5653,
+				A61FC88137B228D037C79225,
 				A80F3F8A46E17E78809B0BF1,
 				AA61953EE3D08900327C17AA,
 				A13290FFC0709B92BC31D9A2,
@@ -68,6 +70,7 @@
 				A16A78DC6A49B5E024FCF3C6,
 				ACCAC5BECADD9D6CD6270C61,
 				A2FDDBE28212E07C5BD396D4,
+				AB3E4B3AD752C9EED53B42F7,
 				A835BFBB706BFECF65143581,
 				A50834C49441CBFBC3A616C4,
 				AB4F5DE7F7B2FBF6D015A601,
@@ -277,9 +280,11 @@
 				CC4BE04410BDB19C788C79E7,
 				C14AD38C0F9C5DD49F829C7D,
 				C241B9A9353C2A7EFCAF0D21,
+				CA8AF0FF4544BCF4B82CC2D0,
 				CDE3B1D6B126969DC101E534,
 				C60927296F1CDD49E8A685C9,
 				C261AE566CA25491BA9D300C,
+				CC9C19757787A8B316326462,
 				C57A0DA2E6EC6072B806CCB2,
 				CBBA318E0866F9D238D2FAE1,
 				C6907871D060BA394FCBA123,
@@ -297,6 +302,7 @@
 				C495B0E33B8AAAA32C96D76A,
 				CB021E25F76124D8F5CD5ACD,
 				C8D601BA67B59311E3BA79BB,
+				C11A62BBD24B0AD986FF8EAD,
 				C1D45DCD8B8F1BFC8C869CDE,
 				C7D0780ABD89F9BB7E0CA5E1,
 				CF93BFA51E0FF98C4D788C23,
@@ -417,6 +423,12 @@
 			path = App/Sources/Camera/CaptureSessionController.swift;
 			sourceTree = "<group>";
 		};
+		A2BC5DF28691877740BD0EF6 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Camera/LooksScreen.swift;
+			sourceTree = "<group>";
+		};
 		A986C89EE8122E2C72D79F88 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -433,6 +445,12 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Sources/Camera/PreviewView.swift;
+			sourceTree = "<group>";
+		};
+		A61FC88137B228D037C79225 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Camera/ProCapabilities.swift;
 			sourceTree = "<group>";
 		};
 		A80F3F8A46E17E78809B0BF1 = {
@@ -535,6 +553,12 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Sources/Looks/LookLibrary.swift;
+			sourceTree = "<group>";
+		};
+		AB3E4B3AD752C9EED53B42F7 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/ML/SubjectSegmentation.swift;
 			sourceTree = "<group>";
 		};
 		A835BFBB706BFECF65143581 = {
@@ -707,6 +731,10 @@
 			isa = PBXBuildFile;
 			fileRef = A08A456D717FF17BE38E7044;
 		};
+		CA8AF0FF4544BCF4B82CC2D0 = {
+			isa = PBXBuildFile;
+			fileRef = A2BC5DF28691877740BD0EF6;
+		};
 		CDE3B1D6B126969DC101E534 = {
 			isa = PBXBuildFile;
 			fileRef = A986C89EE8122E2C72D79F88;
@@ -718,6 +746,10 @@
 		C261AE566CA25491BA9D300C = {
 			isa = PBXBuildFile;
 			fileRef = A6351A4D6FD7C5F3DE6C5653;
+		};
+		CC9C19757787A8B316326462 = {
+			isa = PBXBuildFile;
+			fileRef = A61FC88137B228D037C79225;
 		};
 		C57A0DA2E6EC6072B806CCB2 = {
 			isa = PBXBuildFile;
@@ -786,6 +818,10 @@
 		C8D601BA67B59311E3BA79BB = {
 			isa = PBXBuildFile;
 			fileRef = A2FDDBE28212E07C5BD396D4;
+		};
+		C11A62BBD24B0AD986FF8EAD = {
+			isa = PBXBuildFile;
+			fileRef = AB3E4B3AD752C9EED53B42F7;
 		};
 		C1D45DCD8B8F1BFC8C869CDE = {
 			isa = PBXBuildFile;
