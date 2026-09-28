@@ -94,7 +94,7 @@ struct ReportScreen: View {
                 .foregroundStyle(Theme.ColorToken.textSecondary)
             Text("On My iPhone › LumaFrame › " + LumaFrameLogFile.fileName)
                 .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
-                .foregroundStyle(Theme.ColorToken.textTertiary)
+                .foregroundStyle(Theme.ColorToken.textDisabled)
                 .textSelection(.enabled)
         }
     }
