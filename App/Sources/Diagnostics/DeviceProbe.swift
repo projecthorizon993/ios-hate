@@ -11,15 +11,60 @@ import UIKit
 /// capability model and the Step 0 report are for.
 enum DeviceProbe {
 
-    static func sections() -> [ReportSection] {
+    /// Everything this probe needs from UIKit, captured on the main actor.
+    ///
+    /// **This exists because the probe used to read `UIDevice.current`,
+    /// `UIScreen.main` and `UIApplication.shared` from a background queue.** All three
+    /// are main-thread-affine. Touching them off the main thread is not an error the
+    /// compiler reliably catches in Swift 5 mode; it manifests as a main thread that
+    /// stops servicing its runloop until the watchdog kills the app, which is exactly
+    /// what the first on-device attempt did. Nothing in the probe may read UIKit again;
+    /// if a new measurement needs it, it gets added here and sampled on the main actor.
+    struct DisplayFacts: Sendable {
+        var model: String = "unknown"
+        var systemName: String = "unknown"
+        var systemVersion: String = "unknown"
+        var displayGamut: String = "unknown"
+        var maximumFramesPerSecond: Int = 0
+        var appState: String = "unknown"
+        var contentSizeCategory: String = "unknown"
+        var reduceMotionEnabled: Bool = false
+    }
+
+    @MainActor
+    static func displayFacts() -> DisplayFacts {
+        var facts = DisplayFacts()
+        let device = UIDevice.current
+        facts.model = device.model
+        facts.systemName = device.systemName
+        facts.systemVersion = device.systemVersion
+        facts.displayGamut = String(describing: UIScreen.main.traitCollection.displayGamut)
+        facts.maximumFramesPerSecond = UIScreen.main.maximumFramesPerSecond
+        facts.contentSizeCategory = UITraitCollection.current.preferredContentSizeCategory.rawValue
+        facts.reduceMotionEnabled = UIAccessibility.isReduceMotionEnabled
+
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first else { return facts }
+        switch scene.activationState {
+        case .foregroundActive: facts.appState = "active"
+        case .foregroundInactive: facts.appState = "inactive"
+        case .background: facts.appState = "background"
+        case .unattached: facts.appState = "unattached"
+        @unknown default: facts.appState = "unknown"
+        }
+        return facts
+    }
+
+    /// Runs entirely off the main actor. `facts` is the only UIKit input.
+    static func sections(display facts: DisplayFacts) -> [ReportSection] {
         var device = ReportSection("Device")
         let machine = hardwareMachine()
-        device.add(ReportEntry("model (UIDevice.model)", UIDevice.current.model))
+        device.add(ReportEntry("model (UIDevice.model)", facts.model))
         device.add(ReportEntry("hw.machine", machine))
         device.add(ReportEntry("marketing name", marketingName(for: machine), .note))
         device.add(ReportEntry("chip", chip(for: machine), .note))
-        device.add(ReportEntry("system", UIDevice.current.systemName))
-        device.add(ReportEntry("system version", UIDevice.current.systemVersion))
+        device.add(ReportEntry("system", facts.systemName))
+        device.add(ReportEntry("system version", facts.systemVersion))
         // `UIDevice.isSimulator` is a popular category extension that Apple never
         // shipped. This is the supported way to ask, and it is a compile-time constant.
         device.add(ReportEntry("simulator", isSimulator ? "yes" : "no",
@@ -33,21 +78,16 @@ enum DeviceProbe {
                                ReportFormat.number(Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824, decimals: 1) + " GB"))
         system.add(ReportEntry("uptime",
                                ReportFormat.number(ProcessInfo.processInfo.systemUptime / 60, decimals: 1) + " min"))
-        // `ProcessInfo.activationState` does not exist. The app's own lifecycle is the
-        // only source that can answer this, so it is read from the scene phase.
-        system.add(ReportEntry("app state", appState(), .note))
-        system.add(ReportEntry("reduce motion enabled", UIAccessibility.isReduceMotionEnabled))
-        // The preferred content size category is a property of the current trait
-        // collection, not a static on the type.
-        system.add(ReportEntry("content size category",
-                               UITraitCollection.current.preferredContentSizeCategory.rawValue))
+        system.add(ReportEntry("app state", facts.appState, .note))
+        system.add(ReportEntry("reduce motion enabled", facts.reduceMotionEnabled))
+        system.add(ReportEntry("content size category", facts.contentSizeCategory))
 
         var graphics = ReportSection("Color and display")
         // The `UIDisplayGamut` cases are not addressable by name in this SDK, so the
-        // gamut is reported through its description and P3 support is answered by the
-        // color-space check below rather than by comparing against a guessed case.
-        let gamut = UIScreen.main.traitCollection.displayGamut
-        graphics.add(ReportEntry("display gamut", String(describing: gamut), .note))
+        // gamut arrives here already described, and P3 support is answered by the
+        // color-space check below. `CGColorSpace` and `MTLCreateSystemDefaultDevice`
+        // are both safe off the main thread.
+        graphics.add(ReportEntry("display gamut", facts.displayGamut, .note))
         let hasP3 = CGColorSpace(name: CGColorSpace.displayP3) != nil
         graphics.add(ReportEntry("Display P3 color space available", hasP3,
                                  hasP3 ? .good : .warn))
@@ -62,7 +102,7 @@ enum DeviceProbe {
         graphics.add(ReportEntry("Metal family 9 (A14/15 and newer)",
                                  MTLCreateSystemDefaultDevice()?.supportsFamily(.apple9) ?? false, .note))
         graphics.add(ReportEntry("maximum frames per second",
-                                 ReportFormat.number(Double(UIScreen.main.maximumFramesPerSecond), decimals: 0)))
+                                 ReportFormat.number(Double(facts.maximumFramesPerSecond), decimals: 0)))
 
         return [device, system, graphics]
     }
@@ -75,21 +115,6 @@ enum DeviceProbe {
         return false
         #endif
     }()
-
-    /// The app's lifecycle, read from the connected scene rather than from a
-    /// non-existent `ProcessInfo` property.
-    private static func appState() -> String {
-        let scenes = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-        guard let scene = scenes.first else { return "no scene" }
-        switch scene.activationState {
-        case .foregroundActive: return "active"
-        case .foregroundInactive: return "inactive"
-        case .background: return "background"
-        case .unattached: return "unattached"
-        @unknown default: return "unknown"
-        }
-    }
 
     // MARK: - Render benchmark
 

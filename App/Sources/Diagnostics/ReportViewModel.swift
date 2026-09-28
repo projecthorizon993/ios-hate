@@ -51,7 +51,18 @@ final class ReportViewModel: ObservableObject {
         guard canRun else { return }
         state = .running
         savedLocation = nil
-        let outcome = await CapabilityCollector.collect(modelURL: modelURL, logLimit: logLimit)
+        // Sampled here, on the main actor, because the probe body runs detached and
+        // `UIDevice`, `UIScreen` and `UIApplication` are all main-thread-affine.
+        let display = DeviceProbe.displayFacts()
+        // The report opens a second capture session to read output-level capabilities.
+        // The camera screen tells us whether it has already released the device.
+        let ownsCamera = CameraRelease.shared.isCameraReleased
+        AppLog.note(AppLog.diagnostics,
+                    "capability report: running, cameraIsOwned=\(ownsCamera)")
+        let outcome = await CapabilityCollector.collect(modelURL: modelURL,
+                                                        logLimit: logLimit,
+                                                        display: display,
+                                                        cameraIsOwned: ownsCamera)
         report = outcome.report
         logLines = outcome.logLines
         state = .ready

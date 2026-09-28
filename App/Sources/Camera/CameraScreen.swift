@@ -40,9 +40,11 @@ struct CameraScreen: View {
         .onDisappear {
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
             model.stop()
+            // If the screen goes away while the report sheet is still up, the device
+            // must not be marked as released: something else now owns the app.
+            if !isShowingReport { model.resumeAfterDiagnostics() }
         }
-        .sheet(isPresented: $isShowingReport) { ReportScreen() }
-    }
+        .sheet(isPresented: $isShowingReport, onDismiss: presentReport) { ReportScreen() }    }
 
     // MARK: - Viewfinder
 
@@ -73,7 +75,7 @@ struct CameraScreen: View {
             if model.showDebugOverlay {
                 VStack {
                     Spacer()
-                    Button("capability report") { isShowingReport = true }
+                    Button("capability report") { presentReport() }
                         .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
                         .foregroundStyle(Theme.ColorToken.textSecondary)
                         .padding(.horizontal, Theme.Space.s)
@@ -281,6 +283,15 @@ struct CameraScreen: View {
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
         deviceOrientation = UIDevice.current.orientation
         model.start()
+    }
+
+    /// The report opens a capture session of its own, so the camera screen hands the
+    /// device over before the sheet appears and takes it back on dismiss. Doing it in
+    /// the button action rather than here means the handover happens exactly once per
+    /// presentation and cannot be left half-done by a cancellation.
+    private func presentReport() {
+        model.releaseForDiagnostics()
+        isShowingReport = true
     }
 
     /// A banner is a status line, not something the user has to dismiss by hand while

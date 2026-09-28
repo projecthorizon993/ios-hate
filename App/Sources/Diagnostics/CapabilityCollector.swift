@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 
 /// Runs every probe off the main thread and assembles a `CapabilityReport`.
 ///
@@ -13,23 +12,35 @@ enum CapabilityCollector {
         var logLines: [String]
     }
 
-    /// - Parameter modelURL: compiled benchmark model if one has been added to the
-    ///   target. `nil` is a valid, non-error state: the Core ML section then reports
-    ///   the capability surface without inventing a measurement.
-    static func collect(modelURL: URL?, logLimit: Int?) async -> Outcome {
+    /// - Parameters:
+    ///   - modelURL: compiled benchmark model if one has been added to the target.
+    ///     `nil` is a valid, non-error state: the Core ML section then reports the
+    ///     capability surface without inventing a measurement.
+    ///   - display: UIKit-derived facts, sampled on the main actor by the caller. The
+    ///     probe body runs on a detached task and must not touch UIKit.
+    ///   - cameraIsOwned: `true` when this report may start and stop its own
+    ///     `AVCaptureSession`. `AVFoundationProbe` builds a second session to read the
+    ///     output-level RAW and ProRAW capabilities, and two sessions competing for one
+    ///     physical device in one process is exactly the kind of contention that stalls
+    ///     the main runloop. The camera screen releases the device before opening the
+    ///     report and sets this to `true`.
+    static func collect(modelURL: URL?,
+                        logLimit: Int?,
+                        display: DeviceProbe.DisplayFacts,
+                        cameraIsOwned: Bool) async -> Outcome {
         let result = await Task.detached(priority: .userInitiated) { () -> Outcome in
             AppLog.note(AppLog.diagnostics, "capability probe: start")
 
             var sections: [ReportSection] = []
-            sections.append(contentsOf: DeviceProbe.sections())
-            sections.append(contentsOf: AVFoundationProbe.sections())
-            sections.append(CoreMLProbe.coreMLSection(modelURL: modelURL))
-            sections.append(CoreMLProbe.visionSection())
-            sections.append(DeviceProbe.renderBenchmark())
+            sections.append(contentsOf: contained("device") { DeviceProbe.sections(display: display) })
+            sections.append(contentsOf: contained("avfoundation") { AVFoundationProbe.sections(cameraIsOwned: cameraIsOwned) })
+            sections.append(contentsOf: contained("coreml") { [CoreMLProbe.coreMLSection(modelURL: modelURL)] })
+            sections.append(contentsOf: contained("vision") { [CoreMLProbe.visionSection()] })
+            sections.append(contentsOf: contained("render benchmark") { [DeviceProbe.renderBenchmark()] })
 
-            let platform = platformString()
             let report = CapabilityReport(generatedAt: Date(),
-                                          platform: platform,
+                                          platform: display.systemName + " " + display.systemVersion
+                                              + " (" + DeviceProbe.hardwareMachine() + ")",
                                           summary: buildSummary(from: sections),
                                           sections: sections)
 
@@ -40,6 +51,23 @@ enum CapabilityCollector {
         }.value
 
         return result
+    }
+
+    /// Runs one probe inside the exception trap.
+    ///
+    /// A diagnostics screen must never be able to kill the app it is diagnosing, and an
+    /// Objective-C exception from AVFoundation cannot be caught in Swift. So each probe
+    /// is contained, and a failure becomes a visible line in the report naming the probe
+    /// that failed — which is also what tells the next person where to look.
+    private static func contained(_ name: String, _ body: () -> [ReportSection]) -> [ReportSection] {
+        let produced = LumaFrameSafety.perform(body)
+        if let failure = produced {
+            AppLog.fail(AppLog.diagnostics, "probe \(name) raised \(failure)")
+            var section = ReportSection("Probe failed")
+            section.add(ReportEntry(name, failure, .fail))
+            return [section]
+        }
+        return []
     }
 
     // MARK: - Summary
@@ -64,10 +92,5 @@ enum CapabilityCollector {
         guard !values.isEmpty else { return nil }
         let unique = Set(values)
         return unique.count == 1 ? values[0] : "mixed"
-    }
-
-    private static func platformString() -> String {
-        let device = UIDevice.current
-        return "\(device.systemName) \(device.systemVersion) (\(DeviceProbe.hardwareMachine()))"
     }
 }

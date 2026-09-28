@@ -103,7 +103,10 @@ final class CameraViewModel: ObservableObject {
         guard !hasConfigured else { return }
         hasConfigured = true
         AppLog.note(AppLog.camera, "camera screen start, facing=\(facing.rawValue)")
+        configure()
+    }
 
+    private func configure() {
         var capabilities = CameraCapabilities.unknown
         capabilities.attachBackCameras(CaptureSessionController.discoverBackCameras())
         self.capabilities = capabilities
@@ -117,6 +120,24 @@ final class CameraViewModel: ObservableObject {
                 self.present(error.localizedDescription, isError: true)
             }
         }
+    }
+
+    /// Gives the device up entirely, so the capability report can open a session of its
+    /// own. This is a full teardown — inputs and outputs removed — not a `stopRunning`,
+    /// because a stopped-but-configured session still counts as holding the device.
+    func releaseForDiagnostics() {
+        AppLog.note(AppLog.camera, "releasing the camera for diagnostics")
+        readoutTimer?.invalidate()
+        readoutTimer = nil
+        sessionController.tearDown()
+        CameraRelease.shared.markReleased()
+    }
+
+    /// Takes the device back after the report and rebuilds the session.
+    func resumeAfterDiagnostics() {
+        CameraRelease.shared.markRetaken()
+        AppLog.note(AppLog.camera, "resuming the camera after diagnostics")
+        configure()
     }
 
     func stop() {

@@ -24,13 +24,19 @@ enum AVFoundationProbe {
     /// Cap on formats listed per device, so the shareable text stays readable.
     static let formatLimit = 40
 
-    static func sections() -> [ReportSection] {
+    /// - Parameter cameraIsOwned: whether this report may start and stop its own
+    ///   `AVCaptureSession`. Reading RAW and ProRAW requires a session with a video
+    ///   source attached, which means a second session for a device the camera screen may
+    ///   already hold. Two sessions contending for one physical device inside one process
+    ///   is the other thing that stalls the main runloop, so when the caller has not
+    ///   released the camera the live probe is skipped and the reason is reported.
+    static func sections(cameraIsOwned: Bool) -> [ReportSection] {
         var sections: [ReportSection] = []
         let devices = discoverDevices()
 
         sections.append(discoverySection(devices))
         for device in devices {
-            sections.append(deviceSection(device))
+            sections.append(deviceSection(device, cameraIsOwned: cameraIsOwned))
         }
         return sections
     }
@@ -107,7 +113,7 @@ enum AVFoundationProbe {
 
     // MARK: - Per device
 
-    private static func deviceSection(_ device: AVCaptureDevice) -> ReportSection {
+    private static func deviceSection(_ device: AVCaptureDevice, cameraIsOwned: Bool) -> ReportSection {
         let title = "Device " + describeType(device.deviceType) + " [\(device.position)]"
         var section = ReportSection(title)
 
@@ -171,15 +177,28 @@ enum AVFoundationProbe {
         section.add(ReportEntry("automatically adjusts video HDR",
                                device.automaticallyAdjustsVideoHDREnabled, .note))
 
-        section.add(entries: sessionCapabilityEntries(device))
+        section.add(entries: sessionCapabilityEntries(device, cameraIsOwned: cameraIsOwned))
         section.add(entries: formatEntries(device))
 
         return section
     }
 
     /// Everything that requires inputs and outputs to be attached.
-    private static func sessionCapabilityEntries(_ device: AVCaptureDevice) -> [ReportEntry] {
+    private static func sessionCapabilityEntries(_ device: AVCaptureDevice, cameraIsOwned: Bool) -> [ReportEntry] {
         var entries: [ReportEntry] = []
+
+        guard cameraIsOwned else {
+            // RAW and ProRAW are output properties that Apple documents as readable only
+            // from a session with a connected video source, so without owning the camera
+            // there is no honest way to answer them. Saying so is better than opening a
+            // second session and contending for the device.
+            entries.append(ReportEntry("live session probe", "skipped", .warn))
+            entries.append(ReportEntry("live session probe note",
+                                       "the camera was still in use, so RAW, ProRAW and the photo "
+                                       + "output limits were not probed. Close the camera screen "
+                                       + "and run the report again.", .note))
+            return entries
+        }
 
         let session = AVCaptureSession()
         session.beginConfiguration()
