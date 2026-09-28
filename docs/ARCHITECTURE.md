@@ -36,7 +36,7 @@ Stated precisely so Step 2 is not built on a false assumption:
   probe, and a second `AVCaptureSession` contending with the live one — and the report
   then **crashed the app after 6–7 seconds on device**, so neither fix held.
 - That crash has two candidate causes, both found by reading rather than by a log, and
-  both fixed in `6a1c9d3`:
+  both fixed in `b0a2dfa`:
   - `renderBenchmark` rendered a 2560×1440 frame 21 times in a loop with no
     `autoreleasepool` and no suspension point, so ~300 MB of `CGImage`s stayed live.
     `Task.detached` adds no pool of its own. That is a jetsam kill: the process
