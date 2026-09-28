@@ -75,13 +75,33 @@ jobs:
             # The compiler output is behind auth, so it is also published as step-summary
             # text and as check annotations. Both are readable from the API without a
             # token, which is the difference between "CI is red" and knowing why.
+            LOG="$RUNNER_TEMP/xcodebuild-test.log"
             {
               echo "### Swift compiler diagnostics"
-              grep -E "error:|warning:|XCTAssert" "$RUNNER_TEMP/xcodebuild-test.log" | sort -u || true
+              grep -E "error:|warning:|XCTAssert|Testing failed|Testing cancelled" "$LOG" | sort -u || true
+              echo
+              echo "<details><summary>Last 150 lines of xcodebuild output</summary>"
+              echo
+              echo '```'
+              tail -n 150 "$LOG"
+              echo '```'
+              echo "</details>"
             } >> "$GITHUB_STEP_SUMMARY"
-            grep -E "error:" "$RUNNER_TEMP/xcodebuild-test.log" | sort -u | while IFS= read -r diagnostic; do
-              printf '::error title=Swift compiler::%s\n' "$diagnostic"
-            done
+
+            ERRORS="$(grep -E "error:" "$LOG" | sort -u || true)"
+            if [ -n "$ERRORS" ]; then
+              echo "$ERRORS" | while IFS= read -r diagnostic; do
+                printf '::error title=Swift compiler::%s\n' "$diagnostic"
+              done
+            else
+              # A failure with no "error:" line is a test failure, a link failure or a
+              # toolchain problem. The tail is the only way to tell them apart, so it is
+              # published as one annotation rather than leaving the run unexplained.
+              tail -n 60 "$LOG" | tr '\n' '\036' | sed 's/\x1E/\\n/g' | tr '\036' '\n' \
+                | fold -w 900 | while IFS= read -r chunk; do
+                  printf '::error title=xcodebuild output (tail)::%s\n' "$chunk"
+                done
+            fi
             exit "$STATUS"
           fi
 
