@@ -121,19 +121,21 @@ object CameraProbe {
         val capabilities = info.capabilities
         fun supported(key: Int) = capabilities.contains(key)
 
+        // Camera2 has no MANUAL_SENSOR_BLOCKED and no RAW_SENSOR. The real names are
+        // REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING and
+        // REQUEST_AVAILABLE_CAPABILITIES_RAW, so a device that advertises neither
+        // reports the absence rather than failing to compile.
         val manualSensor = supported(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR)
-        val manualBlocked = supported(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR_BLOCKED)
+        val manualPostProcessing =
+            supported(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
 
         return listOf(
             ReportEntry("MANUAL_SENSOR", manualSensor,
                 if (manualSensor) ReportLevel.GOOD else ReportLevel.FAIL),
-            ReportEntry("MANUAL_SENSOR_BLOCKED", manualBlocked,
-                if (manualBlocked) ReportLevel.WARN else ReportLevel.INFO),
+            ReportEntry("MANUAL_POST_PROCESSING", manualPostProcessing,
+                if (manualPostProcessing) ReportLevel.GOOD else ReportLevel.INFO),
             ReportEntry("RAW", supported(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW),
                 if (supported(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW))
-                    ReportLevel.GOOD else ReportLevel.FAIL),
-            ReportEntry("RAW_SENSOR", supported(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW_SENSOR),
-                if (supported(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW_SENSOR))
                     ReportLevel.GOOD else ReportLevel.FAIL),
             ReportEntry("LOGICAL_MULTI_CAMERA",
                 supported(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA), ReportLevel.NOTE),
@@ -189,8 +191,12 @@ object CameraProbe {
         ReportEntry("AF modes", ReportFormat.list(info.afModes.map(::afModeName))),
         ReportEntry("AE modes", ReportFormat.list(info.aeModes.map(::aeModeName))),
         ReportEntry("AWB modes", ReportFormat.list(info.awbModes.map(::awbModeName))),
+        // Camera2 reports AE_TARGET_FPS_RANGE as a Range<Int>, and ReportFormat.number
+        // takes a Double, so both bounds are widened explicitly.
         ReportEntry("AE target fps ranges",
-            ReportFormat.list(info.aeTargetFpsRanges.map { "${ReportFormat.number(it.lower, 0)}-${ReportFormat.number(it.upper, 0)}" })),
+            ReportFormat.list(info.aeTargetFpsRanges.map {
+                "${ReportFormat.number(it.lower.toDouble(), 0)}-${ReportFormat.number(it.upper.toDouble(), 0)}"
+            })),
         ReportEntry("AE available target EV range",
             info.aeCompensationRange?.let { ReportFormat.range(it.lower.toDouble(), it.upper.toDouble()) }
                 ?: "unknown", ReportLevel.NOTE),

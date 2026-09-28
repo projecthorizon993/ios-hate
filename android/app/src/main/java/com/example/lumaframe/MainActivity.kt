@@ -34,7 +34,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -78,12 +77,13 @@ private fun AppRoot() {
 
     if (granted) {
         val viewModel: ReportViewModel = viewModel(
+            // `viewModelFactory { initializer { ... } }` already returns a
+            // ViewModelProvider.Factory, so wrapping it in Factory.from() was both a
+            // type error and a no-op.
             factory = remember {
-                ViewModelProvider.Factory.from(
-                    viewModelFactory {
-                        initializer { ReportViewModel(context.applicationContext) }
-                    }
-                )
+                viewModelFactory {
+                    initializer { ReportViewModel(context.applicationContext) }
+                }
             }
         )
         LaunchedEffect(Unit) { viewModel.run() }

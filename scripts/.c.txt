@@ -1,12 +1,17 @@
-﻿Fix the version catalog comments and stop using a filter name as a type
+﻿Correct the Android diagnostics constants, one numeric type, and the ViewModel factory
 
-android/gradle/libs.versions.toml opened with two // comment lines. TOML
-comments are #, so the whole catalog was rejected as an invalid definition and
-Gradle never reached a single source file. The duplicate-looking litert key was a
-false alarm: it appears in [versions] and [libraries], which are different
-tables and perfectly legal.
+Camera2 has no REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR_BLOCKED and no
+..._RAW_SENSOR. The real names are ..._MANUAL_POST_PROCESSING and ..._RAW, so a
+device advertising neither now reports the absence instead of failing to compile.
 
-LUTProcessorTests used CIFalseColor as if it were a Swift type. Core Image
-generators are filter names, the same mistake as CIColorCube. Replaced with
-CIImage(color:), and the test now says plainly that pixel values are verified on
-device, not here: what it checks is the decisions and the cube byte order.
+AE_TARGET_FPS_RANGE is a Range<Int> and ReportFormat.number takes a Double, so
+both bounds are widened.
+
+viewModelFactory { initializer { ... } } already returns a
+ViewModelProvider.Factory. Wrapping it in Factory.from() was a type error and a
+no-op, and the now-unused import is gone.
+
+Also dropped a test that asserted a P3 lookup table can be applied to a P3
+image. A .cube domain of 0..1 means gamma-encoded sRGB and the format cannot
+say otherwise, so there is no such table; the refusal is asserted instead, and
+the test now records that the explicit logged conversion is not built yet.

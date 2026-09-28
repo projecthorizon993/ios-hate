@@ -187,15 +187,22 @@ final class LUTProcessorTests: XCTestCase {
         XCTAssertEqual(result.extent, makeTestImage().extent)
     }
 
-    func testAppliesAP3TableToAP3Image() throws {
+    /// There is no "P3 lookup table". A `.cube` domain of 0…1 means gamma-encoded sRGB
+    /// by the Adobe convention, and the format has no way to say otherwise — so a P3
+    /// capture has no table that can be applied to it directly. Either the table is
+    /// applied in sRGB after an **explicit, logged** conversion, or it is not applied at
+    /// all. The refusal is asserted above; the conversion path is not built in Step 2,
+    /// and this test records that rather than implying it works.
+    func testAP3ImageWithAnSRGBTableIsRefusedNotGuessedAt() {
         let table = makeTable(size: 2)
 
-        let result = try processor.apply(table,
-                                         to: makeTestImage(),
-                                         intensity: 1,
-                                         imageSpace: .displayP3)
-
-        XCTAssertFalse(result.extent.isEmpty)
+        XCTAssertThrowsError(try processor.apply(table,
+                                                 to: makeTestImage(),
+                                                 intensity: 1,
+                                                 imageSpace: .displayP3)) { error in
+            XCTAssertEqual(error as? LUTApplicationError,
+                           .domainMismatch(lut: "sRGB", image: "Display P3"))
+        }
     }
 
     func testEveryIntensityInRangeIsAccepted() throws {
