@@ -35,7 +35,7 @@ Stated precisely so Step 2 is not built on a false assumption:
   Two causes were found and fixed — main-thread-only UIKit read from the detached
   probe, and a second `AVCaptureSession` contending with the live one — and the report
   then **crashed the app after 6–7 seconds on device**, so neither fix held.
-- The real cause of the crash, found in `e0c1f4a`, was that **the two fixes were never
+-   The real cause of the crash, found in `e0fd012`, was that **the two fixes were never
   synchronised with each other.** `CaptureSessionController.tearDown()` dispatched the
   teardown onto `sessionQueue` and returned, and `releaseForDiagnostics()` then called
   `markReleased()` straight afterwards. So the capability report was told it owned the
