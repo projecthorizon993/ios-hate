@@ -76,6 +76,9 @@ final class CaptureSessionController: NSObject {
     private(set) var configuration: Configuration?
 
     private let sessionQueue = DispatchQueue(label: "com.example.LumaFrame.session", qos: .userInitiated)
+    /// Identity marker for `sessionQueue`, so `onSessionQueue` can run a block inline
+    /// when it is already there instead of deadlocking on `sync`.
+    private let sessionQueueKey = DispatchSpecificKey<UInt8>()
     /// `sessionQueue` only.
     private var videoInput: AVCaptureDeviceInput?
     /// `sessionQueue` only.
@@ -88,7 +91,22 @@ final class CaptureSessionController: NSObject {
 
     override init() {
         super.init()
+        sessionQueue.setSpecific(key: sessionQueueKey, value: 1)
         observeSystemEvents()
+    }
+
+    /// Runs `block` on `sessionQueue` and **waits for it**, or runs it inline if the
+    /// caller is already on that queue.
+    ///
+    /// The inline case is not defensive decoration. A `sync` from `sessionQueue` onto
+    /// itself is an immediate deadlock, and the only way to be sure no future caller
+    /// introduces one is to check.
+    private func onSessionQueue(_ block: () -> Void) {
+        if DispatchQueue.getSpecific(key: sessionQueueKey) != nil {
+            block()
+        } else {
+            sessionQueue.sync(execute: block)
+        }
     }
 
     deinit {
@@ -149,11 +167,31 @@ final class CaptureSessionController: NSObject {
         }
     }
 
-    /// Releases the session's resources. Called when the camera screen goes away.
+    /// Releases the session's resources, and **does not return until it has.**
+    ///
+    /// This used to dispatch onto `sessionQueue` and return immediately, which meant
+    /// `CameraViewModel.releaseForDiagnostics()` could call `markReleased()` — telling
+    /// the capability report it now owned the camera — while this session was still
+    /// running and still had its input attached. The report then opened a second
+    /// `AVCaptureSession` from a detached task with no ordering whatsoever against this
+    /// queue: one physical camera, two sessions in one process, and a race. That is what
+    /// the report kept dying on, and it is why the two earlier attempts to fix it by
+    /// adding a flag did not hold — the flag was never synchronised with anything.
+    ///
+    /// Synchronous means the main thread waits for `stopRunning()`, which is tens to a
+    /// few hundred milliseconds with a single session and nothing else contending. That
+    /// is the correct trade: a short wait is observable, an unsynchronised second session
+    /// is a crash. The state publish is dispatched rather than awaited so the session
+    /// queue is never blocked on the main thread.
     func tearDown() {
-        stop()
-        sessionQueue.async { [weak self] in
+        onSessionQueue { [weak self] in
             guard let self else { return }
+            if self.session.isRunning {
+                let failure = LumaFrameSafety.perform({ self.session.stopRunning() })
+                if let failure {
+                    AppLog.warn(AppLog.camera, "stopRunning raised \(failure)")
+                }
+            }
             self.session.beginConfiguration()
             for output in self.extraOutputs { self.session.removeOutput(output) }
             if let photoOutput = self.photoOutput { self.session.removeOutput(photoOutput) }
@@ -163,6 +201,11 @@ final class CaptureSessionController: NSObject {
             self.photoOutput = nil
             self.videoInput = nil
             AppLog.note(AppLog.camera, "session torn down")
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, case .running = self.state else { return }
+            self.publish(.idle)
         }
     }
 

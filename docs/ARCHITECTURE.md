@@ -35,18 +35,26 @@ Stated precisely so Step 2 is not built on a false assumption:
   Two causes were found and fixed — main-thread-only UIKit read from the detached
   probe, and a second `AVCaptureSession` contending with the live one — and the report
   then **crashed the app after 6–7 seconds on device**, so neither fix held.
-- That crash has two candidate causes, both found by reading rather than by a log, and
-  both fixed in `b0a2dfa`:
+- The real cause of the crash, found in `e0c1f4a`, was that **the two fixes were never
+  synchronised with each other.** `CaptureSessionController.tearDown()` dispatched the
+  teardown onto `sessionQueue` and returned, and `releaseForDiagnostics()` then called
+  `markReleased()` straight afterwards. So the capability report was told it owned the
+  camera while the camera was still running with its input attached, and it opened a
+  second `AVCaptureSession` from a detached task with no ordering at all against that
+  queue. One physical camera, two sessions in one process, and a race — which is why
+  adding a boolean flag twice did not hold, and why the 6–7 s delay lined up with the
+  teardown and the probe both blocking. `tearDown()` is now synchronous, and
+  `markReleased()` is only true once it has returned.
+- Two genuine latent bugs found while looking for that, and fixed in `b0a2dfa`, neither
+  of which is established as the crash:
   - `renderBenchmark` rendered a 2560×1440 frame 21 times in a loop with no
     `autoreleasepool` and no suspension point, so ~300 MB of `CGImage`s stayed live.
-    `Task.detached` adds no pool of its own. That is a jetsam kill: the process
-    disappears with no Swift or Objective-C exception, so **there would be no crash log**,
-    which is what makes it hard to confirm from the outside.
+    `Task.detached` adds no pool of its own. That is a jetsam kill, which presents with
+    no crash log at all, so it cannot be ruled out from the outside either.
   - The live session probe ran once per discovered device, starting and stopping the
-    single physical camera three or four times in a row. That is the contention the
-    previous fix was meant to remove — it was moved, not solved. It now runs once, on
-    the logical wide lens, and `stopRunning()` moved into a `defer` so a raise between
-    start and stop cannot leave the camera held.
+    camera three or four times in a row. It now runs once, on the logical wide lens, and
+    `stopRunning()` moved into a `defer` so a raise between start and stop cannot leave
+    the hardware held.
 - Until the report completes on a device, none of the three-device comparison exists.
 - The reports collected from the three devices before this rewrite came from a
   **pre-rewrite binary that no longer exists**, so none of the values in them describe
