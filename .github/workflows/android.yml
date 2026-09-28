@@ -66,7 +66,30 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-android-
 
       - name: Run unit tests
-        run: gradle --no-daemon --stacktrace testDebugUnitTest
+        run: |
+          set -uo pipefail
+          set +e
+          gradle --no-daemon --stacktrace testDebugUnitTest 2>&1 | tee "$RUNNER_TEMP/gradle-test.log"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            {
+              echo "### Kotlin compiler diagnostics"
+              grep -E "^e: |error:|FAILED|Execution failed" "$RUNNER_TEMP/gradle-test.log" | sort -u || true
+            } >> "$GITHUB_STEP_SUMMARY"
+            grep -E "^e: " "$RUNNER_TEMP/gradle-test.log" | sort -u | while IFS= read -r diagnostic; do
+              printf '::error title=Kotlin compiler::%s\n' "$diagnostic"
+            done
+            exit "$STATUS"
+          fi
+
+      - name: Upload unit test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaFrame-Android-Test-Log
+          path: ${{ runner.temp }}/gradle-test.log
+          if-no-files-found: warn
 
       - name: Upload unit test results
         if: always()

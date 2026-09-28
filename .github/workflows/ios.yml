@@ -72,7 +72,16 @@ jobs:
           STATUS=${PIPESTATUS[0]}
           set -e
           if [ "$STATUS" -ne 0 ]; then
-            grep -E "error:|failed|XCTAssert" "$RUNNER_TEMP/xcodebuild-test.log" || true
+            # The compiler output is behind auth, so it is also published as step-summary
+            # text and as check annotations. Both are readable from the API without a
+            # token, which is the difference between "CI is red" and knowing why.
+            {
+              echo "### Swift compiler diagnostics"
+              grep -E "error:|warning:|XCTAssert" "$RUNNER_TEMP/xcodebuild-test.log" | sort -u || true
+            } >> "$GITHUB_STEP_SUMMARY"
+            grep -E "error:" "$RUNNER_TEMP/xcodebuild-test.log" | sort -u | while IFS= read -r diagnostic; do
+              printf '::error title=Swift compiler::%s\n' "$diagnostic"
+            done
             exit "$STATUS"
           fi
 
