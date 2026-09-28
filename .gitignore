@@ -7,7 +7,8 @@ xcuserdata/
 *.p12
 *.mobileprovision
 
-# Android
+# Android build products. The Android *app* is tracked on the android-step0 branch,
+# not on main — see docs/ARCHITECTURE.md section 9.
 android/.gradle/
 android/build/
 android/app/build/
@@ -17,6 +18,11 @@ android/.idea/
 *.apk
 *.aab
 *.iml
+
+# On main the whole Android tree is untracked, so a stray `git add -A` cannot pull it
+# back in. Files already tracked on android-step0 are unaffected by an ignore rule.
+# Delete this line when the Android app gets its own repository.
+/android/
 
 # OS / editor
 Thumbs.db
