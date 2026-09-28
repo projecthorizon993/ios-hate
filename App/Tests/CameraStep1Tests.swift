@@ -327,9 +327,14 @@ final class CameraStep1Tests: XCTestCase {
         let exif = try XCTUnwrap(dictionary[kCGImagePropertyExifDictionary as String] as? [String: Any])
 
         XCTAssertEqual(exif[kCGImagePropertyExifISOSpeedRatings as String] as? [Int], [800])
-        XCTAssertEqual(exif[kCGImagePropertyExifFocalLengthIn35mmFilm as String] as? Int, 24)
+        XCTAssertEqual(exif[kCGImagePropertyExifISOSpeed as String] as? Int, 800)
         let comment = try XCTUnwrap(exif[kCGImagePropertyExifUserComment as String] as? String)
         XCTAssertEqual(comment, metadata.recipeString())
+        // The focal length lives in the recipe, not in an EXIF key, because this SDK has
+        // no `kCGImagePropertyExifFocalLengthIn35mmFilm`. If it ever comes back, the
+        // recipe is still the source of truth and this assertion keeps the two in step.
+        XCTAssertTrue(comment.contains("f=24.0"))
+        XCTAssertNotNil(dictionary[kCGImagePropertyTIFFDictionary as String])
     }
 
     // MARK: - Meter

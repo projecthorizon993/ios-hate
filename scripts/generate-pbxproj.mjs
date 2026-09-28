@@ -213,14 +213,15 @@ function generate() {
   p("\t\t\tdefaultConfigurationName = Release;");
   p("\t\t};");
 
-  // Main group: every file reference is flat, as in the previous project.
+  // Main group: every source file reference is flat, as in the previous project. The
+  // built products are NOT listed here: they already live in the products group, and a
+  // file reference in two groups makes Xcode warn about a malformed project and silently
+  // keep only one of the memberships.
   p(`\t\t${ID.mainGroup} = {`);
   p("\t\t\tisa = PBXGroup;");
   p("\t\t\tchildren = (");
   for (const ref of fileRefs) p(`\t\t\t\t${ref.id},`);
-  p(`\t\t\t\t${ID.assetCatalogRef},`);
-  p(`\t\t\t\t${ID.appProduct},`);
-  p(`\t\t\t\t${ID.testProduct}`);
+  p(`\t\t\t\t${ID.assetCatalogRef}`);
   p("\t\t\t);");
   p("\t\t\tname = LumaFrame;");
   p('\t\t\tsourceTree = "<group>";');

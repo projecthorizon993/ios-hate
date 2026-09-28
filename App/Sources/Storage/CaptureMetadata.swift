@@ -100,15 +100,17 @@ struct CaptureMetadata: Equatable, Sendable {
             exif[kCGImagePropertyExifExposureTime as String] = shutter
         }
         if let iso, iso > 0 {
+            // Both ISO keys are written. `ISOSpeedRatings` is the array form that every
+            // reader understands; `ISOSpeed` is the newer scalar form. There is no
+            // `kCGImagePropertyExifPhotographicSensitivity` in this SDK, and an invented
+            // constant is worse than one fewer redundant key.
             exif[kCGImagePropertyExifISOSpeedRatings as String] = [Int(iso.rounded())]
             exif[kCGImagePropertyExifISOSpeed as String] = Int(iso.rounded())
-            exif[kCGImagePropertyExifPhotographicSensitivity as String] = Int(iso.rounded())
         }
-        if let focal = lensFocalLength35mm, focal > 0 {
-            // 35 mm equivalent, which is the number a photographer can compare against
-            // another camera's spec sheet.
-            exif[kCGImagePropertyExifFocalLengthIn35mmFilm as String] = Int(focal.rounded())
-        }
+        // The 35 mm equivalent focal length travels in the recipe, not in a TIFF/EXIF
+        // key: this SDK has no `kCGImagePropertyExifFocalLengthIn35mmFilm` constant, and
+        // the recipe is the app's own lossless record anyway. `f=` in the recipe is
+        // written whenever the value was measured.
         exif[kCGImagePropertyExifUserComment as String] = recipeString()
 
         var tiff: [String: Any] = [:]
