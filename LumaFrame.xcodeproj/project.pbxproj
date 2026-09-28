@@ -62,9 +62,11 @@
 				A02A2A153CFFED4CEFEDA4D9,
 				A46FA81BF8D2894BBEE02C5A,
 				A87A7D5BF5DFE40C21C7490A,
+				A835BFBB706BFECF65143581,
 				A50834C49441CBFBC3A616C4,
 				AB4F5DE7F7B2FBF6D015A601,
 				AF7FD765128CFFD4B16917C9,
+				ACBC0CF62F8F814F7FDF6232,
 				A5BC11F303052291E6FB2C1B,
 				AEB620EE64789952E59B006A,
 				AB174A3B018201C704EA6219,
@@ -75,6 +77,7 @@
 				ADA0DEBE0747651E8E6C6109,
 				AC938FD7C68ED288AC7E4FED,
 				AD2B88580548E280FD38F0B1,
+				A2890D903D2D4D036C61B290,
 				A7681A1A19F9BB62FD3BBEEF,
 				A10000000000000000000058
 			);
@@ -276,9 +279,11 @@
 				C9567CE8C0EE524653499FA9,
 				CBC555BBDADBCEB25D89CCED,
 				C1389DB9408908EB53F4801C,
+				C1D45DCD8B8F1BFC8C869CDE,
 				C7D0780ABD89F9BB7E0CA5E1,
 				CF93BFA51E0FF98C4D788C23,
 				C08A489679DF1A5BC07ECEE2,
+				CB7336D15371172CBD060428,
 				CA974A731C2FD5B4E35E7AEB,
 				C8F0875D32195865344EC1F9,
 				C4AA261019E06676EC934AA8,
@@ -294,6 +299,7 @@
 			files = (
 				D7EA069DAB30A429FBAE2818,
 				D8343F3D69C04F13AD71A04B,
+				DF8246E931F2AD3EAA34D9E7,
 				D0D1942134E71C67DBB59C17,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -471,6 +477,12 @@
 			path = App/Sources/Diagnostics/ShareSheet.swift;
 			sourceTree = "<group>";
 		};
+		A835BFBB706BFECF65143581 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Processing/ColorSpace.swift;
+			sourceTree = "<group>";
+		};
 		A50834C49441CBFBC3A616C4 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -487,6 +499,12 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Sources/Processing/CubeLUTParser.swift;
+			sourceTree = "<group>";
+		};
+		ACBC0CF62F8F814F7FDF6232 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Processing/LUTProcessor.swift;
 			sourceTree = "<group>";
 		};
 		A5BC11F303052291E6FB2C1B = {
@@ -547,6 +565,12 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Tests/CubeLUTParserTests.swift;
+			sourceTree = "<group>";
+		};
+		A2890D903D2D4D036C61B290 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Tests/LUTProcessorTests.swift;
 			sourceTree = "<group>";
 		};
 		A7681A1A19F9BB62FD3BBEEF = {
@@ -643,6 +667,10 @@
 			isa = PBXBuildFile;
 			fileRef = A87A7D5BF5DFE40C21C7490A;
 		};
+		C1D45DCD8B8F1BFC8C869CDE = {
+			isa = PBXBuildFile;
+			fileRef = A835BFBB706BFECF65143581;
+		};
 		C7D0780ABD89F9BB7E0CA5E1 = {
 			isa = PBXBuildFile;
 			fileRef = A50834C49441CBFBC3A616C4;
@@ -654,6 +682,10 @@
 		C08A489679DF1A5BC07ECEE2 = {
 			isa = PBXBuildFile;
 			fileRef = AF7FD765128CFFD4B16917C9;
+		};
+		CB7336D15371172CBD060428 = {
+			isa = PBXBuildFile;
+			fileRef = ACBC0CF62F8F814F7FDF6232;
 		};
 		CA974A731C2FD5B4E35E7AEB = {
 			isa = PBXBuildFile;
@@ -686,6 +718,10 @@
 		D8343F3D69C04F13AD71A04B = {
 			isa = PBXBuildFile;
 			fileRef = AD2B88580548E280FD38F0B1;
+		};
+		DF8246E931F2AD3EAA34D9E7 = {
+			isa = PBXBuildFile;
+			fileRef = A2890D903D2D4D036C61B290;
 		};
 		D0D1942134E71C67DBB59C17 = {
 			isa = PBXBuildFile;

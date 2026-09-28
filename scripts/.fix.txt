@@ -1,4 +1,0 @@
-﻿Correct a miscounted line number in the parser test
-
-The sample outside the declared domain is on the eighth line, not the seventh:
-four directive lines precede it. The parser was right.

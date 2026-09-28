@@ -38,11 +38,31 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # `ubuntu-latest` ships an Android SDK but not `sdkmanager` on PATH, so the license
-      # step below died with exit code 127 before Gradle ever ran. This action installs
-      # the command-line tools and puts them on PATH.
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # `ubuntu-latest` ships an Android SDK and sets ANDROID_HOME, but the command-line
+      # tools are not on PATH, so `sdkmanager` exits 127 and the build never reaches
+      # Gradle. `android-actions/setup-android` was doing that job and started failing in
+      # its own right, so the PATH is set directly here instead: no third-party action,
+      # and the locations are probed so a runner image change fails with a readable
+      # message rather than a mystery.
+      - name: Put the Android command-line tools on PATH
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          for candidate in \
+            "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin" \
+            "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/bin" \
+            "/usr/local/lib/android/sdk/cmdline-tools/latest/bin" \
+            "/opt/android-sdk/cmdline-tools/latest/bin"
+          do
+            if [ -x "$candidate/sdkmanager" ]; then
+              echo "using $candidate"
+              echo "$candidate" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "sdkmanager not found in any known location" >&2
+          find / -name sdkmanager -type f 2>/dev/null | head -5 >&2 || true
+          exit 1
 
       # The Gradle wrapper JAR is a binary and is not committed. Installing the exact
       # pinned distribution keeps the build reproducible. Run `gradle wrapper` locally
@@ -59,7 +79,7 @@ jobs:
       - name: Accept Android SDK licenses
         run: |
           set -euo pipefail
-          command -v sdkmanager
+          command -v sdkmanager > /dev/null
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
