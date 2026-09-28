@@ -1,6 +1,5 @@
 import CoreImage
 import Foundation
-import ImageIO
 
 /// Why a frame could not be processed.
 ///
@@ -175,9 +174,12 @@ struct ProcessingPipeline {
     /// There is no `jpegData` on `CIImage`; encoding goes through a `CIContext`.
     static func encodeJPEG(_ image: CIImage, space: ColorSpace, quality: Float) -> Data? {
         let context = CIContext(options: [.cacheIntermediates: false])
+        // The options dictionary is keyed by `CIImageRepresentationOption`, not `String`.
+        // `kCGImageDestinationLossyCompressionQuality` is the ImageIO spelling of the same
+        // idea and does not belong here.
         return context.jpegRepresentation(of: image,
                                           colorSpace: space.cgColorSpace,
-                                          options: [kCGImageDestinationLossyCompressionQuality as String: quality])
+                                          options: [.lossyCompressionQuality: Double(quality)])
     }
 
     // MARK: - Stages
