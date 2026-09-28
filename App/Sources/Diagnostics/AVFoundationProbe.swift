@@ -35,10 +35,44 @@ enum AVFoundationProbe {
         let devices = discoverDevices()
 
         sections.append(discoverySection(devices))
+
+        // The live session probe opens a real `AVCaptureSession`, starts it and stops it,
+        // which is roughly a second of blocking work each time. It used to run once per
+        // discovered device, so on an iPhone 11 Pro Max the report started and stopped
+        // the single physical camera three or four times in a row, and the run took the
+        // better part of ten seconds to die. Doing it once is both faster and more
+        // honest: there is one camera, and the back wide lens is the one whose output
+        // capabilities describe the pipeline.
+        //
+        // `prefersWideAngle` is true for the dual/triple wide containers as well as the
+        // plain wide one, which is what we want — the logical wide lens, not the physical
+        // module list.
+        let primary = devices.first { $0.position == .back && $0.deviceType.prefersWideAngle }
+            ?? devices.first { $0.position == .back }
+            ?? devices.first
+
         for device in devices {
-            sections.append(deviceSection(device, cameraIsOwned: cameraIsOwned))
+            let isPrimary = device.uniqueID == primary?.uniqueID
+            sections.append(deviceSection(device,
+                                          cameraIsOwned: cameraIsOwned,
+                                          runLiveSession: isPrimary,
+                                          probedDeviceName: primary.flatMap { describeName($0) }))
         }
         return sections
+    }
+
+    private static func describeName(_ device: AVCaptureDevice) -> String {
+        describeType(device.deviceType) + " [" + "\(device.position)" + "]"
+    }
+
+    /// True for the logical wide lens. `builtInDualWideCamera` and
+    /// `builtInTripleCamera` are containers that *include* the wide lens, so they count.
+    private static var wideTypes: Set<AVCaptureDevice.DeviceType> {
+        [.builtInWideAngleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInTripleCamera]
+    }
+
+    private extension AVCaptureDevice.DeviceType {
+        var prefersWideAngle: Bool { AVFoundationProbe.wideTypes.contains(self) }
     }
 
     // MARK: - Discovery
@@ -113,7 +147,10 @@ enum AVFoundationProbe {
 
     // MARK: - Per device
 
-    private static func deviceSection(_ device: AVCaptureDevice, cameraIsOwned: Bool) -> ReportSection {
+    private static func deviceSection(_ device: AVCaptureDevice,
+                                      cameraIsOwned: Bool,
+                                      runLiveSession: Bool,
+                                      probedDeviceName: String?) -> ReportSection {
         let title = "Device " + describeType(device.deviceType) + " [\(device.position)]"
         var section = ReportSection(title)
 
@@ -177,15 +214,36 @@ enum AVFoundationProbe {
         section.add(ReportEntry("automatically adjusts video HDR",
                                device.automaticallyAdjustsVideoHDREnabled, .note))
 
-        section.add(entries: sessionCapabilityEntries(device, cameraIsOwned: cameraIsOwned))
+        section.add(entries: sessionCapabilityEntries(device,
+                                                      cameraIsOwned: cameraIsOwned,
+                                                      runLiveSession: runLiveSession,
+                                                      probedDeviceName: probedDeviceName))
         section.add(entries: formatEntries(device))
 
         return section
     }
 
     /// Everything that requires inputs and outputs to be attached.
-    private static func sessionCapabilityEntries(_ device: AVCaptureDevice, cameraIsOwned: Bool) -> [ReportEntry] {
+    private static func sessionCapabilityEntries(_ device: AVCaptureDevice,
+                                                 cameraIsOwned: Bool,
+                                                 runLiveSession: Bool,
+                                                 probedDeviceName: String?) -> [ReportEntry] {
         var entries: [ReportEntry] = []
+
+        guard runLiveSession else {
+            // Not a limitation of this lens, just the fact that only one device is probed
+            // live. It says so rather than leaving a gap that looks like an omission.
+            entries.append(ReportEntry("live session probe", "skipped", .note))
+            if let probedDeviceName {
+                entries.append(ReportEntry("live session probe note",
+                                           "probed on " + probedDeviceName
+                                           + ". The output-level capabilities are properties of the "
+                                           + "camera system rather than of each lens, and starting a "
+                                           + "session per device took seconds and held the hardware "
+                                           + "the whole time.", .note))
+            }
+            return entries
+        }
 
         guard cameraIsOwned else {
             // RAW and ProRAW are output properties that Apple documents as readable only
@@ -231,6 +289,18 @@ enum AVFoundationProbe {
             entries.append(ReportEntry("session started", isRunning, isRunning ? .good : .warn))
             if let startFailure {
                 entries.append(ReportEntry("session start", startFailure, .fail))
+            }
+
+            // `defer`, not a call at the bottom of the block. Every read between the start
+            // and the stop below is an AVFoundation property that can raise, and this is
+            // the only handle on the camera. If any of them threw, the old code skipped
+            // `stopRunning()` and left the hardware held by a session nothing would ever
+            // close — which shows up much later as the camera screen failing to start,
+            // with nothing pointing back here.
+            defer {
+                if isRunning {
+                    _ = LumaFrameSafety.perform { session.stopRunning() }
+                }
             }
 
             entries.append(ReportEntry("session preset .photo accepted", presetAccepted,
@@ -289,9 +359,6 @@ enum AVFoundationProbe {
                                            active.isHighestPhotoQualitySupported ? .good : .warn))
             }
 
-            if isRunning {
-                _ = LumaFrameSafety.perform { session.stopRunning() }
-            }
         } catch {
             entries.append(ReportEntry("session", "input creation failed: \(error.localizedDescription)", .fail))
         }

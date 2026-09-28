@@ -124,6 +124,15 @@ enum DeviceProbe {
     /// a real ms number on a device with no model assets, which is enough to separate
     /// the SE 2022 from the 11 Pro Max for tiering. 2560x1440 is roughly the largest
     /// still-preview size the pipeline will touch.
+    ///
+    /// **Every render is wrapped in an `autoreleasepool`.** Each `createCGImage` at this
+    /// size allocates about 14 MB, and the loop below has no suspension point, so without
+    /// an explicit pool nothing is drained until the whole loop finishes: 21 renders is
+    /// roughly 300 MB of live CGImages. `Task.detached` does not add a pool of its own.
+    /// That is a jetsam kill — the process disappears with no Swift or Objective-C
+    /// exception and therefore no crash log, which is exactly the symptom this section
+    /// was rewritten for. The pool is not an optimisation here, it is the difference
+    /// between a report and a dead app.
     static func renderBenchmark(iterations: Int = 20) -> ReportSection {
         var section = ReportSection("Render benchmark (Core Image / Metal)")
 
@@ -136,15 +145,17 @@ enum DeviceProbe {
         let height = 1440
         let context = CIContext(mtlDevice: device)
         let source = makeTestImage(width: width, height: height)
+        let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+
+        var samples: [Double] = []
 
         // One untimed warm-up so shader compilation and the first texture allocation
         // do not land in the measurement.
-        _ = context.createCGImage(source, from: CGRect(x: 0, y: 0, width: width, height: height))
+        autoreleasepool { _ = context.createCGImage(source, from: bounds) }
 
-        var samples: [Double] = []
         for _ in 0..<max(1, iterations) {
             let start = DispatchTime.now().uptimeNanoseconds
-            _ = context.createCGImage(source, from: CGRect(x: 0, y: 0, width: width, height: height))
+            autoreleasepool { _ = context.createCGImage(source, from: bounds) }
             let end = DispatchTime.now().uptimeNanoseconds
             samples.append(Double(end - start) / 1_000_000.0)
         }
@@ -175,21 +186,28 @@ enum DeviceProbe {
     // MARK: - Private
 
     private static func makeTestImage(width: Int, height: Int) -> CIImage {
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        for y in 0..<height {
-            for x in 0..<width {
-                let offset = (y * width + x) * 4
-                // A smooth gradient plus high-frequency detail, so the GPU is doing
-                // real work and not just blitting a uniform buffer.
-                pixels[offset] = UInt8(x & 0xFF)
-                pixels[offset + 1] = UInt8(y & 0xFF)
-                pixels[offset + 2] = UInt8((x & 0xFF) &+ (y & 0xFF))
-                pixels[offset + 3] = 0xFF
+        // Filled as `Data` directly rather than as a Swift `[UInt8]` that is then
+        // converted. The array form holds 14 MB and `Data(_:)` copies it, so the peak is
+        // twice the image for no reason.
+        var pixels = Data(count: width * height * 4)
+        pixels.withUnsafeMutableBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            let buffer = base.assumingMemoryBound(to: UInt8.self)
+            for y in 0..<height {
+                for x in 0..<width {
+                    let offset = (y * width + x) * 4
+                    // A smooth gradient plus high-frequency detail, so the GPU is doing
+                    // real work and not just blitting a uniform buffer.
+                    buffer[offset] = UInt8(x & 0xFF)
+                    buffer[offset + 1] = UInt8(y & 0xFF)
+                    buffer[offset + 2] = UInt8((x & 0xFF) &+ (y & 0xFF))
+                    buffer[offset + 3] = 0xFF
+                }
             }
         }
         // `CGBitmapInfo` is a struct, not the raw UInt32, so it has to be constructed.
         let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-        guard let provider = CGDataProvider(data: Data(pixels) as CFData),
+        guard let provider = CGDataProvider(data: pixels as CFData),
               let cgImage = CGImage(width: width,
                                     height: height,
                                     bitsPerComponent: 8,

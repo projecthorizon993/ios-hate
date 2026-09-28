@@ -33,8 +33,21 @@ Stated precisely so Step 2 is not built on a false assumption:
 - The app has **never run to completion on a device.** The first attempt to open the
   capability report hung the main thread for ~600 ms and was killed by the watchdog.
   Two causes were found and fixed — main-thread-only UIKit read from the detached
-  probe, and a second `AVCaptureSession` contending with the live one — but **that fix
-  has itself never been run on a device.**
+  probe, and a second `AVCaptureSession` contending with the live one — and the report
+  then **crashed the app after 6–7 seconds on device**, so neither fix held.
+- That crash has two candidate causes, both found by reading rather than by a log, and
+  both fixed in `6a1c9d3`:
+  - `renderBenchmark` rendered a 2560×1440 frame 21 times in a loop with no
+    `autoreleasepool` and no suspension point, so ~300 MB of `CGImage`s stayed live.
+    `Task.detached` adds no pool of its own. That is a jetsam kill: the process
+    disappears with no Swift or Objective-C exception, so **there would be no crash log**,
+    which is what makes it hard to confirm from the outside.
+  - The live session probe ran once per discovered device, starting and stopping the
+    single physical camera three or four times in a row. That is the contention the
+    previous fix was meant to remove — it was moved, not solved. It now runs once, on
+    the logical wide lens, and `stopRunning()` moved into a `defer` so a raise between
+    start and stop cannot leave the camera held.
+- Until the report completes on a device, none of the three-device comparison exists.
 - The reports collected from the three devices before this rewrite came from a
   **pre-rewrite binary that no longer exists**, so none of the values in them describe
   the current code.
