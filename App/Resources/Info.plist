@@ -20,6 +20,14 @@
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Without these two, Documents is invisible in the Files app: the app does not
+	     appear under "On My iPhone" and its folder cannot be opened in place. The
+	     capability report and the log file are only useful if the user can actually get
+	     them off the device, so both are required rather than optional. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>LumaFrame uses the camera to capture photos.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

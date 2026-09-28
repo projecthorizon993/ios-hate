@@ -27,16 +27,19 @@ enum AppLog {
     static func note(_ logger: Logger, _ message: String) {
         logger.info("\(message, privacy: .public)")
         buffer.append(message)
+        LumaFrameLogFile.append(message)
     }
 
     static func warn(_ logger: Logger, _ message: String) {
         logger.warning("\(message, privacy: .public)")
         buffer.append("! " + message)
+        LumaFrameLogFile.append("! " + message)
     }
 
     static func fail(_ logger: Logger, _ message: String) {
         logger.error("\(message, privacy: .public)")
         buffer.append("x " + message)
+        LumaFrameLogFile.append("x " + message)
     }
 
     /// ML lines are the most useful to grep for, and the brief requires a log line on
@@ -46,6 +49,7 @@ enum AppLog {
             + String(format: "%.2f", milliseconds) + "ms"
         if index % 30 == 0 || index == 1 {
             buffer.append(line)
+            LumaFrameLogFile.append(line)
         }
         logger.debug("\(line, privacy: .public)")
     }

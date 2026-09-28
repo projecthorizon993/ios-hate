@@ -20,6 +20,7 @@ struct ReportScreen: View {
                     }
                     logToggle
                     savedNote
+                    logFileNote
                 }
                 .padding(Theme.Space.l)
             }
@@ -77,6 +78,24 @@ struct ReportScreen: View {
             Text("Saved to Documents/Reports/\(location)")
                 .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
                 .foregroundStyle(Theme.ColorToken.accentActive)
+        }
+    }
+
+    /// Where the on-disk log lives, always shown rather than only after a save.
+    ///
+    /// The log is written continuously and survives a crash, which is the only record of
+    /// how far a report run got when the run dies. But it is only useful if the user can
+    /// find it, and it is reachable through Files.app only because `UIFileSharingEnabled`
+    /// and `LSSupportsOpeningDocumentsInPlace` are set in Info.plist.
+    private var logFileNote: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            Text("Live log file (survives a crash)")
+                .font(.system(size: Theme.TypeSize.label))
+                .foregroundStyle(Theme.ColorToken.textSecondary)
+            Text("On My iPhone › LumaFrame › " + LumaFrameLogFile.fileName)
+                .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                .foregroundStyle(Theme.ColorToken.textTertiary)
+                .textSelection(.enabled)
         }
     }
 

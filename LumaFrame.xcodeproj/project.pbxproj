@@ -72,6 +72,7 @@
 				AEB620EE64789952E59B006A,
 				AB174A3B018201C704EA6219,
 				AF5DA351FBF73C7FBFF2B805,
+				A4BA07DD1E0851A352093BC1,
 				AFA822C55F0EB6711410EAA3,
 				A5E20936E5F8525DAA7DFD3A,
 				A549153AEC2703901FADC6CE,
@@ -290,6 +291,7 @@
 				C8F0875D32195865344EC1F9,
 				C4AA261019E06676EC934AA8,
 				C1F850435B6C78A454F5B4BC,
+				C4DA73A05B3B8030C75BC53C,
 				C6FEE4DA81F4AE9A32EEE859,
 				CE7682ADF4BECB5A828EAE47,
 			);
@@ -539,6 +541,12 @@
 			path = App/Sources/Support/Haptics.swift;
 			sourceTree = "<group>";
 		};
+		A4BA07DD1E0851A352093BC1 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Support/LumaFrameLogFile.swift;
+			sourceTree = "<group>";
+		};
 		AFA822C55F0EB6711410EAA3 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.c.objc;
@@ -714,6 +722,10 @@
 		C1F850435B6C78A454F5B4BC = {
 			isa = PBXBuildFile;
 			fileRef = AF5DA351FBF73C7FBFF2B805;
+		};
+		C4DA73A05B3B8030C75BC53C = {
+			isa = PBXBuildFile;
+			fileRef = A4BA07DD1E0851A352093BC1;
 		};
 		C6FEE4DA81F4AE9A32EEE859 = {
 			isa = PBXBuildFile;
