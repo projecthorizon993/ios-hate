@@ -137,15 +137,42 @@ final class ProcessingPipelineTests: XCTestCase {
     /// Red has to vary fastest, or the channels come out transposed — a plausible-looking
     /// image with the colours swapped, which is exactly the kind of bug that survives a
     /// visual check.
-    func testGeneratedTablesHaveRedVaryingFastest() {
-        guard let table = GeneratedLooks.table(for: .noColour) else {
-            return XCTFail("no table")
+    ///
+    /// `.noColour` is the right look to check: it maps every channel to the same luma, so
+    /// the *only* thing that can make the first two samples differ is red moving first.
+    /// If green moved first the two samples would be identical in red and differ in green.
+    func testGeneratedTablesHaveRedVaryingFastest() throws {
+        let table = try XCTUnwrap(GeneratedLooks.table(for: .noColour))
+        let s = Array(table.samples.prefix(6))
+
+        // Sample 0 is the cube origin and sample 1 is one step along the first-varying
+        // axis. Identical in green and blue, different in red.
+        XCTAssertNotEqual(s[0], s[3], "the first axis should be red")
+        XCTAssertEqual(s[1], s[4], "green must not move first")
+        XCTAssertEqual(s[2], s[5], "blue must not move first")
+
+        // And the direction: the first axis runs from black to white, not the reverse.
+        XCTAssertGreaterThan(s[3], s[0])
+    }
+
+    /// `.noColour` deliberately lifts blacks rather than crushing them, so a pure luma copy
+    /// is not what it does. Asserted because "No Colour" promising a pure conversion and
+    /// shipping a lifted one is the kind of mismatch the name hides.
+    func testNoColourLiftsBlacksRatherThanCrushingThem() throws {
+        let table = try XCTUnwrap(GeneratedLooks.table(for: .noColour))
+        let origin = Array(table.samples.prefix(3))
+        for value in origin {
+            XCTAssertGreaterThan(value, 0, "the cube origin should be lifted off zero")
+            XCTAssertLessThan(value, 0.1, "and only slightly")
         }
-        let first = Array(table.samples.prefix(3))
-        // The first sample of a grey ramp is black and the second is white, so with red
-        // varying fastest the very first entry has a non-zero red component.
-        XCTAssertEqual(first[0], 0, "the first sample should be the cube origin")
-        XCTAssertNotEqual(first[3], 0, "the second sample should differ in red first")
+        // Still a grey ramp: all three channels equal at every point.
+        for index in stride(from: 0, to: table.samples.count, by: 3) {
+            let r = table.samples[index]
+            let g = table.samples[index + 1]
+            let b = table.samples[index + 2]
+            XCTAssertEqual(r, g, "no colour must have equal channels")
+            XCTAssertEqual(g, b, "no colour must have equal channels")
+        }
     }
 
     /// Out-of-range samples are not clamped by Core Image, so a generator that overshoots
