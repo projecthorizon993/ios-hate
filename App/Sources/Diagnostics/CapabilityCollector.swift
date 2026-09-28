@@ -59,7 +59,11 @@ enum CapabilityCollector {
     /// Objective-C exception from AVFoundation cannot be caught in Swift. So each probe
     /// is contained, and a failure becomes a visible line in the report naming the probe
     /// that failed — which is also what tells the next person where to look.
-    private static func contained(_ name: String, _ body: () -> [ReportSection]) -> [ReportSection] {
+    /// The probe closure is `@escaping` because the Objective-C block parameter of
+    /// `LumaFrameSafety.perform` is itself escaping. Every call site captures only plain
+    /// values — the display snapshot, the model URL, a `Bool` — so nothing needs to
+    /// outlive the call.
+    private static func contained(_ name: String, body: @escaping () -> [ReportSection]) -> [ReportSection] {
         // `LumaFrameSafety.perform` takes a void block, so the sections are collected
         // into a local rather than returned from the closure.
         var produced: [ReportSection] = []
