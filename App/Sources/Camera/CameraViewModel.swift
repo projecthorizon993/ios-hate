@@ -190,7 +190,7 @@ final class CameraViewModel: ObservableObject {
                      maxDimensions: "\(photo.output.maxPhotoDimensions.width)"
                                     + "x\(photo.output.maxPhotoDimensions.height)")
         AppLog.note(AppLog.camera,
-                    "pro panel: \(proCapabilities.availabilitySummary(against: proCapabilities))")
+                    "pro panel: \(proCapabilities.availabilitySummary)")
         looks = lookLibrary.all
         pushSettingsToPreview()
         startReadout()

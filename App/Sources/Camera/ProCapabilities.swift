@@ -81,6 +81,25 @@ struct ProCapabilities: Equatable {
             && !canLockExposure && !canLockFocus && !canLockWhiteBalance
             && !rawSupported && !proRawSupported
     }
+
+    /// A short description of what this device and format can do, for the mode switcher and
+    /// the Pro panel to show rather than an empty panel of disabled switches.
+    ///
+    /// A property of the capabilities and not of the manual settings, because it describes
+    /// the hardware, not what the user asked for.
+    var availabilitySummary: String {
+        var available: [String] = []
+        if isoRange != nil { available.append("ISO") }
+        if shutterRange != nil { available.append("shutter") }
+        if canLockExposure { available.append("exposure lock") }
+        if canLockFocus { available.append("focus lock") }
+        if canLockWhiteBalance { available.append("white balance lock") }
+        if rawSupported { available.append("RAW") }
+        if proRawSupported { available.append("ProRAW") }
+        return available.isEmpty
+            ? "no manual controls on this device and format"
+            : available.joined(separator: ", ")
+    }
 }
 
 /// What the user dialled in on the Pro panel.
@@ -154,21 +173,5 @@ struct ManualSettings: Equatable, Codable, Sendable {
         // be honoured and is reduced rather than passed on to fail.
         if copy.proRaw && !copy.raw { copy.raw = true }
         return copy
-    }
-
-    /// A short description of what this panel can do here, for the mode switcher to show
-    /// when it would otherwise offer a mode with nothing in it.
-    func availabilitySummary(against capabilities: ProCapabilities) -> String {
-        var available: [String] = []
-        if capabilities.isoRange != nil { available.append("ISO") }
-        if capabilities.shutterRange != nil { available.append("shutter") }
-        if capabilities.canLockExposure { available.append("exposure lock") }
-        if capabilities.canLockFocus { available.append("focus lock") }
-        if capabilities.canLockWhiteBalance { available.append("white balance lock") }
-        if capabilities.rawSupported { available.append("RAW") }
-        if capabilities.proRawSupported { available.append("ProRAW") }
-        return available.isEmpty
-            ? "no manual controls on this device and format"
-            : available.joined(separator: ", ")
     }
 }

@@ -34,7 +34,7 @@ struct ProScreen: View {
             Text("No manual controls here")
                 .font(.system(size: Theme.TypeSize.value))
                 .foregroundStyle(Theme.ColorToken.textPrimary)
-            Text(model.proCapabilities.availabilitySummary(against: model.proCapabilities))
+            Text(model.proCapabilities.availabilitySummary)
                 .font(.system(size: Theme.TypeSize.caption))
                 .foregroundStyle(Theme.ColorToken.textDisabled)
             Text("Switching to Pro changes nothing on this device and format, so the mode is here for the chrome and not for the controls.")
