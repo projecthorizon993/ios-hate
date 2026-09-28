@@ -69,14 +69,17 @@ enum CoreMLProbe {
                 configuration.computeUnits = units
                 let model = try MLModel(contentsOf: url, configuration: configuration)
                 let loadMs = elapsedMs(since: loadStart)
-                try describeInputs(of: model, into: &section)
+                describeInputs(of: model, into: &section)
 
                 var samples: [Double] = []
                 var failure: Error?
                 do {
                     for _ in 0..<benchmarkIterations {
                         let start = DispatchTime.now().uptimeNanoseconds
-                        _ = try model.prediction(from: makeZeroInput(for: model))
+                        // `prediction(from:)` is not a throwing call; `makeZeroInput` is,
+                        // and that is what this `do` block is catching.
+                        let input = try makeZeroInput(for: model)
+                        _ = model.prediction(from: input)
                         samples.append(elapsedMs(since: start))
                     }
                 } catch {
@@ -128,13 +131,14 @@ enum CoreMLProbe {
         // `MLModelDescription` in the iOS SDK, so they are not reported. What is
         // available is the free-form metadata dictionary, which is printed verbatim.
         section.add(ReportEntry("model metadata keys",
-                               ReportFormat.list(description.metadata.keys.sorted(), empty: "none"), .note))
+                               ReportFormat.list(description.metadata.keys.map { String(describing: $0) },
+                                                empty: "none"), .note))
         section.add(ReportEntry("model metadata",
                                description.metadata.isEmpty
                                    ? "empty; no license or author recorded in the model"
                                    : description.metadata
-                                       .sorted { $0.key < $1.key }
-                                       .map { "\($0.key)=\($0.value)" }
+                                       .map { "\(String(describing: $0.key))=\(String(describing: $0.value))" }
+                                       .sorted()
                                        .joined(separator: ", "),
                                description.metadata.isEmpty ? .warn : .note))
         section.add(ReportEntry("model inputs", describeShapes(description.inputDescriptionsByName), .note))
@@ -187,10 +191,10 @@ enum CoreMLProbe {
         section.add(ReportEntry("default quality level accepted",
                                "\(request.qualityLevel.rawValue)"))
         section.add(ReportEntry("output pixel format count",
-                               request.supportedOutputPixelFormats.count))
+                               request.supportedOutputPixelFormats().count))
         section.add(ReportEntry("output pixel formats",
                                ReportFormat.list(
-                                request.supportedOutputPixelFormats.map { fourCCHex($0.ostValue) },
+                                request.supportedOutputPixelFormats().map { fourCCHex($0) },
                                 empty: "none"),
                                .note))
         section.add(ReportEntry("attention saliency request", "available", .good))

@@ -80,13 +80,28 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
         return BackCameraCapabilities(
             uniqueID: device.uniqueID,
             kind: kind(of: device.deviceType),
-            // A property of the format, not of the device. The active format is the
-            // honest answer for "what focal length is this lens running at".
-            focalLength35mm: Double(device.activeFormat.nominalFocalLengthIn35mmFilm),
+            // There is no 35 mm equivalent focal length in the iOS SDK on either the
+            // device or its format, so the video field of view of the active format is
+            // used instead. It is a measured value, it is on the format, and the zoom
+            // labels below are ratios of these so they stay internally consistent.
+            focalLength35mm: Self.relativeFocalLength(of: device.activeFormat),
             virtualZoomFactors: virtual.isEmpty ? [] : [1.0] + virtual,
             minimumFocusDistance: Double(device.minimumFocusDistance),
             flashAvailable: device.isFlashAvailable
         )
+    }
+
+    /// The format's diagonal field of view in millimetres of 35 mm film, which is a
+    /// stand-in for focal length: a wider field of view means a shorter equivalent
+    /// length, so lens ordering and zoom ratios both come out right.
+    ///
+    /// The diagonal, not the horizontal field of view: portrait and landscape capture
+    /// would otherwise swap the ordering of the lenses depending on how the phone is
+    /// held.
+    private static func relativeFocalLength(of format: AVCaptureDevice.Format) -> Double {
+        let fov = CMVideoFieldOfView(diagonal: format.formatDescription)
+        guard fov.degrees > 0 else { return 0 }
+        return 43.2666 / tan(fov.degrees * .pi / 360)
     }
 
     static func kind(of type: AVCaptureDevice.DeviceType) -> Kind {
@@ -211,7 +226,7 @@ struct CameraCapabilities: Equatable, Sendable {
                       photoOutput: AVCapturePhotoOutput) -> CameraCapabilities {
         var capabilities = CameraCapabilities()
         capabilities.facing = device.position == .front ? .front : .back
-        capabilities.rawPixelTypes = photoOutput.availableRawPhotoPixelFormatTypes.map(\.ostValue)
+        capabilities.rawPixelTypes = photoOutput.availableRawPhotoPixelFormatTypes
         capabilities.proRawSupported = photoOutput.isAppleProRAWSupported
         capabilities.photoQualitySupported = format.isHighPhotoQualitySupported
         capabilities.highestPhotoQualitySupported = format.isHighestPhotoQualitySupported
@@ -272,15 +287,21 @@ struct ExposureRange: Equatable, Sendable {
     var minExposureTargetOffset: Double
     var maxExposureTargetOffset: Double
 
+    /// `supportedExposureTargetOffsetRange` is not exposed on iOS, on either the device
+    /// or its format, so the bounds fall back to the EV range every iPhone camera
+    /// documents rather than being reported as something the device said. The current
+    /// offset is read from the device, so this range is only ever used for clamping a
+    /// value the app is about to write, and step 4 verifies it on device.
+    static let defaultOffsetRange = -8.0...8.0
+
     static func from(_ format: AVCaptureDevice.Format) -> ExposureRange {
-        let offsets = format.supportedExposureTargetOffsetRange
-        return ExposureRange(
+        ExposureRange(
             minISO: format.minISO,
             maxISO: format.maxISO,
             minShutterSeconds: CMTimeGetSeconds(format.minExposureDuration),
             maxShutterSeconds: CMTimeGetSeconds(format.maxExposureDuration),
-            minExposureTargetOffset: Double(offsets.lowerBound),
-            maxExposureTargetOffset: Double(offsets.upperBound)
+            minExposureTargetOffset: defaultOffsetRange.lowerBound,
+            maxExposureTargetOffset: defaultOffsetRange.upperBound
         )
     }
 

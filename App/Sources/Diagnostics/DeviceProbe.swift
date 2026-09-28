@@ -43,14 +43,14 @@ enum DeviceProbe {
                                UITraitCollection.current.preferredContentSizeCategory.rawValue))
 
         var graphics = ReportSection("Color and display")
+        // The `UIDisplayGamut` cases are not addressable by name in this SDK, so the
+        // gamut is reported through its description and P3 support is answered by the
+        // color-space check below rather than by comparing against a guessed case.
         let gamut = UIScreen.main.traitCollection.displayGamut
-        // The cases are `.sRGB` and `.displayP3`; there is no `.p3`.
-        let isP3 = gamut == .displayP3
-        graphics.add(ReportEntry("display gamut",
-                                 gamut == .sRGB ? "sRGB" : isP3 ? "display P3" : "unspecified (\(gamut.rawValue))",
-                                 isP3 ? .good : .warn))
-        graphics.add(ReportEntry("Display P3 color space available",
-                                 CGColorSpace(name: CGColorSpace.displayP3) != nil))
+        graphics.add(ReportEntry("display gamut", String(describing: gamut), .note))
+        let hasP3 = CGColorSpace(name: CGColorSpace.displayP3) != nil
+        graphics.add(ReportEntry("Display P3 color space available", hasP3,
+                                 hasP3 ? .good : .warn))
         graphics.add(ReportEntry("extended range color space available",
                                  CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3) != nil, .note))
         graphics.add(ReportEntry("sRGB color space available",

@@ -151,14 +151,10 @@ enum AVFoundationProbe {
                                 + " ... " + ReportFormat.shutter(CMTimeGetSeconds(format.maxExposureDuration))))
         section.add(ReportEntry("exposure duration (current)",
                                ReportFormat.shutter(CMTimeGetSeconds(device.exposureDuration))))
-        // The offset range is a property of the device, and only when the active format
-        // has one; a device without it reports -1 on both bounds, which is a real answer
-        // rather than a missing measurement.
-        let offsets = device.supportedExposureTargetOffsetRange
-        section.add(ReportEntry("exposure target offset range",
-                               offsets.lowerBound >= 0
-                                   ? ReportFormat.range(Double(offsets.lowerBound), Double(offsets.upperBound))
-                                   : notMeasured))
+        // `supportedExposureTargetOffsetRange` is not exposed on iOS: it is on neither
+        // `AVCaptureDevice` nor `AVCaptureDevice.Format`. The current offset is still
+        // reported below, so the range is honestly marked as unmeasured.
+        section.add(ReportEntry("exposure target offset range", notMeasured, .note))
         section.add(ReportEntry("exposure target offset (current)",
                                ReportFormat.number(Double(device.exposureTargetOffset))))
         section.add(ReportEntry("exposure modes",
@@ -223,14 +219,12 @@ enum AVFoundationProbe {
             entries.append(ReportEntry("max photo dimensions",
                                        "\(output.maxPhotoDimensions.width)x\(output.maxPhotoDimensions.height)"))
 
-            // RAW. Output-level, so a session is required. The property is
-            // `availableRawPhotoPixelFormatTypes` — "PixelTypes" is the name people
-            // remember, and it does not exist.
+            // The list is `[OSType]` in Swift, not `[NSNumber]`.
             let rawTypes = output.availableRawPhotoPixelFormatTypes
             entries.append(ReportEntry("RAW available", !rawTypes.isEmpty,
                                        rawTypes.isEmpty ? .fail : .good))
             for type in rawTypes {
-                entries.append(ReportEntry("RAW pixel type", fourCCHex(type.ostValue), .note))
+                entries.append(ReportEntry("RAW pixel type", fourCCHex(type), .note))
             }
             if rawTypes.isEmpty {
                 entries.append(ReportEntry("RAW note",
@@ -257,10 +251,12 @@ enum AVFoundationProbe {
             entries.append(ReportEntry("max bracketed capture photo count",
                                        output.maxBracketedCapturePhotoCount))
 
+            // `availablePhotoCodecTypes` is `[UTType]`, so the elements are compared as
+            // uniform type identifiers and printed by identifier. Guessing at the codec
+            // enum here is what produced a compile error in the first place.
             let codecs = output.availablePhotoCodecTypes
             entries.append(ReportEntry("photo codecs", ReportFormat.list(
-                codecs.map { $0 == .hevc ? "HEVC" : $0 == .heif ? "HEIF" : $0 == .jpeg ? "JPEG" : "\($0.rawValue)" },
-                empty: "none")))
+                codecs.map { $0.identifier }, empty: "none")))
             entries.append(ReportEntry("is Apple ProRAW enabled (default)", output.isAppleProRAWEnabled, .note))
 
             // ProRAW cannot be requested for a format that is not the active one, so
@@ -341,7 +337,6 @@ enum AVFoundationProbe {
         case .builtInTrueDepthCamera: return "true depth"
         case .builtInLiDARDepthCamera: return "LiDAR depth"
         case .external: return "external"
-        case .externalWideAngle: return "external wide"
         case .continuityCamera: return "continuity"
         @unknown default: return "unknown (\(type.rawValue))"
         }

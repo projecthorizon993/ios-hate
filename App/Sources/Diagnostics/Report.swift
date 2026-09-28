@@ -75,13 +75,6 @@ struct ReportSection: Identifiable, Equatable, Sendable {
 /// not resolve is not.
 let notMeasured = "not measured on iOS"
 
-/// `availableRawPhotoPixelFormatTypes` and Vision's `supportedOutputPixelFormats` are
-/// both declared as `NSArray<NSNumber *>`, so their elements arrive boxed rather than as
-/// a plain `OSType`. This is the single unwrapping helper for both.
-extension NSNumber {
-    var ostValue: OSType { OSType(truncatingIfNeeded: uint32Value) }
-}
-
 struct CapabilityReport: Equatable, Sendable {
     var generatedAt: Date
     var platform: String
