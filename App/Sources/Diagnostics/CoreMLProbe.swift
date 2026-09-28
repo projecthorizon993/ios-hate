@@ -63,7 +63,11 @@ enum CoreMLProbe {
         for (name, units) in variants {
             let loadStart = DispatchTime.now().uptimeNanoseconds
             do {
-                let model = try MLModel(contentsOf: url, computeUnits: units)
+                // Compute units are configured through `MLModelConfiguration`, not as a
+                // second argument to the initialiser.
+                let configuration = MLModelConfiguration()
+                configuration.computeUnits = units
+                let model = try MLModel(contentsOf: url, configuration: configuration)
                 let loadMs = elapsedMs(since: loadStart)
                 try describeInputs(of: model, into: &section)
 
@@ -120,9 +124,19 @@ enum CoreMLProbe {
 
     private static func describeInputs(of model: MLModel, into section: inout ReportSection) {
         let description = model.modelDescription
-        section.add(ReportEntry("model author", description.author ?? "unattributed", .note))
-        section.add(ReportEntry("model license", description.license ?? "unlicensed", .note))
-        section.add(ReportEntry("model version", description.versionDescription ?? "unversioned", .note))
+        // `author`, `license` and `versionDescription` are not part of
+        // `MLModelDescription` in the iOS SDK, so they are not reported. What is
+        // available is the free-form metadata dictionary, which is printed verbatim.
+        section.add(ReportEntry("model metadata keys",
+                               ReportFormat.list(description.metadata.keys.sorted(), empty: "none"), .note))
+        section.add(ReportEntry("model metadata",
+                               description.metadata.isEmpty
+                                   ? "empty; no license or author recorded in the model"
+                                   : description.metadata
+                                       .sorted { $0.key < $1.key }
+                                       .map { "\($0.key)=\($0.value)" }
+                                       .joined(separator: ", "),
+                               description.metadata.isEmpty ? .warn : .note))
         section.add(ReportEntry("model inputs", describeShapes(description.inputDescriptionsByName), .note))
         section.add(ReportEntry("model outputs", describeShapes(description.outputDescriptionsByName), .note))
     }
@@ -131,13 +145,13 @@ enum CoreMLProbe {
         guard !descriptions.isEmpty else { return "none" }
         return descriptions.keys.sorted().map { name -> String in
             guard let description = descriptions[name] else { return name }
-            switch description {
-            case let multiArray as MLMultiArrayConstraintDescription:
-                let shape = multiArray.shape.map { "\($0)" }.joined(separator: "x")
-                return "\(name) [\(shape)] \(multiArray.dataType.rawValue)"
-            default:
+            // The constraint type is `MLMultiArrayConstraint`; there is no
+            // `...ConstraintDescription` in Swift.
+            guard let multiArray = description.multiArrayConstraint else {
                 return "\(name) (non-array)"
             }
+            let shape = multiArray.shape.map { "\($0)" }.joined(separator: "x")
+            return "\(name) [\(shape)] \(multiArray.dataType.rawValue)"
         }.joined(separator: ", ")
     }
 
@@ -147,17 +161,12 @@ enum CoreMLProbe {
     private static func makeZeroInput(for model: MLModel) throws -> MLDictionaryFeatureProvider {
         var features: [String: MLFeatureValue] = [:]
         for (name, description) in model.modelDescription.inputDescriptionsByName {
-            guard let constraint = description as? MLMultiArrayConstraintDescription else {
+            guard let constraint = description.multiArrayConstraint else {
                 throw ProbeError.unsupportedInput(name)
             }
-            // `shape` is `[NSNumber]`, so the product has to be taken through
-            // `intValue`. Multiplying the `Int` seed by an `NSNumber` does not compile.
-            let elementCount = constraint.shape.reduce(1) { $0 * $1.intValue }
-            let byteCount = elementCount * constraint.dataType.bytes
-            let buffer = [UInt8](repeating: 0, count: byteCount)
-            let array = try MLMultiArray(data: Data(buffer),
-                                         shape: constraint.shape.map { NSNumber(value: $0) },
-                                         dataType: constraint.dataType)
+            // `MLMultiArray(shape:dataType:)` allocates its own zeroed buffer, so there
+            // is no need to size one by hand and no way to pass one in.
+            let array = try MLMultiArray(shape: constraint.shape, dataType: constraint.dataType)
             features[name] = MLFeatureValue(multiArray: array)
         }
         return try MLDictionaryFeatureProvider(dictionary: features)
@@ -170,14 +179,20 @@ enum CoreMLProbe {
         var section = ReportSection("Vision (built-in models)")
 
         section.add(ReportEntry("person segmentation request", "available", .good))
-        section.add(ReportEntry("supported quality levels",
-                               ReportFormat.list(VNGeneratePersonSegmentationRequest
-                                   .supportedQualityLevels
-                                   .map { "\($0.rawValue)" })))
-        section.add(ReportEntry("supported output pixel formats",
-                               ReportFormat.list(VNGeneratePersonSegmentationRequest
-                                   .supportedOutputPixelFormats
-                                   .map { "\(fourCCHex($0))" })))
+        // `supportedQualityLevels` is not exposed on this class. The request is still
+        // constructible, which is the fact that actually matters for Step 5, so that is
+        // what is reported rather than a list of constants that does not exist.
+        let request = VNGeneratePersonSegmentationRequest()
+        request.qualityLevel = .balanced
+        section.add(ReportEntry("default quality level accepted",
+                               "\(request.qualityLevel.rawValue)"))
+        section.add(ReportEntry("output pixel format count",
+                               request.supportedOutputPixelFormats.count))
+        section.add(ReportEntry("output pixel formats",
+                               ReportFormat.list(
+                                request.supportedOutputPixelFormats.map { fourCCHex($0.ostValue) },
+                                empty: "none"),
+                               .note))
         section.add(ReportEntry("attention saliency request", "available", .good))
         section.add(ReportEntry("note",
                                "subject segmentation needs no bundled model. Skin-tone protection is a "
@@ -221,22 +236,5 @@ enum CoreMLProbe {
             return (scalar.value >= 0x20 && scalar.value < 0x7F) ? String(scalar) : "?"
         }.joined()
         return "0x" + String(type, radix: 16, uppercase: true) + " '" + text + "'"
-    }
-}
-
-/// The Swift name for the ObjC `MLDataType` enum. `MLDataType` does not exist in Swift,
-/// so the extension below has to be on `MLFeatureType` or nothing type-checks.
-private extension MLFeatureType {
-    var bytes: Int {
-        switch self {
-        case .double: return 8
-        case .float32: return 4
-        case .float16: return 2
-        case .int8, .uint8, .bool: return 1
-        case .int16, .uint16: return 2
-        case .int32, .uint32: return 4
-        case .int64, .uint64: return 8
-        @unknown default: return 4
-        }
     }
 }

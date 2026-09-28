@@ -111,7 +111,8 @@ struct CameraCapabilities: Equatable, Sendable {
     /// Physical lenses, in the order they should be offered. Empty when the device
     /// has no back camera at all (front-only tablets, and the simulator).
     var backCameras: [BackCameraCapabilities] = []
-    /// `AVCapturePhotoOutput.availableRawPhotoPixelTypes`. Empty means no RAW.
+    /// `AVCapturePhotoOutput.availableRawPhotoPixelFormatTypes`. Empty means no RAW.
+    /// The property is spelled `...PixelFormatTypes`, not `...PixelTypes`.
     var rawPixelTypes: [OSType] = []
     /// `AVCapturePhotoOutput.isAppleProRAWSupported`. Independent of `rawPixelTypes`:
     /// a device can support one and not the other.
@@ -202,15 +203,15 @@ struct CameraCapabilities: Equatable, Sendable {
     /// Builds the model from a live device, its active format, and a photo output that
     /// is already attached to a session with that input.
     ///
-    /// The session and the output are both required: `availableRawPhotoPixelTypes` and
-    /// `isAppleProRAWSupported` are documented as properties of the output in its
+    /// The session and the output are both required: `availableRawPhotoPixelFormatTypes`
+    /// and `isAppleProRAWSupported` are documented as properties of the output in its
     /// current environment, and reading them from the device alone is not possible.
     static func probe(device: AVCaptureDevice,
                       format: AVCaptureDevice.Format,
                       photoOutput: AVCapturePhotoOutput) -> CameraCapabilities {
         var capabilities = CameraCapabilities()
         capabilities.facing = device.position == .front ? .front : .back
-        capabilities.rawPixelTypes = Array(photoOutput.availableRawPhotoPixelTypes)
+        capabilities.rawPixelTypes = photoOutput.availableRawPhotoPixelFormatTypes.map(\.ostValue)
         capabilities.proRawSupported = photoOutput.isAppleProRAWSupported
         capabilities.photoQualitySupported = format.isHighPhotoQualitySupported
         capabilities.highestPhotoQualitySupported = format.isHighestPhotoQualitySupported

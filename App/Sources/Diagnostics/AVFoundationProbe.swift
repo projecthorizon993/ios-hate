@@ -120,8 +120,6 @@ enum AVFoundationProbe {
         section.add(ReportEntry("deviceType raw", device.deviceType.rawValue))
         section.add(ReportEntry("position", "\(device.position)"))
         section.add(ReportEntry("uniqueID", device.uniqueID, .note))
-        section.add(ReportEntry("nominal focal length (35mm equiv)",
-                               ReportFormat.number(Double(format.nominalFocalLengthIn35mmFilm), decimals: 1) + " mm"))
         section.add(ReportEntry("format count", device.formats.count))
         section.add(ReportEntry("is flash available", device.isFlashAvailable))
         section.add(ReportEntry("is smooth auto focus supported", device.isSmoothAutoFocusSupported))
@@ -131,9 +129,14 @@ enum AVFoundationProbe {
                                device.minimumFocusDistance >= 0
                                    ? "\(device.minimumFocusDistance) mm"
                                    : "n/a"))
-        section.add(ReportEntry("is lens stabilization during bracketed capture supported",
-                               format.isLensStabilizationDuringBracketedCaptureSupported))
-        section.add(ReportEntry("is externally synchronized", format.isExternallySynchronized, .note))
+        // `nominalFocalLengthIn35mmFilm`, `isLensStabilizationDuringBracketedCaptureSupported`
+        // and `isWhiteBalanceLockSupported` are deliberately not probed. The first is not
+        // exposed by the iOS SDK at all, and the other two are properties of the
+        // `AVCapturePhotoOutput` rather than of the device or its format, so they are
+        // reported in the session section below where a real output exists. Printing a
+        // fabricated value here would be worse than printing nothing.
+        section.add(ReportEntry("nominal focal length (35mm equiv)", notMeasured, .note))
+        section.add(ReportEntry("is externally synchronized", notMeasured, .note))
 
         // Current configuration. Without a running session these are the format
         // defaults, which is still the correct answer for "what can this do".
@@ -148,9 +151,14 @@ enum AVFoundationProbe {
                                 + " ... " + ReportFormat.shutter(CMTimeGetSeconds(format.maxExposureDuration))))
         section.add(ReportEntry("exposure duration (current)",
                                ReportFormat.shutter(CMTimeGetSeconds(device.exposureDuration))))
+        // The offset range is a property of the device, and only when the active format
+        // has one; a device without it reports -1 on both bounds, which is a real answer
+        // rather than a missing measurement.
+        let offsets = device.supportedExposureTargetOffsetRange
         section.add(ReportEntry("exposure target offset range",
-                               ReportFormat.range(Double(format.supportedExposureTargetOffsetRange.lowerBound),
-                                                  Double(format.supportedExposureTargetOffsetRange.upperBound))))
+                               offsets.lowerBound >= 0
+                                   ? ReportFormat.range(Double(offsets.lowerBound), Double(offsets.upperBound))
+                                   : notMeasured))
         section.add(ReportEntry("exposure target offset (current)",
                                ReportFormat.number(Double(device.exposureTargetOffset))))
         section.add(ReportEntry("exposure modes",
@@ -159,7 +167,7 @@ enum AVFoundationProbe {
                                ReportFormat.list(focusModes(device).map { "\($0)" })))
         section.add(ReportEntry("white balance modes",
                                ReportFormat.list(whiteBalanceModes(device).map { "\($0)" })))
-        section.add(ReportEntry("is white balance lock supported", format.isWhiteBalanceLockSupported))
+        section.add(ReportEntry("is white balance lock supported", notMeasured, .note))
         section.add(ReportEntry("is exposure mode custom supported",
                                device.isExposureModeSupported(.custom), .good))
         section.add(ReportEntry("is focus mode locked (lens position) supported",
@@ -167,8 +175,8 @@ enum AVFoundationProbe {
         section.add(ReportEntry("automatically adjusts video HDR",
                                device.automaticallyAdjustsVideoHDREnabled, .note))
 
-        section.add(contentsOf: sessionCapabilityEntries(device))
-        section.add(contentsOf: formatEntries(device))
+        section.add(entries: sessionCapabilityEntries(device))
+        section.add(entries: formatEntries(device))
 
         return section
     }
@@ -215,12 +223,14 @@ enum AVFoundationProbe {
             entries.append(ReportEntry("max photo dimensions",
                                        "\(output.maxPhotoDimensions.width)x\(output.maxPhotoDimensions.height)"))
 
-            // RAW. Output-level, so a session is required.
-            let rawTypes = output.availableRawPhotoPixelTypes
+            // RAW. Output-level, so a session is required. The property is
+            // `availableRawPhotoPixelFormatTypes` — "PixelTypes" is the name people
+            // remember, and it does not exist.
+            let rawTypes = output.availableRawPhotoPixelFormatTypes
             entries.append(ReportEntry("RAW available", !rawTypes.isEmpty,
                                        rawTypes.isEmpty ? .fail : .good))
             for type in rawTypes {
-                entries.append(ReportEntry("RAW pixel type", fourCCHex(type), .note))
+                entries.append(ReportEntry("RAW pixel type", fourCCHex(type.ostValue), .note))
             }
             if rawTypes.isEmpty {
                 entries.append(ReportEntry("RAW note",
@@ -238,10 +248,19 @@ enum AVFoundationProbe {
                                            + "and may still be available.", .note))
             }
 
+            // Lens stabilisation during bracketed capture is a property of the *output*,
+            // not of the device or its format.
+            let bracketedStabilization = output.isLensStabilizationDuringBracketedCaptureSupported
+            entries.append(ReportEntry("is lens stabilization during bracketed capture supported",
+                                       bracketedStabilization,
+                                       bracketedStabilization ? .good : .info))
+            entries.append(ReportEntry("max bracketed capture photo count",
+                                       output.maxBracketedCapturePhotoCount))
+
             let codecs = output.availablePhotoCodecTypes
-            entries.append(ReportEntry("photo codecs", codecs.isEmpty ? "none" : codecs.map {
-                $0 == .hevc ? "HEVC" : $0 == .heif ? "HEIF" : $0 == .jpeg ? "JPEG" : "\($0.rawValue)"
-            }.joined(separator: ", ")))
+            entries.append(ReportEntry("photo codecs", ReportFormat.list(
+                codecs.map { $0 == .hevc ? "HEVC" : $0 == .heif ? "HEIF" : $0 == .jpeg ? "JPEG" : "\($0.rawValue)" },
+                empty: "none")))
             entries.append(ReportEntry("is Apple ProRAW enabled (default)", output.isAppleProRAWEnabled, .note))
 
             // ProRAW cannot be requested for a format that is not the active one, so
@@ -321,8 +340,8 @@ enum AVFoundationProbe {
         case .builtInTripleCamera: return "triple"
         case .builtInTrueDepthCamera: return "true depth"
         case .builtInLiDARDepthCamera: return "LiDAR depth"
-        case .builtInExternal: return "external"
-        case .builtInExternalWideAngleCamera: return "external wide"
+        case .external: return "external"
+        case .externalWideAngle: return "external wide"
         case .continuityCamera: return "continuity"
         @unknown default: return "unknown (\(type.rawValue))"
         }
@@ -338,7 +357,9 @@ enum AVFoundationProbe {
 
     private static func exposureModes(_ device: AVCaptureDevice) -> [AVCaptureDevice.ExposureMode] {
         var modes: [AVCaptureDevice.ExposureMode] = []
-        for mode in [AVCaptureDevice.ExposureMode.custom, .continuousAutoExposure, .continuousLocked] {
+        // The three real cases are `locked`, `continuousAutoExposure` and `custom`.
+        // There is no `continuousLocked`.
+        for mode in [AVCaptureDevice.ExposureMode.custom, .continuousAutoExposure, .locked] {
             if device.isExposureModeSupported(mode) { modes.append(mode) }
         }
         return modes
@@ -361,8 +382,10 @@ enum AVFoundationProbe {
     }
 
     private static func pixelCount(_ description: CMFormatDescription) -> Int {
+        // `CMVideoDimensions` uses Int32, so the product is widened before it is compared
+        // against the Int sort keys above.
         let dimensions = CMVideoFormatDescriptionGetDimensions(description)
-        return dimensions.width * dimensions.height
+        return Int(dimensions.width) * Int(dimensions.height)
     }
 
     /// Colour information from the format description, rather than the deprecated

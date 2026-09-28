@@ -64,6 +64,22 @@ struct ReportSection: Identifiable, Equatable, Sendable {
     mutating func add(_ entry: ReportEntry) {
         entries.append(entry)
     }
+
+    mutating func add(entries newEntries: [ReportEntry]) {
+        entries.append(contentsOf: newEntries)
+    }
+}
+
+/// Printed instead of a value when a probe cannot measure something honestly. A report
+/// line that says it does not know is useful; one that says zero because a constant did
+/// not resolve is not.
+let notMeasured = "not measured on iOS"
+
+/// `availableRawPhotoPixelFormatTypes` and Vision's `supportedOutputPixelFormats` are
+/// both declared as `NSArray<NSNumber *>`, so their elements arrive boxed rather than as
+/// a plain `OSType`. This is the single unwrapping helper for both.
+extension NSNumber {
+    var ostValue: OSType { OSType(truncatingIfNeeded: uint32Value) }
 }
 
 struct CapabilityReport: Equatable, Sendable {
@@ -116,9 +132,19 @@ enum ReportText {
     }
 
     /// Locale-independent, so reports from three devices diff cleanly.
+    ///
+    /// `ISO8601DateFormatter` rather than `Date.ISO8601FormatStyle`: the format style
+    /// spells this option `time(includingFractionalSeconds:)`, and mixing it with
+    /// `time(separator:)` is a different API than it looks.
+    static let stampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+
     static func stamp(_ date: Date) -> String {
-        date.formatted(.iso8601.year().month().day().dateSeparator(.dash)
-            .time(separator: .colon).time(includeFractionalSeconds: false))
+        stampFormatter.string(from: date)
     }
 }
 

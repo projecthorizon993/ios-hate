@@ -292,17 +292,16 @@ extension PhotoCaptureController {
 
     /// Which RAW pixel type to request.
     ///
-    /// ProRAW is a *separate* list from standard RAW, and a device can support one
-    /// without the other, so choosing it is a deliberate act.
-    ///
-    /// Within a list the **first** entry is used, deliberately. Apple publishes no
-    /// ordering or bit-depth contract for these values — the FourCC is a bare 32-bit
-    /// code with no documented meaning — so ranking them by a parsed "bit depth" would
-    /// be inventing a fact. Every type the device offers is written to the log so the
-    /// capability report shows what is actually there, and a documented preference can
-    /// be added in step 4 once the real codes have been seen on all three devices.
+    /// There is one list of RAW pixel types, `availableRawPhotoPixelFormatTypes`, and
+    /// ProRAW is selected *out of it* with `isAppleProRAWPixelFormat(_:)`. There is no
+    /// separate `availableAppleProRAWPhotoPixelTypes`, and Apple publishes no ordering
+    /// or bit-depth contract for these values, so the **first** entry is used and the
+    /// whole list is logged so the capability report shows what the device actually
+    /// offers. A documented preference can be added in step 4 once the real codes have
+    /// been seen on all three devices.
     nonisolated static func rawPixelType(for output: AVCapturePhotoOutput, proRaw: Bool) -> OSType? {
-        let types = proRaw ? output.availableAppleProRAWPhotoPixelTypes : output.availableRawPhotoPixelTypes
+        let all = output.availableRawPhotoPixelFormatTypes.map(\.ostValue)
+        let types = proRaw ? all.filter { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) } : all
         guard let first = types.first else { return nil }
         AppLog.note(AppLog.camera,
                     "RAW pixel types (proRAW=\(proRaw)): "

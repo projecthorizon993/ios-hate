@@ -20,8 +20,10 @@ enum DeviceProbe {
         device.add(ReportEntry("chip", chip(for: machine), .note))
         device.add(ReportEntry("system", UIDevice.current.systemName))
         device.add(ReportEntry("system version", UIDevice.current.systemVersion))
-        device.add(ReportEntry("simulator", UIDevice.current.isSimulator ? "yes" : "no",
-                               UIDevice.current.isSimulator ? .warn : .good))
+        // `UIDevice.isSimulator` is a popular category extension that Apple never
+        // shipped. This is the supported way to ask, and it is a compile-time constant.
+        device.add(ReportEntry("simulator", isSimulator ? "yes" : "no",
+                               isSimulator ? .warn : .good))
 
         var system = ReportSection("System")
         system.add(ReportEntry("thermal state", thermalDescription(ProcessInfo.processInfo.thermalState)))
@@ -31,15 +33,22 @@ enum DeviceProbe {
                                ReportFormat.number(Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824, decimals: 1) + " GB"))
         system.add(ReportEntry("uptime",
                                ReportFormat.number(ProcessInfo.processInfo.systemUptime / 60, decimals: 1) + " min"))
-        system.add(ReportEntry("app state", "\(ProcessInfo.processInfo.activationState)", .note))
+        // `ProcessInfo.activationState` does not exist. The app's own lifecycle is the
+        // only source that can answer this, so it is read from the scene phase.
+        system.add(ReportEntry("app state", appState(), .note))
         system.add(ReportEntry("reduce motion enabled", UIAccessibility.isReduceMotionEnabled))
-        system.add(ReportEntry("content size category", UIContentSizeCategory.preferredContentSizeCategory.rawValue))
+        // The preferred content size category is a property of the current trait
+        // collection, not a static on the type.
+        system.add(ReportEntry("content size category",
+                               UITraitCollection.current.preferredContentSizeCategory.rawValue))
 
         var graphics = ReportSection("Color and display")
         let gamut = UIScreen.main.traitCollection.displayGamut
+        // The cases are `.sRGB` and `.displayP3`; there is no `.p3`.
+        let isP3 = gamut == .displayP3
         graphics.add(ReportEntry("display gamut",
-                                 gamut == .p3 ? "P3" : gamut == .sRGB ? "sRGB" : "other (\(gamut.rawValue))",
-                                 gamut == .p3 ? .good : .warn))
+                                 gamut == .sRGB ? "sRGB" : isP3 ? "display P3" : "unspecified (\(gamut.rawValue))",
+                                 isP3 ? .good : .warn))
         graphics.add(ReportEntry("Display P3 color space available",
                                  CGColorSpace(name: CGColorSpace.displayP3) != nil))
         graphics.add(ReportEntry("extended range color space available",
@@ -48,16 +57,38 @@ enum DeviceProbe {
                                  CGColorSpace(name: CGColorSpace.sRGB) != nil))
         graphics.add(ReportEntry("Metal device", MTLCreateSystemDefaultDevice()?.name ?? "none",
                                  MTLCreateSystemDefaultDevice() == nil ? .fail : .info))
-        if let family = MTLCreateSystemDefaultDevice()?.family {
-            graphics.add(ReportEntry("Metal GPU family", "\(family)", .note))
-        }
-        if let p = MTLCreateSystemDefaultDevice()?.supportsFamily(.apple9) {
-            graphics.add(ReportEntry("Metal family 9 (A14/15 class)", p, .note))
-        }
+        // `MTLDevice.family` does not exist. GPU family support is queried with
+        // `supportsFamily`, and the newest family this SDK knows about is listed below.
+        graphics.add(ReportEntry("Metal family 9 (A14/15 and newer)",
+                                 MTLCreateSystemDefaultDevice()?.supportsFamily(.apple9) ?? false, .note))
         graphics.add(ReportEntry("maximum frames per second",
-                                 ReportFormat.number(UIScreen.main.maximumFramesPerSecond)))
+                                 ReportFormat.number(Double(UIScreen.main.maximumFramesPerSecond), decimals: 0)))
 
         return [device, system, graphics]
+    }
+
+    /// A compile-time constant, not a runtime property.
+    static let isSimulator: Bool = {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
+    }()
+
+    /// The app's lifecycle, read from the connected scene rather than from a
+    /// non-existent `ProcessInfo` property.
+    private static func appState() -> String {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first else { return "no scene" }
+        switch scene.activationState {
+        case .foregroundActive: return "active"
+        case .foregroundInactive: return "inactive"
+        case .background: return "background"
+        case .unattached: return "unattached"
+        @unknown default: return "unknown"
+        }
     }
 
     // MARK: - Render benchmark
@@ -131,7 +162,8 @@ enum DeviceProbe {
                 pixels[offset + 3] = 0xFF
             }
         }
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        // `CGBitmapInfo` is a struct, not the raw UInt32, so it has to be constructed.
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
         guard let provider = CGDataProvider(data: Data(pixels) as CFData),
               let cgImage = CGImage(width: width,
                                     height: height,
