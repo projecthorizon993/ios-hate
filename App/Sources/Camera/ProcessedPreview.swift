@@ -54,7 +54,7 @@ final class ProcessedPreview: NSObject {
     /// The most recent rendered image, for the still-frame grab in the compare control.
     private var lastRendered: CIImage?
 
-    init() {
+    override init() {
         pipeline = ProcessingPipeline()
         metalDevice = MTLCreateSystemDefaultDevice()
         if let device = metalDevice {
@@ -210,6 +210,11 @@ extension ProcessedPreview: AVCaptureVideoDataOutputSampleBufferDelegate {
 /// Kept apart from `ProcessedPreview` on purpose: the capture side is a class with a
 /// delegate and a queue, the display side is a `UIView` with a drawable, and merging them
 /// would mean the view's lifetime controlled the capture output's.
+///
+/// `@MainActor` because `MTKViewDelegate` is main-actor isolated in this SDK, so a
+/// non-isolated class cannot satisfy it. That is also the right isolation anyway: the only
+/// thing touched here is the drawable, and only the main thread may touch that.
+@MainActor
 final class ProcessedPreviewRenderer: NSObject, MTKViewDelegate {
 
     private let view: MTKView
