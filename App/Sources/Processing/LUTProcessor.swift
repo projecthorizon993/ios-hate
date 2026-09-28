@@ -73,22 +73,22 @@ struct LUTProcessor {
         ]
         parameters["inputColorSpace"] = imageSpace.cgColorSpace
 
-        var graded: CIImage?
+        // Captured through a mutable local because the trap takes a void block.
+        var captured: CIImage?
         let raised = LumaFrameSafety.perform {
-            graded = CIFilter(name: "CIColorCubeWithColorSpace", parameters: parameters)?.outputImage
+            captured = CIFilter(name: "CIColorCubeWithColorSpace", parameters: parameters)?.outputImage
         }
         if let raised {
             AppLog.fail(AppLog.processing, "cube construction raised \(raised); LUT not applied")
             throw LUTApplicationError.notUsable
         }
-        guard let result = graded else {
+        guard let graded = captured else {
             // A nil filter means the name is unknown to this OS version, which is a
             // different failure from an exception and gets its own line so the two are
             // not confused later.
             AppLog.fail(AppLog.processing, "CIColorCubeWithColorSpace unavailable; LUT not applied")
             throw LUTApplicationError.notUsable
         }
-        let cube = result
 
         guard intensity < 1 else { return graded }
 
