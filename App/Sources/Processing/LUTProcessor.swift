@@ -59,12 +59,17 @@ struct LUTProcessor {
         // string-based API. That is deliberate: the typed `CIFilter` builtins are
         // generated per SDK and guessing at one is a compile error waiting to happen,
         // whereas the string form and these four keys are part of the filter's contract.
-        let cube = CIFilter(name: "CIColorCube", parameters: [
+        // `Data(lut.samples)` does not compile: `Data` initialises from bytes, and
+        // `Float` is not `UInt8`. CIColorCube wants the raw 32-bit float bit patterns,
+        // so the sample buffer is copied verbatim rather than converted.
+        guard let cubeData = cubeData(for: lut) else { throw LUTApplicationError.notUsable }
+        var parameters: [String: Any] = [
             kCIInputImageKey: image,
             "inputCubeDimension": CGFloat(lut.size),
-            "inputCubeData": Data(lut.samples),
-            "inputColorSpace": imageSpace.cgColorSpace
-        ])
+            "inputCubeData": cubeData
+        ]
+        parameters["inputColorSpace"] = imageSpace.cgColorSpace
+        let cube = CIFilter(name: "CIColorCube", parameters: parameters)
         guard let graded = cube?.outputImage else {
             // Core Image returns nil for an unknown filter or bad parameters rather
             // than raising, so this is a real branch and the only correct answer is to
@@ -91,6 +96,6 @@ struct LUTProcessor {
     /// colours every photo slightly wrong.
     static func cubeData(for lut: CubeLUT) -> Data? {
         guard lut.kind == .threeDimensional, lut.isUsable else { return nil }
-        return Data(lut.samples)
+        return lut.samples.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 }

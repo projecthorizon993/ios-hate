@@ -214,8 +214,9 @@ final class LUTProcessorTests: XCTestCase {
 
         XCTAssertTrue(lut.isUsable)
         let data = try XCTUnwrap(LUTProcessor.cubeData(for: lut))
-        XCTAssertEqual(data.count, CubeLUTParser.maximumSize
-                       * CubeLUTParser.maximumSize
-                       * CubeLUTParser.maximumSize * 4)
+        // Three floats per sample, four bytes per float.
+        XCTAssertEqual(data.count,
+                       CubeLUTParser.maximumSize * CubeLUTParser.maximumSize
+                       * CubeLUTParser.maximumSize * 3 * 4)
     }
 }
