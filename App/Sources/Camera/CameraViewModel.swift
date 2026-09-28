@@ -183,6 +183,14 @@ final class CameraViewModel: ObservableObject {
         capabilities = probed
 
         photo.configureOutput(capabilities: probed)
+        proCapabilities = ProCapabilities
+            .probe(device: configuration.device, format: configuration.format)
+            .withRaw(raw: !photo.output.availableRawPhotoPixelFormatTypes.isEmpty,
+                     proRaw: photo.output.isAppleProRAWSupported,
+                     maxDimensions: "\(photo.output.maxPhotoDimensions.width)"
+                                    + "x\(photo.output.maxPhotoDimensions.height)")
+        AppLog.note(AppLog.camera,
+                    "pro panel: \(proCapabilities.availabilitySummary(against: proCapabilities))")
         looks = lookLibrary.all
         pushSettingsToPreview()
         startReadout()
@@ -269,6 +277,63 @@ final class CameraViewModel: ObservableObject {
     /// `true` when the recipe does nothing, which is when the app uses the direct preview
     /// layer instead of the processed one.
     var isProcessingActive: Bool { !settings.isIdentity && processedPreview.isAvailable }
+
+    func setMode(_ mode: CameraMode) {
+        self.mode = mode
+    }
+
+    // MARK: - Pro (Step 4)
+
+    /// What this device and this format can actually do. Re-probed on every configuration
+    /// change, because a capability like a locked exposure belongs to the *format*, and
+    /// switching lenses or formats changes it.
+    @Published private(set) var proCapabilities: ProCapabilities = .none
+
+    /// What the user dialled in. Clamped against `proCapabilities` on every change, so a
+    /// value that a format cannot honour never reaches AVFoundation to raise.
+    @Published private(set) var manual = ManualSettings.none
+
+    private func updateManual(_ transform: (inout ManualSettings) -> Void) {
+        var copy = manual
+        transform(&copy)
+        // The clamp is the whole reason this method exists. Writing an out-of-range ISO or
+        // exposure raises inside AVFoundation, and the resulting log line names the
+        // property, not the fact that the panel offered a value the format does not have.
+        let clamped = copy.clamped(to: proCapabilities)
+        if clamped != manual {
+            AppLog.note(AppLog.camera, "manual: \(manual.summarise) -> \(clamped.summarise)")
+        }
+        manual = clamped
+    }
+
+    func setManual(iso: Float) { updateManual { $0.iso = iso } }
+    func setManual(shutterSeconds: Double) { updateManual { $0.shutterSeconds = shutterSeconds } }
+    func setManual(exposureTargetOffset: Float) { updateManual { $0.exposureTargetOffset = exposureTargetOffset } }
+    func setManual(lockExposure: Bool) { updateManual { $0.lockExposure = lockExposure } }
+    func setManual(lockFocus: Bool) { updateManual { $0.lockFocus = lockFocus } }
+    func setManual(lockWhiteBalance: Bool) { updateManual { $0.lockWhiteBalance = lockWhiteBalance } }
+    func setManual(raw: Bool) { updateManual { $0.raw = raw } }
+    func setManual(proRaw: Bool) { updateManual { $0.proRaw = proRaw } }
+
+    func setManualISO(automatic: Bool) {
+        updateManual { $0.iso = automatic ? nil : (proCapabilities.isoRange?.lowerBound) }
+    }
+
+    func setManualShutter(automatic: Bool) {
+        updateManual {
+            $0.shutterSeconds = automatic ? nil : proCapabilities.shutterRange?.lowerBound
+        }
+    }
+
+    /// Exposure compensation has no "automatic" in the enum sense — 0 EV *is* the neutral
+    /// point, and AVFoundation meters to it. So automatic means "back to zero", and the
+    /// toggle only exists because the slider cannot express it.
+    func setManualEV(automatic: Bool) {
+        updateManual { $0.exposureTargetOffset = automatic ? 0 : $0.exposureTargetOffset }
+        if !automatic, manual.exposureTargetOffset == 0 {
+            updateManual { $0.exposureTargetOffset = 0.25 }
+        }
+    }
 
     // MARK: - Readout
 

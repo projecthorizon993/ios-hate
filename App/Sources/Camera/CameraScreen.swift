@@ -1,12 +1,17 @@
 import AVFoundation
 import SwiftUI
 
-/// The camera screen. Auto mode only — that is Step 1.
+/// The camera screen — Auto, Looks and Pro.
 ///
 /// Layout follows `docs/DESIGN_SPEC.md`: a status row with no tappable controls, the
 /// viewfinder, then a bottom stack that is the only interactive region. Portrait only,
 /// matching `UISupportedInterfaceOrientations` in the Info.plist; the landscape column
 /// layout arrives with the orientation change that enables it.
+///
+/// Looks and Pro are **sheets over the viewfinder, not replacements for it.** A camera
+/// app that swaps the screen to show a slider has taken away the thing the slider is
+/// adjusting, and the user has to dismiss it to check the result. The preview is computed
+/// per frame, so leaving it visible behind a sheet costs nothing extra.
 struct CameraScreen: View {
 
     @StateObject private var model = CameraViewModel()
@@ -14,6 +19,8 @@ struct CameraScreen: View {
     @State private var deviceOrientation = UIDevice.current.orientation
     @State private var focusReticle: CGPoint?
     @State private var isShowingReport = false
+    @State private var isShowingLooks = false
+    @State private var isShowingPro = false
 
     /// Derived, never stored twice. Rotating the device or flipping the camera both
     /// change it, and there is only one place the angle is computed.
@@ -51,19 +58,40 @@ struct CameraScreen: View {
         .sheet(isPresented: $isShowingReport, onDismiss: { model.resumeAfterDiagnostics() }) {
             ReportScreen()
         }
+        // Steps 3 and 4. Presented over the viewfinder, and deliberately not routed
+        // through the diagnostics handover — that handover exists because the report opens
+        // a second capture session, and neither of these does.
+        .sheet(isPresented: $isShowingLooks) {
+            NavigationStack { LooksScreen(model: model) }
+        }
+        .sheet(isPresented: $isShowingPro) {
+            NavigationStack { ProScreen(model: model) }
+        }
     }
 
     // MARK: - Viewfinder
 
     private var viewfinder: some View {
         ZStack {
-            PreviewView(session: model.captureSession,
-                        rotationAngle: previewRotation,
-                        isFrontFacing: model.facing == .front,
-                        onBridgeReady: { bridge = $0 })
-                .background(Theme.ColorToken.surfaceBase)
-                .aspectRatio(3.0 / 4.0, contentMode: .fit)
-                .clipped()
+            // Two preview paths, chosen by whether the recipe does anything. The direct
+            // layer is the fastest preview there is and is on screen for the whole of Auto
+            // mode; the processed one is what makes the Looks tab mean anything, because
+            // otherwise the intensity slider would be a guess until after the shutter.
+            if model.isProcessingActive {
+                ProcessedPreviewView(preview: model.processedPreview,
+                                     redrawToken: model.previewRedrawToken)
+                    .background(Theme.ColorToken.surfaceBase)
+                    .aspectRatio(3.0 / 4.0, contentMode: .fit)
+                    .clipped()
+            } else {
+                PreviewView(session: model.captureSession,
+                            rotationAngle: previewRotation,
+                            isFrontFacing: model.facing == .front,
+                            onBridgeReady: { bridge = $0 })
+                    .background(Theme.ColorToken.surfaceBase)
+                    .aspectRatio(3.0 / 4.0, contentMode: .fit)
+                    .clipped()
+            }
 
             overlayCanvas
                 .aspectRatio(3.0 / 4.0, contentMode: .fit)
@@ -242,11 +270,18 @@ struct CameraScreen: View {
         HStack(spacing: Theme.Space.s) {
             ForEach(CameraMode.allCases, id: \.self) { mode in
                 ModeButton(mode: mode, isSelected: model.mode == mode) {
-                    guard mode.isImplemented else {
-                        model.present("\(mode.label) mode arrives in a later step", isError: false)
-                        return
-                    }
                     Haptics.selection()
+                    switch mode {
+                    case .auto:
+                        // Auto is the base state: the recipe stays exactly as the user left
+                        // it, because a look the user dialled in in Looks mode is a
+                        // preference, not something leaving Looks mode should undo.
+                        model.setMode(.auto)
+                    case .looks:
+                        isShowingLooks = true
+                    case .pro:
+                        isShowingPro = true
+                    }
                 }
             }
         }
