@@ -69,12 +69,14 @@ enum SubjectSegmentation {
             return nil
         }
 
-        guard let observation = request.results?.first as? VNPixelBufferObservation,
-              let maskBuffer = observation.pixelBuffer
-        else {
+        // `VNPixelBufferObservation.pixelBuffer` is non-optional on this SDK: an observation
+        // only exists if there is a buffer, so there is no "no mask" case to unwrap. The
+        // only absence worth handling is no observation at all, which means no person.
+        guard let observation = request.results?.first as? VNPixelBufferObservation else {
             AppLog.note(AppLog.ml, "segmentation found no person")
             return nil
         }
+        let maskBuffer = observation.pixelBuffer
 
         let coverage = meanValue(of: maskBuffer)
         guard coverage > minimumCoverage else {
