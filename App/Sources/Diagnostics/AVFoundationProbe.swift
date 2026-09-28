@@ -47,7 +47,7 @@ enum AVFoundationProbe {
         // `prefersWideAngle` is true for the dual/triple wide containers as well as the
         // plain wide one, which is what we want — the logical wide lens, not the physical
         // module list.
-        let primary = devices.first { $0.position == .back && $0.deviceType.prefersWideAngle }
+        let primary = devices.first { $0.position == .back && isWide($0.deviceType) }
             ?? devices.first { $0.position == .back }
             ?? devices.first
 
@@ -67,12 +67,11 @@ enum AVFoundationProbe {
 
     /// True for the logical wide lens. `builtInDualWideCamera` and
     /// `builtInTripleCamera` are containers that *include* the wide lens, so they count.
-    private static var wideTypes: Set<AVCaptureDevice.DeviceType> {
-        [.builtInWideAngleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInTripleCamera]
-    }
-
-    private extension AVCaptureDevice.DeviceType {
-        var prefersWideAngle: Bool { AVFoundationProbe.wideTypes.contains(self) }
+    private static func isWide(_ type: AVCaptureDevice.DeviceType) -> Bool {
+        type == .builtInWideAngleCamera
+            || type == .builtInDualWideCamera
+            || type == .builtInDualCamera
+            || type == .builtInTripleCamera
     }
 
     // MARK: - Discovery
