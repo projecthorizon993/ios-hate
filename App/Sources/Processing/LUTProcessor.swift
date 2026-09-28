@@ -55,28 +55,40 @@ struct LUTProcessor {
         // texture upload and filter pass on every frame while a look is switched off.
         guard intensity > 0 else { return image }
 
-        // `CIColorCube` is a filter *name*, not a Swift type, so it is built through the
-        // string-based API. That is deliberate: the typed `CIFilter` builtins are
-        // generated per SDK and guessing at one is a compile error waiting to happen,
-        // whereas the string form and these four keys are part of the filter's contract.
-        // `Data(lut.samples)` does not compile: `Data` initialises from bytes, and
-        // `Float` is not `UInt8`. CIColorCube wants the raw 32-bit float bit patterns,
-        // so the sample buffer is copied verbatim rather than converted.
+        // `CIColorCube` has **no** `inputColorSpace` key — it operates in the
+        // context's working colour space. Passing that key raises
+        // NSUnknownKeyException at `setValue:forUndefinedKey:`, which is an
+        // Objective-C exception, which Swift cannot catch, which means the app dies.
+        // The colour-space-aware variant is a separate filter name, so that is what is
+        // used, and the whole construction is inside the exception trap below.
         guard let cubeData = Self.cubeData(for: lut) else { throw LUTApplicationError.notUsable }
+
+        // `Data(lut.samples)` does not compile: `Data` initialises from bytes, and
+        // `Float` is not `UInt8`. The filter wants the raw 32-bit float bit patterns, so
+        // the sample buffer is copied verbatim rather than converted.
         var parameters: [String: Any] = [
             kCIInputImageKey: image,
             "inputCubeDimension": CGFloat(lut.size),
             "inputCubeData": cubeData
         ]
         parameters["inputColorSpace"] = imageSpace.cgColorSpace
-        let cube = CIFilter(name: "CIColorCube", parameters: parameters)
-        guard let graded = cube?.outputImage else {
-            // Core Image returns nil for an unknown filter or bad parameters rather
-            // than raising, so this is a real branch and the only correct answer is to
-            // not apply the table.
-            AppLog.fail(AppLog.processing, "CIColorCube produced no output; LUT not applied")
+
+        var graded: CIImage?
+        let raised = LumaFrameSafety.perform {
+            graded = CIFilter(name: "CIColorCubeWithColorSpace", parameters: parameters)?.outputImage
+        }
+        if let raised {
+            AppLog.fail(AppLog.processing, "cube construction raised \(raised); LUT not applied")
             throw LUTApplicationError.notUsable
         }
+        guard let result = graded else {
+            // A nil filter means the name is unknown to this OS version, which is a
+            // different failure from an exception and gets its own line so the two are
+            // not confused later.
+            AppLog.fail(AppLog.processing, "CIColorCubeWithColorSpace unavailable; LUT not applied")
+            throw LUTApplicationError.notUsable
+        }
+        let cube = result
 
         guard intensity < 1 else { return graded }
 

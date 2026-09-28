@@ -218,6 +218,14 @@ final class LUTProcessorTests: XCTestCase {
         }
     }
 
+    /// An Objective-C exception is not catchable in Swift, so an invalid filter key
+    /// takes the whole app down rather than failing a capture. `CIColorCube` has no
+    /// `inputColorSpace` key at all, and the first version of this code proved that the
+    /// hard way. `testEveryIntensityInRangeIsAccepted` and the apply tests below are
+    /// therefore also the regression test for the trap: if a future edit reintroduces a
+    /// key the filter does not have, the process dies here in CI rather than on a phone
+    /// in someone's hand.
+
     /// A larger table must also build. The size ceiling is enforced at parse time, so a
     /// 33-cubed table reaching here is already known to be within the texture budget.
     func testAcceptsTheMaximumTableSize() throws {

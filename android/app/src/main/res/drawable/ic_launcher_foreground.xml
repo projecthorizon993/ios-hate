@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original mark: a simple aperture ring. Deliberately not derived from any
+     third-party camera iconography. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#F2C14E"
+        android:pathData="M54,32a22,22 0 1,0 0.1,0zM54,40a14,14 0 1,1 -0.1,0z" />
+    <path
+        android:fillColor="#F2C14E"
+        android:pathData="M52,28h4v10h-4z" />
+    <path
+        android:fillColor="#9BA0A8"
+        android:pathData="M52,70h4v10h-4z" />
+</vector>
