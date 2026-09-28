@@ -378,9 +378,18 @@ final class CameraStep1Tests: XCTestCase {
 
     // MARK: - Modes
 
-    func testOnlyAutoIsImplementedInStep1() {
-        XCTAssertTrue(CameraMode.auto.isImplemented)
-        XCTAssertFalse(CameraMode.pro.isImplemented)
-        XCTAssertFalse(CameraMode.looks.isImplemented)
+    /// Was `testOnlyAutoIsImplementedInStep1`, asserting that Pro and Looks reported
+    /// themselves unavailable. Steps 3 and 4 built them, so the assertion was inverted
+    /// rather than deleted — the modes are still all present and still all labelled the
+    /// same way, which is the part of the contract that does not change when one of them
+    /// stops being a placeholder.
+    func testEveryModeIsImplementedAndKeepsItsLabel() {
+        for mode in CameraMode.allCases {
+            XCTAssertTrue(mode.isImplemented, "\(mode) should be implemented")
+            XCTAssertFalse(mode.label.isEmpty, "\(mode) needs a label")
+        }
+        // The mode switcher's order is the chrome, and `DESIGN_SPEC.md` requires it not
+        // to move when a mode is filled in.
+        XCTAssertEqual(CameraMode.allCases, [.auto, .pro, .looks])
     }
 }

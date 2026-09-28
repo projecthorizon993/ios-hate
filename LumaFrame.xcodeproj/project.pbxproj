@@ -89,6 +89,7 @@
 				AC938FD7C68ED288AC7E4FED,
 				AD2B88580548E280FD38F0B1,
 				A2890D903D2D4D036C61B290,
+				A2DBE3DC77B7D5D67C72CF65,
 				A7681A1A19F9BB62FD3BBEEF,
 				A10000000000000000000058
 			);
@@ -322,6 +323,7 @@
 				D7EA069DAB30A429FBAE2818,
 				D8343F3D69C04F13AD71A04B,
 				DF8246E931F2AD3EAA34D9E7,
+				DE69752AFD735837BE0E75AB,
 				D0D1942134E71C67DBB59C17,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -661,6 +663,12 @@
 			path = App/Tests/LUTProcessorTests.swift;
 			sourceTree = "<group>";
 		};
+		A2DBE3DC77B7D5D67C72CF65 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Tests/ProcessingPipelineTests.swift;
+			sourceTree = "<group>";
+		};
 		A7681A1A19F9BB62FD3BBEEF = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -854,6 +862,10 @@
 		DF8246E931F2AD3EAA34D9E7 = {
 			isa = PBXBuildFile;
 			fileRef = A2890D903D2D4D036C61B290;
+		};
+		DE69752AFD735837BE0E75AB = {
+			isa = PBXBuildFile;
+			fileRef = A2DBE3DC77B7D5D67C72CF65;
 		};
 		D0D1942134E71C67DBB59C17 = {
 			isa = PBXBuildFile;

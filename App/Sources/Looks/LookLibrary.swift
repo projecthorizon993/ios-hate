@@ -38,9 +38,12 @@ final class LookLibrary {
         Look.Generated.allCases.map(\.look) + imported
     }
 
-    /// The look that means "no processing", offered as a grid tile so the user always has
-    /// a way back.
-    static let original = Look(name: "Original", source: .generated(.liftedShadows))
+    // There is deliberately no "Original" Look value. Original is the *absence* of a look
+    // — `ProcessingSettings.look == nil` — and giving it a Look would mean an identity
+    // table that has to be generated, resolved and applied at full intensity to produce
+    // the unprocessed image. The version that existed briefly pointed at
+    // `.liftedShadows`, which would have made the one control that must return the photo
+    // to how it was captured apply a graded look instead.
 
     /// Resolves a look to a table, or `nil` with a logged reason.
     ///
