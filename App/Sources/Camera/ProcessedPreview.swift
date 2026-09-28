@@ -109,8 +109,15 @@ final class ProcessedPreview: NSObject {
         }
         // `AVAssetWriter` is the only encoder that writes HEVC from a `CIImage` without
         // an intermediate file, and the app has to produce HEVC because that is the codec
-        // chosen for stills.
-        let encoder = AVAssetWriter(outputURL: url, fileType: .mov)
+        // chosen for stills. It has a throwing initialiser, so a bad URL fails here
+        // rather than silently producing a zero-byte file.
+        let encoder: AVAssetWriter
+        do {
+            encoder = try AVAssetWriter(outputURL: url, fileType: .mov)
+        } catch {
+            AppLog.fail(AppLog.processing, "still encoder could not be created: \(error.localizedDescription)")
+            return
+        }
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.hevc,
             AVVideoWidthKey: Int(still.extent.width),
@@ -258,7 +265,9 @@ final class ProcessedPreviewRenderer: NSObject, MTKViewDelegate {
     func draw(in view: MTKView) {
         guard let image = source?.lastStill(),
               let drawable = view.currentDrawable,
-              let commandBuffer = view.device?.makeCommandBuffer()
+              // `MTLDevice` has no `makeCommandBuffer`; the buffer comes from a queue.
+              let queue = view.device?.makeCommandQueue(),
+              let commandBuffer = queue.makeCommandBuffer()
         else { return }
 
         let drawableSize = view.drawableSize
