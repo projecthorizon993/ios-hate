@@ -34,7 +34,9 @@ struct LUTProcessor {
               LUTProcessor.intensityRange.contains(intensity) else {
             throw LUTApplicationError.intensityOutOfRange(intensity)
         }
-        guard lut.isUsable else { throw LUTApplicationError.notUsable }
+        guard lut.isUsable else {
+            throw LUTApplicationError.notUsable(reason: "the table is missing samples")
+        }
         guard lut.kind == .threeDimensional else {
             throw LUTApplicationError.oneDimensionalTableNotSupported(size: lut.size)
         }
@@ -55,39 +57,39 @@ struct LUTProcessor {
         // texture upload and filter pass on every frame while a look is switched off.
         guard intensity > 0 else { return image }
 
-        // `CIColorCube` has **no** `inputColorSpace` key — it operates in the
-        // context's working colour space. Passing that key raises
-        // NSUnknownKeyException at `setValue:forUndefinedKey:`, which is an
-        // Objective-C exception, which Swift cannot catch, which means the app dies.
-        // The colour-space-aware variant is a separate filter name, so that is what is
-        // used, and the whole construction is inside the exception trap below.
-        guard let cubeData = Self.cubeData(for: lut) else { throw LUTApplicationError.notUsable }
+        // The colour space is part of this filter, which is why it is
+        // `CIColorCubeWithColorSpace` and not `CIColorCube`.
+        //
+        // Built through the **typed** API, not the string form. Three CI runs went into
+        // the string form: `CIColorCube` has no `inputColorSpace` key and raised
+        // NSUnknownKeyException (an Objective-C exception Swift cannot catch, so the app
+        // would have died on the first frame), and a `CGFloat` dimension was silently
+        // refused where the property is declared `Float`, producing a nil filter and no
+        // error at all. Every one of those is a compile-time error here and a runtime
+        // surprise there, which is the exact trade the typed builtins exist to remove.
+        guard let cubeData = Self.cubeData(for: lut) else {
+            throw LUTApplicationError.notUsable(reason: "the sample buffer could not be built")
+        }
 
         // `Data(lut.samples)` does not compile: `Data` initialises from bytes, and
         // `Float` is not `UInt8`. The filter wants the raw 32-bit float bit patterns, so
         // the sample buffer is copied verbatim rather than converted.
-        var parameters: [String: Any] = [
-            kCIInputImageKey: image,
-            "inputCubeDimension": CGFloat(lut.size),
-            "inputCubeData": cubeData
-        ]
-        parameters["inputColorSpace"] = imageSpace.cgColorSpace
-
-        // Captured through a mutable local because the trap takes a void block.
-        var captured: CIImage?
+        var graded: CIImage?
         let raised = LumaFrameSafety.perform {
-            captured = CIFilter(name: "CIColorCubeWithColorSpace", parameters: parameters)?.outputImage
+            let cube = CIFilter.colorCubeWithColorSpace()
+            cube.inputImage = image
+            cube.cubeDimension = Float(lut.size)
+            cube.cubeData = cubeData
+            cube.colorSpace = imageSpace.cgColorSpace
+            graded = cube.outputImage
         }
         if let raised {
             AppLog.fail(AppLog.processing, "cube construction raised \(raised); LUT not applied")
-            throw LUTApplicationError.notUsable
+            throw LUTApplicationError.notUsable(reason: "Core Image raised \(raised)")
         }
-        guard let graded = captured else {
-            // A nil filter means the name is unknown to this OS version, which is a
-            // different failure from an exception and gets its own line so the two are
-            // not confused later.
-            AppLog.fail(AppLog.processing, "CIColorCubeWithColorSpace unavailable; LUT not applied")
-            throw LUTApplicationError.notUsable
+        guard let graded else {
+            AppLog.fail(AppLog.processing, "cube produced no output; LUT not applied")
+            throw LUTApplicationError.notUsable(reason: "Core Image produced no output")
         }
 
         guard intensity < 1 else { return graded }

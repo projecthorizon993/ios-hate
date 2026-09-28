@@ -104,7 +104,10 @@ final class LUTProcessorTests: XCTestCase {
                                                  to: makeTestImage(),
                                                  intensity: 1,
                                                  imageSpace: .sRGB)) { error in
-            XCTAssertEqual(error as? LUTApplicationError, .notUsable)
+            guard case .notUsable(let reason)? = error as? LUTApplicationError else {
+                return XCTFail("expected notUsable, got \(error)")
+            }
+            XCTAssertFalse(reason.isEmpty, "the reason must say something")
         }
     }
 
@@ -138,7 +141,7 @@ final class LUTProcessorTests: XCTestCase {
         let refusals: [LUTApplicationError] = [
             .oneDimensionalTableNotSupported(size: 3),
             .domainMismatch(lut: "linear sRGB", image: "sRGB"),
-            .notUsable,
+            .notUsable(reason: "the table is missing samples"),
             .intensityOutOfRange(2)
         ]
         for refusal in refusals {

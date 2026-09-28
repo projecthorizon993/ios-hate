@@ -57,7 +57,10 @@ enum LUTApplicationError: LocalizedError, Equatable {
     /// The table's declared domain is not the image's colour space.
     case domainMismatch(lut: String, image: String)
 
-    case notUsable
+    /// Core Image would not build the filter. Carries the reason because three separate
+    /// CI runs were spent on a bare `notUsable` that said nothing about which of the
+    /// filter's parameters it disliked.
+    case notUsable(reason: String)
 
     case intensityOutOfRange(Float)
 
@@ -68,8 +71,8 @@ enum LUTApplicationError: LocalizedError, Equatable {
         case .domainMismatch(let lut, let image):
             return "This lookup table is in \(lut) and the image is in \(image). "
                 + "Converting between them would change the colours, so it is not done automatically."
-        case .notUsable:
-            return "This lookup table is incomplete and cannot be applied."
+        case .notUsable(let reason):
+            return "This lookup table cannot be applied: \(reason)."
         case .intensityOutOfRange(let value):
             return "Intensity \(value) is outside 0…1."
         }
