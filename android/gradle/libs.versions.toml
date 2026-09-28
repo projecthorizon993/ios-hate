@@ -1,5 +1,5 @@
-// Version catalog is the single place to bump the toolchain. See docs/ARCHITECTURE.md
-// section 8 for why each of these versions is pinned.
+# Version catalog is the single place to bump the toolchain. See docs/ARCHITECTURE.md
+# section 8 for why each of these versions is pinned.
 [versions]
 agp = "8.13.2"
 kotlin = "2.3.21"

@@ -37,12 +37,16 @@ final class LUTProcessorTests: XCTestCase {
                        samples: samples)
     }
 
+    /// A plain CIImage to hand to the processor.
+    ///
+    /// `CIImage(color:)` rather than a generator filter: `CIFalseColor` and friends are
+    /// filter *names*, not Swift types, and a flat image is enough here. The pixel
+    /// *values* produced by the pipeline are not asserted — that needs a real GPU and a
+    /// reference image, and belongs in the on-device checklist. What is asserted here is
+    /// the decisions: what is refused, what is a no-op, and the cube byte order.
     private func makeTestImage() -> CIImage {
-        let gradient = CIFalseColor()
-        gradient.color0 = CIColor(red: 0, green: 0, blue: 0)
-        gradient.color1 = CIColor(red: 1, green: 1, blue: 1)
-        gradient.extent = CGRect(x: 0, y: 0, width: 4, height: 4)
-        return gradient.outputImage
+        let flat = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+        return flat.cropped(to: CGRect(x: 0, y: 0, width: 4, height: 4))
     }
 
     // MARK: - Cube data

@@ -1,0 +1,12 @@
+﻿Fix the version catalog comments and stop using a filter name as a type
+
+android/gradle/libs.versions.toml opened with two // comment lines. TOML
+comments are #, so the whole catalog was rejected as an invalid definition and
+Gradle never reached a single source file. The duplicate-looking litert key was a
+false alarm: it appears in [versions] and [libraries], which are different
+tables and perfectly legal.
+
+LUTProcessorTests used CIFalseColor as if it were a Swift type. Core Image
+generators are filter names, the same mistake as CIColorCube. Replaced with
+CIImage(color:), and the test now says plainly that pixel values are verified on
+device, not here: what it checks is the decisions and the cube byte order.
