@@ -22,18 +22,16 @@ object CameraProbe {
     fun sections(context: Context): List<ReportSection> {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
             ?: return listOf(ReportSection("Camera2").apply {
-                += ReportEntry("result", "CameraManager unavailable", ReportLevel.FAIL)
+                add(ReportEntry("result", "CameraManager unavailable", ReportLevel.FAIL))
             })
 
         val ids = try {
             manager.cameraIdList.toList()
         } catch (error: Throwable) {
             return listOf(ReportSection("Camera2").apply {
-                += listOf(
-                    ReportEntry("cameraIdList", "failed: ${error.message}", ReportLevel.FAIL),
-                    ReportEntry("note", "a SecurityException here means CAMERA permission is not granted",
-                        ReportLevel.WARN)
-                )
+                add(ReportEntry("cameraIdList", "failed: ${error.message}", ReportLevel.FAIL))
+                add(ReportEntry("note", "a SecurityException here means CAMERA permission is not granted",
+                    ReportLevel.WARN))
             })
         }
 
