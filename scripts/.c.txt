@@ -1,9 +1,0 @@
-﻿Stop set -e from killing the Android failure handler
-
-set -e is re-enabled before the failure block, and a grep that matches nothing
-exits 1. Inside a pipeline that aborts the step immediately, so the handler died
-on its first grep and printed nothing at all: no annotations, no summary, exit 1.
-Every command in the block now explicitly tolerates failure, and the same fix
-goes into the assembleDebug step.
-
-Also fixes a static member called on an instance in LUTProcessor.

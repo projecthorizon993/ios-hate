@@ -23,7 +23,6 @@ The repository at:
 `https://github.com/zhihongz/awesome-low-light-image-enhancement`
 
 is a research and model-selection resource. It is not an iOS SDK and must not be treated as an application backend.
-
 Use it to evaluate and select enhancement techniques, not to copy its entire catalog into the app.
 
 Recommended evaluation order:
@@ -34,7 +33,9 @@ Recommended evaluation order:
 4. Compare candidate approaches such as Zero-DCE, EnlightenGAN, SCI, Retinexformer, and newer lightweight models.
 5. Prefer models that support iPhone-specific RAW or camera data, real-time inference, stable colors, and acceptable memory use.
 
-The first release must work without a server. A backend is optional and is used only for account features, preset synchronization, model distribution, and analytics.
+The first release must work without a server, and there is no server at all: there is no
+account, no sync, no remote model distribution and no analytics. Model selection happens
+at build time from the sources above. See section 13.1.
 
 ## 3. Product Goals
 
@@ -548,7 +549,10 @@ Quality profiles:
 
 Preserve the original capture and store processing instructions as a recipe so processing can be re-rendered without destructive edits.
 
-## 13. Optional Backend
+## 13. Backend — considered and rejected
+
+> **Resolved: there is no backend.** See section 13.1 for the decision and for what
+> replaces it. What follows is kept only as the record of what was considered.
 
 The first release must be usable offline. If a backend is added, keep it optional and separate from capture.
 
@@ -578,6 +582,45 @@ Export job service
 
 Use signed URLs for media, encrypted transport, strict authorization, rate limiting, and deletion workflows.
 
+### 13.1 Decision: no backend, and a separately versioned format contract
+
+**Resolved. The list above is what was considered and is not being built.** Preset
+sync, accounts, model distribution and telemetry all stay out indefinitely. There is no
+server component.
+
+What replaces it is narrower and more important. The iOS and Android apps must produce
+and read **the same files, byte for byte** — the same recipe, the same preset schema, the
+same `.cube` rules, the same processing order — and they must do that without sharing
+code, because the only things they can share are text formats and an ordered pipeline,
+not Swift or Kotlin.
+
+So the shared artefact is a **contract**, not a service:
+
+| | |
+| --- | --- |
+| Repositories | iOS app, Android app, `format-contract` — three, released independently |
+| Shared | the file formats and the processing order, specified in `format-contract` |
+| Not shared | source code. No submodules, no private package dependencies, no generated clients |
+| Versioning | each component carries its own semver; the contract is versioned separately and each app pins the version it implements |
+| Enforcement | shared fixtures with byte-exact expected results, run as a conformance suite in both apps' CI |
+
+Data is shared; code is not. Two independent implementations that both pass the same
+byte-exact fixtures produce interchangeable files. Two that agree only on prose do not.
+
+The full rules — what the contract contains, the MAJOR/MINOR/PATCH meanings, the
+"a reader must accept every version at or below its own" rule, and the migration order
+— are in `docs/ARCHITECTURE.md` section 9.
+
+Consequences worth stating plainly:
+
+- Section 14 is unaffected. Media stays on the device, there is no account, and nothing
+  is uploaded. Separating the contract into its own repository adds no network path.
+- Every feature below that assumed preset sync or remote models is now out of scope
+  and must be re-specified in local terms. Sync, in particular, is replaced by export
+  and import of the same files.
+- The original capture remains the only source of truth, exactly as before. The
+  contract describes how to describe it, not how to store it anywhere else.
+
 ## 14. Security and Privacy
 
 - Request camera, microphone, photo-library, and local-network permissions only when required.
@@ -587,7 +630,8 @@ Use signed URLs for media, encrypted transport, strict authorization, rate limit
 - Do not log image contents, EXIF, file names, or user identifiers in debug logs.
 - Redact credentials and tokens from diagnostics.
 - Use Keychain for credentials and secure local storage where appropriate.
-- Use ATS and certificate validation for backend traffic.
+- Use ATS and certificate validation for any network traffic. There is currently no
+  network traffic; this rule is retained so that adding one is a deliberate act.
 - Validate imported LUTs and preset files.
 - Provide a one-step way to clear local media, caches, and account data.
 - Document model and dataset licenses before shipping.
@@ -720,7 +764,9 @@ Exit criteria: the app meets its performance budgets and recovers cleanly from r
 - Validate App Store privacy declarations.
 - Review model, dataset, font, icon, and texture licenses.
 - Create release build configuration.
-- Add crash-free-session and performance dashboards if a backend exists.
+- Crash-free-session and performance dashboards. With no backend, telemetry is
+  on-device only: the bounded log ring buffer that the capability report already
+  exports. There is nowhere for a dashboard to get its data.
 - Prepare screenshots and camera capability disclosures.
 - Run a final regression suite.
 
@@ -803,7 +849,9 @@ Test every supported device class:
 
 The first release is accepted when:
 
-- The app can launch without a backend connection.
+- The app launches and works with no network connection of any kind. There is no
+  account, no sync and no server to be unreachable, so this is a property of the
+  design rather than a degraded mode.
 - The camera preview is stable and orientation-correct.
 - Manual controls honor the device's actual capabilities.
 - Low-light mode improves dark scenes without excessive noise or color casts.
@@ -836,6 +884,9 @@ The first release is accepted when:
 | Third-party licensing is incompatible | Maintain a license inventory and approved-source policy |
 | Backend privacy concerns | Keep capture local and require explicit consent for upload |
 | Custom assets consume storage | Use optimized raster assets and load them by demand |
+| The two apps drift apart on file formats | One versioned contract plus byte-exact fixtures, run as a conformance suite in both CI pipelines; see section 13.1 |
+| A file written by an older app stops opening | The format version lives in the file, and a reader must accept every version at or below its own |
+| A format change ships without agreement | No format change ships without a contract version bump and a new fixture |
 
 ## 19. Agent Execution Rules
 
@@ -855,6 +906,10 @@ For every task:
 10. Record unsupported features in the capability diagnostics and UI.
 11. Use bounded queues and cancellation for every real-time processing path.
 12. Update this plan when architecture, supported devices, or acceptance criteria change.
+13. Do not change a file format, the recipe grammar, or the processing order without a
+    contract version bump and a byte-exact fixture. See section 13.1.
+14. Do not add a server, a shared code dependency between the two apps, or a
+    cross-repository build link. Data is shared; code is not.
 
 Recommended implementation order for the first vertical slice:
 

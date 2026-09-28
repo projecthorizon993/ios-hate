@@ -388,7 +388,132 @@ Deliberately **not** adopted yet, and why:
 
 ---
 
-## 9. Testing
+## 9. Infrastructure and repository topology
+
+Decided, and deliberately **not** a backend.
+
+### 9.1 What is actually shared
+
+**The file formats. Not the code, and not a server.**
+
+There is one artefact both platforms must agree on byte for byte: the data a photo
+carries and the rules for reading it. That is:
+
+| Artefact | Where it is defined today | Notes |
+| --- | --- | --- |
+| Recipe string grammar | `Storage/CaptureMetadata.swift` | `v1;key=value;…` in `Exif.UserComment` |
+| Preset JSON schema | does not exist yet (Step 3) | |
+| `.cube` accept/reject rules | `Processing/CubeLUTParser.swift` | including the error taxonomy |
+| Colour-space rules per stage | `Processing/ColorSpace.swift` | section 3.1 above |
+| Reference fixtures | do not exist yet | see 9.4 |
+
+The native pipeline in `docs/ARCHITECTURE.md` section 3 is a **second** shared thing
+and is the more important of the two: the order of operations, and the rule that
+preview and saved photo use the same code path with the same parameters. A preset
+authored on one platform and applied on the other only matches if both follow the same
+order, not merely the same file format.
+
+### 9.2 Repositories
+
+Three, each versioned and released on its own cadence.
+
+| Repository | Contains | Version | Ships when |
+| --- | --- | --- | --- |
+| `ios-hate` (this one) | iOS app | semver + build number | App Store release |
+| Android app | Android app | semver + `versionCode` | Play release |
+| **format-contract** | the normative spec and fixtures | semver, own CHANGELOG | whenever the format changes |
+
+A manifest of compatible versions lives in the contract repo, and each app records the
+contract version it implements in exactly one place, and logs it at startup. That way a
+photo taken by an old app declares which reader it needs, instead of relying on someone
+remembering.
+
+### 9.3 Why separate repos and not a shared library
+
+The tempting design is a shared SwiftPM / Gradle package holding the parsers. It is
+wrong here, for three reasons:
+
+1. **A shared library couples the release cadences**, which is the thing being avoided.
+   Every change to the recipe format would force both apps out together.
+2. **Both platforms cannot share code anyway.** The format is text; the parsers are
+   Swift and Kotlin. A shared library would have to be either Swift-only (so Android
+   reimplements it and the contract drifts) or a C target (which is not worth a build
+   system for a text format).
+3. **A git submodule or a private package dependency makes every build need network
+   access**, and the brief requires the first release to work with no backend and no
+   network.
+
+So: **data is shared, code is not.** The contract is a specification plus test
+fixtures, and each platform implements it independently and is held to it by tests.
+
+### 9.4 The contract, concretely
+
+The contract repository holds:
+
+- A **normative specification** in prose, not comments in somebody's source file. The
+  grammar currently lives in `CaptureMetadata.swift` doc comments, which is not a
+  specification — it is a description of one implementation.
+- **JSON Schemas** for the preset file, so a third-party tool can validate one.
+- **Fixtures**: a small, fixed set of files with byte-exact expected results.
+  - recipe strings in, parsed field maps out
+  - `.cube` files in, parsed tables and specific error cases out
+  - at least one *invalid* fixture per rejection rule, because the rejection path is
+    the half of a parser that is never tested
+- A **conformance suite** each app can run in CI.
+
+The fixtures are the enforcement. Two implementations that both pass the same
+byte-exact fixtures produce the same files; two that only agree on prose will not.
+
+### 9.5 Versioning rules
+
+- **MAJOR** — an incompatible change. A reader must not silently misinterpret old
+  files. Old files keep their own version marker, so this is a *new* reader path, never
+  a reinterpretation.
+- **MINOR** — additive. A new optional key. A reader that does not know the key ignores
+  it, which is why unknown keys are skipped rather than rejected in `CubeLUTParser`.
+- **PATCH** — editorial: clarifications, extra examples, no behaviour change.
+
+Two hard rules:
+
+1. **A reader must accept every version at or below its own.** A photo taken three app
+   versions ago must still open. This is why the version is *in the file*
+   (`v1;…` in the recipe, `version` in a preset) rather than implied by the app.
+2. **No format change ships without a contract version bump and a fixture.** A change
+   to parsing that is not accompanied by a new fixture is a bug, and CI should be
+   arranged so it is caught before review rather than after.
+
+### 9.6 What this rules out
+
+- **No backend, and none is planned.** Preset sync, model distribution, accounts and
+  telemetry all stay out. This supersedes the optional-backend sketch in
+  `IOS_CAMERA_APP_PLAN.md` section 13; that section is retained only as the record of
+  what was considered and why it was dropped.
+- **No cross-repo source sharing.** No submodules, no private SwiftPM or Gradle
+  dependencies, no generated clients from a shared schema.
+- **No implicit contract.** If a rule is only in a source comment, it is not a rule
+  yet. It becomes one when it is in the specification and has a fixture.
+
+### 9.7 Privacy consequence
+
+None, and that is the point: section 14 of the plan still holds in full. Media stays on
+the device, there is no account, and nothing is uploaded. Separating the *contract* into
+its own repository adds no network path and no data path.
+
+### 9.8 Migration order
+
+1. Create the contract repository with the specification, extracted from the doc
+   comments in `CaptureMetadata.swift`, `CubeLUTParser.swift` and `ColorSpace.swift`.
+2. Add the fixtures, and a conformance test target in this repository that runs them.
+   Until this exists, the contract is prose and proves nothing.
+3. Add the same conformance target to the Android repository against the same fixtures.
+4. Only then change a format.
+
+Step 2 before step 3, because the iOS side is the only implementation that exists, and
+it is the one that should be measured against the fixtures first.
+
+---
+
+## 10. Testing
 
 Lean and high-value only. The list is in the original brief; the constraint is that
 **CI tests run without a device** (`xcodebuild test` needs a simulator destination,
