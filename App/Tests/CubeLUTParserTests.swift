@@ -262,7 +262,9 @@ final class CubeLUTParserTests: XCTestCase {
         1.0 1.0 1.0
         """
 
-        assertThrows(.sampleOutsideDeclaredDomain(line: 7), text: text)
+        // The offending sample is `1.4 1.0 0.0`, which is the eighth line: four
+        // directive/comment lines come first.
+        assertThrows(.sampleOutsideDeclaredDomain(line: 8), text: text)
     }
 
     /// A lower-case token that is neither a number nor a known directive is damaged data,
