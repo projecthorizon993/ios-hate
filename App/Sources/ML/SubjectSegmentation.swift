@@ -41,12 +41,27 @@ enum SubjectSegmentation {
     /// Vision is documented to reuse them.
     private static var activeRequest: VNGeneratePersonSegmentationRequest?
 
+    /// A computed mask: the statistics that go in a recipe, and the buffer they describe.
+    ///
+    /// These are two different lifetimes and are therefore two different fields. The
+    /// statistics are `Codable` and travel with the photo; the buffer belongs to the frame
+    /// it was computed from and is gone as soon as that frame is. Bundling them into one
+    /// type is what stops the temptation to put a `CVPixelBuffer` in the recipe.
+    struct Result {
+        var mask: SubjectMask
+        var buffer: CVPixelBuffer
+
+        /// The mask as an image, for the pipeline. Computed on demand rather than stored,
+        /// because most frames never ask and the conversion is not free.
+        func image() -> CIImage? { SubjectSegmentation.maskImage(from: buffer) }
+    }
+
     /// Computes a mask for one frame.
     ///
     /// Returns `nil` when there is no usable subject, which is the common case and is not
     /// an error. Never throws: an ML failure has to degrade to "no mask", not to a lost
     /// frame.
-    static func mask(for pixelBuffer: CVPixelBuffer) -> SubjectMask? {
+    static func compute(for pixelBuffer: CVPixelBuffer) -> Result? {
         let request: VNGeneratePersonSegmentationRequest
         if let existing = activeRequest {
             request = existing
@@ -90,7 +105,8 @@ enum SubjectSegmentation {
         let spread = contrastOf(maskBuffer)
         let confidence = min(1, max(0, spread))
 
-        return SubjectMask(coverage: coverage, confidence: confidence)
+        return Result(mask: SubjectMask(coverage: coverage, confidence: confidence),
+                      buffer: maskBuffer)
     }
 
     /// The mask as a `CIImage`, for the pipeline.

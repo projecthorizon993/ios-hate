@@ -54,6 +54,15 @@ final class ProcessedPreview: NSObject {
     /// The most recent rendered image, for the still-frame grab in the compare control.
     private var lastRendered: CIImage?
 
+    /// Segmentation state, guarded because it is written from the segmentation queue and
+    /// read from the capture queue.
+    private let maskLock = NSLock()
+    private var cachedMask: SubjectSegmentation.Result?
+    private var lastSegmentationAt: UInt64?
+
+    private let segmentationQueue = DispatchQueue(label: "com.example.LumaFrame.preview.segmentation",
+                                                   qos: .userInitiated)
+
     override init() {
         // Before `super.init()`: `output` and the delegate hand-off both need a fully
         // initialised `self`, and Swift will not let `super.init()` run twice.
@@ -206,11 +215,70 @@ extension ProcessedPreview: AVCaptureVideoDataOutputSampleBufferDelegate {
             image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         }
 
+        // Segmentation runs on a cadence, not per frame, and on its own queue: it is the
+        // most expensive thing in the app and the mask changes far slower than the image
+        // does. A nil is a real "no subject here" rather than "not computed yet", so the
+        // look falls back to global for that frame.
+        updateSubjectMaskIfDue(for: pixelBuffer)
+
         let rendered = pipeline.renderOrOriginal(image,
-                                                settings: settings,
+                                                settings: recipeCarryingMask,
                                                 inputSpace: inputSpace,
-                                                outputSpace: outputSpace)
+                                                outputSpace: outputSpace,
+                                                subjectMaskImage: currentMaskImage)
         lastRendered = rendered
+    }
+
+    /// Re-runs segmentation at most once per `SubjectSegmentation.cadence`.
+    private func updateSubjectMaskIfDue(for pixelBuffer: CVPixelBuffer) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        let interval = UInt64(SubjectSegmentation.cadence * 1_000_000_000)
+        if let lastAt = lastSegmentationAt, now &- lastAt < interval { return }
+        lastSegmentationAt = now
+
+        segmentationQueue.async { [weak self] in
+            guard let self else { return }
+            guard let result = SubjectSegmentation.compute(for: pixelBuffer) else {
+                self.setMask(nil)
+                return
+            }
+            // A mask the pipeline would reject is not carried forward. Keeping it would let
+            // a stale mask survive into frames it no longer describes, and the most common
+            // rejection is a mask that covers the whole frame — carrying that forward would
+            // blend by it forever.
+            guard result.mask.isUsable else {
+                AppLog.note(AppLog.ml, "subject mask not used: \(result.mask.decision())")
+                self.setMask(nil)
+                return
+            }
+            self.setMask(result)
+        }
+    }
+
+    private func setMask(_ result: SubjectSegmentation.Result?) {
+        maskLock.lock()
+        cachedMask = result
+        maskLock.unlock()
+        if let result {
+            AppLog.note(AppLog.ml, "subject mask ready: \(result.mask.decision())")
+        }
+    }
+
+    private var currentMaskImage: CIImage? {
+        maskLock.lock()
+        defer { maskLock.unlock() }
+        return cachedMask?.image()
+    }
+
+    /// The recipe with the mask's statistics folded in, so a capture records that a
+    /// subject was found. The pixels stay in `cachedMask`, because they belong to a frame
+    /// and a `CIImage` cannot go in a photo's metadata.
+    private var recipeCarryingMask: ProcessingSettings {
+        maskLock.lock()
+        defer { maskLock.unlock() }
+        var recipe = settings
+        recipe.subjectMask = cachedMask?.mask
+        return recipe
     }
 }
 
