@@ -57,16 +57,26 @@ struct LUTProcessor {
         // texture upload and filter pass on every frame while a look is switched off.
         guard intensity > 0 else { return image }
 
-        // The colour space is part of this filter, which is why it is
-        // `CIColorCubeWithColorSpace` and not `CIColorCube`.
+        // The colour space is **not** passed to the filter, and that is the correct
+        // behaviour rather than a compromise. `CIColorCube` applies the table in the
+        // working colour space of the image it is given, and the guard above has already
+        // established that the table's space and the image's space are the same one. So
+        // there is nothing to override, and forcing a colour space in would be asserting
+        // a conversion that is not happening.
         //
-        // Built through the **typed** API, not the string form. Three CI runs went into
-        // the string form: `CIColorCube` has no `inputColorSpace` key and raised
-        // NSUnknownKeyException (an Objective-C exception Swift cannot catch, so the app
-        // would have died on the first frame), and a `CGFloat` dimension was silently
-        // refused where the property is declared `Float`, producing a nil filter and no
-        // error at all. Every one of those is a compile-time error here and a runtime
-        // surprise there, which is the exact trade the typed builtins exist to remove.
+        // Two traps here, both found by CI rather than by reading:
+        //
+        // - `CIColorCube` has no `inputColorSpace` key. Passing one raises
+        //   NSUnknownKeyException, an Objective-C exception Swift cannot catch, so the
+        //   first frame with a look applied would have killed the app rather than
+        //   failing a capture. It stays inside the trap below regardless.
+        // - `CIColorCubeWithColorSpace`, which *does* have that key, is absent from the
+        //   SDK CI builds against: both `CIFilter(name:)` and the typed
+        //   `CIFilter.colorCubeWithColorSpace()` fail to find it, the first returning nil
+        //   and the second not compiling. So the colour-space-aware route is unavailable
+        //   and plain `CIColorCube` is what this platform has.
+        //
+        // `inputCubeDimension` is declared `Float` and is passed as one.
         guard let cubeData = Self.cubeData(for: lut) else {
             throw LUTApplicationError.notUsable(reason: "the sample buffer could not be built")
         }
@@ -76,12 +86,12 @@ struct LUTProcessor {
         // the sample buffer is copied verbatim rather than converted.
         var graded: CIImage?
         let raised = LumaFrameSafety.perform {
-            let cube = CIFilter.colorCubeWithColorSpace()
-            cube.inputImage = image
-            cube.cubeDimension = Float(lut.size)
-            cube.cubeData = cubeData
-            cube.colorSpace = imageSpace.cgColorSpace
-            graded = cube.outputImage
+            let cube = CIFilter(name: "CIColorCube", parameters: [
+                kCIInputImageKey: image,
+                "inputCubeDimension": Float(lut.size),
+                "inputCubeData": cubeData
+            ])
+            graded = cube?.outputImage
         }
         if let raised {
             AppLog.fail(AppLog.processing, "cube construction raised \(raised); LUT not applied")
