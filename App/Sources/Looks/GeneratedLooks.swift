@@ -53,53 +53,67 @@ enum GeneratedLooks {
 
     /// The per-pixel transform, in gamma-encoded sRGB because that is the unit domain the
     /// table is declared over and the space `LUTProcessor` will apply it in.
+    ///
+    /// Every intermediate is a named `Float` with an explicit type. Written as nested
+    /// expressions these are `Float` / `CGFloat` literals being multiplied by inferred
+    /// doubles, and the compiler's type checker gives up on them — the error is
+    /// "unable to type-check this expression in reasonable time" pointing at arithmetic
+    /// that is arithmetically trivial. Naming the intermediates is also what makes the
+    /// intent of each look readable.
     private static func transform(_ red: Float, _ green: Float, _ blue: Float,
                                   _ which: Look.Generated) -> [Float] {
         switch which {
         case .warmth:
-            return [clamp01(red + 0.045), clamp01(green + 0.012), clamp01(blue - 0.030)]
+            let r: Float = red + 0.045
+            let g: Float = green + 0.012
+            let b: Float = blue - 0.030
+            return [clamp01(r), clamp01(g), clamp01(b)]
 
         case .coolness:
-            return [clamp01(red - 0.030), clamp01(green + 0.005), clamp01(blue + 0.050)]
+            let r: Float = red - 0.030
+            let g: Float = green + 0.005
+            let b: Float = blue + 0.050
+            return [clamp01(r), clamp01(g), clamp01(b)]
 
         case .fadedFilm:
             // Pulled toward mid grey, which is what "lifted blacks, softened contrast"
             // means, plus a small warmth so it does not go dead.
-            let lift = 0.07
-            return [
-                clamp01(Float(red) * (1 - lift) + Float(lift) + 0.012),
-                clamp01(Float(green) * (1 - lift) + Float(lift) + 0.004),
-                clamp01(Float(blue) * (1 - lift) + Float(lift) - 0.006)
-            ]
+            let lift: Float = 0.07
+            let keep: Float = 1 - lift
+            let r: Float = red * keep + lift + 0.012
+            let g: Float = green * keep + lift + 0.004
+            let b: Float = blue * keep + lift - 0.006
+            return [clamp01(r), clamp01(g), clamp01(b)]
 
         case .noColour:
             // Rec. 709 luma, then a touch of lift so it is not crushed.
-            let luma = 0.2126 * red + 0.7152 * green + 0.0722 * blue
-            let value = clamp01(luma * 0.94 + 0.03)
+            let luma: Float = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+            let value: Float = clamp01(luma * 0.94 + 0.03)
             return [value, value, value]
 
         case .liftedShadows:
             // Shadows lifted, highlights rolled off rather than clipped.
-            let shadowLift = shadowWeight(red, green, blue) * 0.10
-            let highlightRoll = highlightWeight(red, green, blue) * 0.16
-            return [
-                clamp01(red + shadowLift - highlightRoll),
-                clamp01(green + shadowLift - highlightRoll),
-                clamp01(blue + shadowLift - highlightRoll)
-            ]
+            let shadow: Float = shadowWeight(red, green, blue) * 0.10
+            let highlight: Float = highlightWeight(red, green, blue) * 0.16
+            let r: Float = red + shadow - highlight
+            let g: Float = green + shadow - highlight
+            let b: Float = blue + shadow - highlight
+            return [clamp01(r), clamp01(g), clamp01(b)]
         }
     }
 
     /// 1 in the deepest shadows, 0 in the midtones and above.
     private static func shadowWeight(_ red: Float, _ green: Float, _ blue: Float) -> Float {
-        let luma = 0.2126 * red + 0.7152 * green + 0.0722 * blue
-        return max(0, 1 - luma / 0.35)
+        let luma: Float = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+        let scaled: Float = luma / 0.35
+        return max(0, 1 - scaled)
     }
 
     /// 1 in the highlights, 0 below the midpoint.
     private static func highlightWeight(_ red: Float, _ green: Float, _ blue: Float) -> Float {
-        let luma = 0.2126 * red + 0.7152 * green + 0.0722 * blue
-        return max(0, (luma - 0.55) / 0.45)
+        let luma: Float = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+        let scaled: Float = (luma - 0.55) / 0.45
+        return max(0, scaled)
     }
 
     /// Samples must land inside 0…1. `CIColorCube` does not clamp, and an out-of-range
