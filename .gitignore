@@ -32,3 +32,9 @@ node_modules/
 # Local scratch, not source
 decompiled/
 *.ips
+
+# Hang and spin dumps pulled off a device. They are several megabytes each and are
+# evidence, not source: keep them out of the tree and read them locally.
+*.tailspin.gz
+*.spin
+*.hang
