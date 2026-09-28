@@ -68,21 +68,20 @@ final class PhotoCaptureController: NSObject {
 
     /// Records what the output can deliver and sets the ProRAW switch.
     ///
-    /// **No codec is chosen here.** `availablePhotoCodecTypes` is `[UTType]` in this
-    /// SDK, and `AVCapturePhotoSettings(format:)` wants a codec enum, so picking one
-    /// means converting between two type systems to second-guess the system. Step 1
-    /// takes the default, which is the device's own best still format, and logs what
-    /// else was on offer. Codec selection belongs to the cinematic profile in step 7,
-    /// where the choice is a user-visible decision.
-    ///
     /// ProRAW is only enabled when the output reports support, because
     /// `isAppleProRAWEnabled = true` on an unsupported output raises
     /// `NSInvalidArgumentException` — the exact failure `LumaFrameSafety` exists for.
     func configureOutput(capabilities: CameraCapabilities) {
-        let codecs = output.availablePhotoCodecTypes
+        let available = output.availablePhotoCodecTypes
         AppLog.note(AppLog.camera,
-                    "photo codecs available (\(codecs.count)): "
-                    + "\(codecs.map { String(describing: $0) }.joined(separator: ", "))")
+                    "photo codecs available: \(available.map { "\($0.rawValue)" }.joined(separator: ", "))")
+
+        guard let codec = Self.preferredCodec(for: output) else {
+            AppLog.warn(AppLog.camera, "no photo codec available; the output default will be used")
+            return
+        }
+        output.availablePhotoCodecTypes = [codec]
+        AppLog.note(AppLog.camera, "photo codec set: \(codec.rawValue)")
 
         guard capabilities.proRawSupported else {
             if output.isAppleProRAWEnabled {
@@ -95,6 +94,21 @@ final class PhotoCaptureController: NSObject {
         } else {
             AppLog.note(AppLog.camera, "ProRAW enabled")
         }
+    }
+
+    /// HEVC when offered, because it is the only still codec here that carries
+    /// Display P3 and an HDR gain map, and this is a low-light app that cares about
+    /// both. JPEG is the fallback.
+    ///
+    /// Only `.hevc` and `.jpeg` are tested. `AVVideoCodecType` has no `.heif` case —
+    /// naming one silently resolves it against `UTType` instead and produces a type
+    /// error that points nowhere near the real mistake.
+    nonisolated static func preferredCodec(for output: AVCapturePhotoOutput) -> AVVideoCodecType? {
+        let available = output.availablePhotoCodecTypes
+        for candidate in [AVVideoCodecType.hevc, .jpeg] where available.contains(candidate) {
+            return candidate
+        }
+        return available.first
     }
 
     // MARK: - Capture
@@ -136,10 +150,10 @@ final class PhotoCaptureController: NSObject {
         metadata.proRaw = request.proRaw
         metadata.raw = request.raw
 
-        // The no-argument initialiser uses the output's own default still format, which
-        // is the device's best available choice and avoids converting between the
-        // `UTType` codec list and the `AVVideoCodecType` this API expects.
-        let settings = AVCapturePhotoSettings()
+        // The codec is the one chosen in `configureOutput`, so the settings are built
+        // from the same value the output was restricted to.
+        let codec = Self.preferredCodec(for: output) ?? AVVideoCodecType.jpeg
+        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: codec])
         settings.photoQualityPrioritization = request.preferQuality ? .quality : .balanced
         settings.isFlashEnabled = request.flash == .on && output.supportedFlashModes.contains(.on)
         if request.proRaw { settings.isAppleProRAWEnabled = true }
@@ -152,7 +166,8 @@ final class PhotoCaptureController: NSObject {
         settings.metadata = metadata.dictionary()
 
         AppLog.note(AppLog.camera,
-                    "capture requested: quality=\(request.preferQuality ? "quality" : "balanced") "
+                    "capture requested: codec=\(codec.rawValue) "
+                    + "quality=\(request.preferQuality ? "quality" : "balanced") "
                     + "flash=\(settings.isFlashEnabled ? "on" : "off") raw=\(request.raw) "
                     + "proRAW=\(request.proRaw) mode=\(metadata.mode)")
 

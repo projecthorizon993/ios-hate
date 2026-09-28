@@ -251,12 +251,12 @@ enum AVFoundationProbe {
             entries.append(ReportEntry("max bracketed capture photo count",
                                        output.maxBracketedCapturePhotoCount))
 
-            // `availablePhotoCodecTypes` is `[UTType]`, so the elements are compared as
-            // uniform type identifiers and printed by identifier. Guessing at the codec
-            // enum here is what produced a compile error in the first place.
+            // The list is `[AVVideoCodecType]`. An earlier version of this line compared
+            // against `.heif`, which does not exist on that type — the compiler resolved
+            // it against `UTType` instead and reported a misleading type mismatch.
             let codecs = output.availablePhotoCodecTypes
             entries.append(ReportEntry("photo codecs", ReportFormat.list(
-                codecs.map { $0.identifier }, empty: "none")))
+                codecs.map { "\($0.rawValue)" }, empty: "none")))
             entries.append(ReportEntry("is Apple ProRAW enabled (default)", output.isAppleProRAWEnabled, .note))
 
             // ProRAW cannot be requested for a format that is not the active one, so
@@ -338,7 +338,10 @@ enum AVFoundationProbe {
         case .builtInLiDARDepthCamera: return "LiDAR depth"
         case .external: return "external"
         case .continuityCamera: return "continuity"
-        @unknown default: return "unknown (\(type.rawValue))"
+        // `AVCaptureDevice.DeviceType` is a struct wrapping a raw value, not an enum,
+        // so `@unknown default` is not available here and `default` is required for the
+        // switch to be exhaustive.
+        default: return "unknown (\(type.rawValue))"
         }
     }
 

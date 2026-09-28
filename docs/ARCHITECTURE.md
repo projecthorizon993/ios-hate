@@ -1,6 +1,6 @@
 # LumaFrame — Architecture
 
-Native camera app for **iOS 17+ (Swift/SwiftUI)** and **Android 14+ (Kotlin/Compose)**.
+Native camera app for **iOS 18+ (Swift/SwiftUI)** and **Android 14+ (Kotlin/Compose)**.
 
 This document is the contract for Steps 1–7. Step 0 (Capability Report) is already
 implemented. Read this before writing any feature.
@@ -146,7 +146,7 @@ rule 8 and the app's own honesty requirement.
   2 Nov 2026**.
 - `macos-15` defaults to **Xcode 16.4** and also has Xcode 26.3 installed.
 - Swift language mode stays **v5** (`SWIFT_VERSION = 5.9`) — the project targets
-  iOS 17 and strict concurrency is not worth the build risk at this stage.
+  iOS 18 and strict concurrency is not worth the build risk at this stage.
 
 ---
 
@@ -317,7 +317,7 @@ Never log image contents, file names, or user identifiers.
 
 | | Version |
 | --- | --- |
-| Deployment target | iOS 17.0 |
+| Deployment target | iOS 18.0 | Raised from 17.0: Vision's `supportedOutputPixelFormats()` is 18.0+, and the app probes the real capability surface rather than a guessed one. Every device on the test matrix runs 18 or newer, so nothing is lost. |
 | Swift language mode | 5 (`SWIFT_VERSION = 5.9`) |
 | Xcode on CI | `macos-15` (Xcode 16.4) |
 | 3rd party | **none** — Apple frameworks only, deliberately |

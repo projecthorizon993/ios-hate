@@ -23,7 +23,12 @@ const PBXPROJ = join(PROJECT_DIR, "project.pbxproj");
 // an explicit edit in one place.
 const BUNDLE_ID = "com.example.LumaFrame";
 const TEST_BUNDLE_ID = "com.example.LumaFrameTests";
-const DEPLOYMENT_TARGET = "17.0";
+// iOS 18.0 is the floor. Raised from 17.0 because Vision's
+// `supportedOutputPixelFormats()` is 18.0+, and the app deliberately probes the real
+// capability surface rather than a guessed one. Every device in the test matrix
+// (iPhone 11 Pro Max, iPhone SE 2022, Galaxy S21 Ultra) runs 18 or newer, so nothing
+// on the matrix is lost.
+const DEPLOYMENT_TARGET = "18.0";
 const SWIFT_VERSION = "5.9";
 const BRIDGING_HEADER = "App/Sources/Support/LumaFrame-Bridging-Header.h";
 const INFO_PLIST = "App/Resources/Info.plist";

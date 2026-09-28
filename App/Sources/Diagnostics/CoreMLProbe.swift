@@ -76,10 +76,9 @@ enum CoreMLProbe {
                 do {
                     for _ in 0..<benchmarkIterations {
                         let start = DispatchTime.now().uptimeNanoseconds
-                        // `prediction(from:)` is not a throwing call; `makeZeroInput` is,
-                        // and that is what this `do` block is catching.
-                        let input = try makeZeroInput(for: model)
-                        _ = model.prediction(from: input)
+                        // `prediction(from:)` throws, and so does `makeZeroInput`. Both
+                        // are caught by this `do` block.
+                        _ = try model.prediction(from: makeZeroInput(for: model))
                         samples.append(elapsedMs(since: start))
                     }
                 } catch {
@@ -190,12 +189,14 @@ enum CoreMLProbe {
         request.qualityLevel = .balanced
         section.add(ReportEntry("default quality level accepted",
                                "\(request.qualityLevel.rawValue)"))
-        section.add(ReportEntry("output pixel format count",
-                               request.supportedOutputPixelFormats().count))
+        // `supportedOutputPixelFormats()` is a throwing method available from iOS 18,
+        // which is why the deployment target is 18.0. Its elements are `NSNumber`, not
+        // `OSType`, so each one is unboxed before being printed.
+        let formats = (try? request.supportedOutputPixelFormats()) ?? []
+        section.add(ReportEntry("output pixel format count", formats.count))
         section.add(ReportEntry("output pixel formats",
-                               ReportFormat.list(
-                                request.supportedOutputPixelFormats().map { fourCCHex($0) },
-                                empty: "none"),
+                               ReportFormat.list(formats.map { fourCCHex($0.ostValue) },
+                                                empty: "none"),
                                .note))
         section.add(ReportEntry("attention saliency request", "available", .good))
         section.add(ReportEntry("note",

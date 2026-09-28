@@ -382,8 +382,7 @@ enum HDRStatus: Equatable, Sendable {
 
 /// Preview and capture rotation, as a plain mapping so it can be unit tested.
 ///
-/// Uses `videoRotationAngle` rather than the deprecated `videoOrientation`, which is
-/// the API available on the iOS 17 deployment target.
+/// Uses `videoRotationAngle` rather than the deprecated `videoOrientation`.
 enum PreviewRotation {
 
     /// Degrees clockwise, matching `AVCaptureConnection.videoRotationAngle`.
