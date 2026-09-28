@@ -84,22 +84,42 @@ struct LUTProcessor {
         // `Data(lut.samples)` does not compile: `Data` initialises from bytes, and
         // `Float` is not `UInt8`. The filter wants the raw 32-bit float bit patterns, so
         // the sample buffer is copied verbatim rather than converted.
+        //
+        // Parameters are set one key at a time rather than handed over as a dictionary.
+        // `CIFilter(name:parameters:)` returns **nil** — with no error and no log — when
+        // any value has the wrong type, so a single wrong value is indistinguishable
+        // from a filter that does not exist. `setValue(_:forKey:)` instead raises
+        // NSInvalidArgumentException, which `LumaFrameSafety` converts to a string, and
+        // recording the key before each call means the message names the parameter that
+        // was refused. Four runs went into this filter being silently wrong; the point
+        // of setting them individually is that the next one is self-diagnosing.
         var graded: CIImage?
+        var currentKey = "creating the filter"
         let raised = LumaFrameSafety.perform {
-            let cube = CIFilter(name: "CIColorCube", parameters: [
-                kCIInputImageKey: image,
-                "inputCubeDimension": Float(lut.size),
-                "inputCubeData": cubeData
-            ])
-            graded = cube?.outputImage
+            guard let cube = CIFilter(name: "CIColorCube") else { return }
+
+            currentKey = kCIInputImageKey
+            cube.setValue(image, forKey: kCIInputImageKey)
+
+            currentKey = "inputCubeDimension"
+            cube.setValue(Float(lut.size), forKey: "inputCubeDimension")
+
+            currentKey = "inputCubeData"
+            cube.setValue(cubeData, forKey: "inputCubeData")
+
+            currentKey = "outputImage"
+            graded = cube.outputImage
         }
         if let raised {
-            AppLog.fail(AppLog.processing, "cube construction raised \(raised); LUT not applied")
-            throw LUTApplicationError.notUsable(reason: "Core Image raised \(raised)")
+            AppLog.fail(AppLog.processing, "cube rejected \(currentKey): \(raised); LUT not applied")
+            throw LUTApplicationError.notUsable(reason: "Core Image refused \(currentKey): \(raised)")
         }
         guard let graded else {
-            AppLog.fail(AppLog.processing, "cube produced no output; LUT not applied")
-            throw LUTApplicationError.notUsable(reason: "Core Image produced no output")
+            let reason = currentKey == "creating the filter"
+                ? "this OS has no CIColorCube filter"
+                : "CIColorCube produced no output"
+            AppLog.fail(AppLog.processing, "cube failed at \(currentKey); LUT not applied")
+            throw LUTApplicationError.notUsable(reason: reason)
         }
 
         guard intensity < 1 else { return graded }
