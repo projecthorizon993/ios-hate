@@ -13,7 +13,7 @@ implemented. Read this before writing any feature.
 | --- | --- | --- |
 | 0 | Architecture + Capability Report (both platforms) | **Code done, device data still missing** |
 | 1 | Auto mode with native HDR + camera screen UI (iOS) | **Code done + CI green; on-device unverified** |
-| 2 | LUT engine (`.cube` parser, GPU 3D LUT, intensity) | In progress |
+| 2 | LUT engine (`.cube` parser, GPU 3D LUT, intensity) | Code done; renderer unverified on device |
 | 3 | Style system + Styles screen | Pending |
 | 4 | Pro mode, RAW, Pro panel | Pending |
 | 5 | ML layer + mask-based style blending | Pending |
@@ -227,6 +227,30 @@ the report logs that assumption.
 Display P3 is a per-capture decision, not a global one: if the preview is P3 and the
 photo is saved as sRGB, the photo will look different from the preview. The gallery
 must show which space each photo is in.
+
+#### What CI cannot check about the LUT
+
+Headless Core Image in the CI simulator **accepts** `CIColorCube` — the filter is
+created and all three parameters are set without raising — and then returns nil for
+`outputImage`. The apply stage is therefore untestable in CI, and two tests in
+`LUTProcessorTests` skip there with that reason rather than assert something untrue.
+Everything around it *is* covered: the refusals, the no-op at intensity 0, the cube byte
+order and the size ceiling.
+
+Carried to the device, then:
+
+- [ ] A 2×2×2 identity table leaves a known flat image unchanged.
+- [ ] A deliberately obvious table (all red, or an inverted ramp) changes it visibly.
+- [ ] Intensity 0…1 blends monotonically, with 0 an exact no-op.
+- [ ] The result matches what the same `.cube` produces in a reference tool on the same
+      file, which is the only real check that byte order and colour space agree.
+
+This is also why the LUT is applied through `CIColorCube` and not
+`CIColorCubeWithColorSpace`: the latter is absent from the SDK CI builds against, so
+there is no colour-space-aware variant available here at all. Since the domain guard
+above has already established the table's space and the image's space are the same one,
+`CIColorCube` applying in the image's own working space is the correct behaviour rather
+than a fallback — there is nothing to override.
 
 ---
 
