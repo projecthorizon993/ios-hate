@@ -54,8 +54,9 @@ enum CubeLUTParser {
             // A data line is one where every token parses as a number. Deciding it that
             // way rather than by looking for a leading keyword means a lowercase
             // directive and a data line that happens to start with a digit are both
-            // handled correctly.
-            if let values = try? floats(in: line), !values.isEmpty {
+            // handled correctly. No throwing here: meeting a directive is expected, not
+            // an error, so detection is a question and not a failure.
+            if let values = allNumbers(in: line) {
                 try validate(values: values, on: lineNumber)
                 samples.append(contentsOf: values)
                 for _ in values { sampleLines.append(lineNumber) }
@@ -184,6 +185,19 @@ enum CubeLUTParser {
             throw CubeLUTError.unsupportedSize(size: value, line: lineNumber)
         }
         return value
+    }
+
+    /// Every token on the line as a float, or `nil` when any token is not a number.
+    private static func allNumbers(in line: String) -> [Float]? {
+        let tokens = line.split(whereSeparator: { $0.isWhitespace })
+        guard !tokens.isEmpty else { return nil }
+        var values: [Float] = []
+        values.reserveCapacity(tokens.count)
+        for token in tokens {
+            guard let value = Float(token) else { return nil }
+            values.append(value)
+        }
+        return values
     }
 
     private static func floats(in line: String, _ lineNumber: Int) throws -> [Float] {
