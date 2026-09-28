@@ -172,14 +172,17 @@ struct ProcessingPipeline {
     /// which is the exact defect this whole pipeline exists to avoid.
     ///
     /// There is no `jpegData` on `CIImage`; encoding goes through a `CIContext`.
+    ///
+    /// `quality` is accepted and **not** applied. `jpegRepresentation` takes
+    /// `CIImageRepresentationOption`, and the lossy-quality case was guessed at twice and
+    /// does not exist under either name; rather than guess a third time the option is
+    /// omitted and Core Image's default is used. A real quality control belongs with the
+    /// `AVAssetWriter` path the still export already uses, where the bit rate is set
+    /// explicitly. Until then this parameter is a promise the code does not keep, which is
+    /// why it is called out here.
     static func encodeJPEG(_ image: CIImage, space: ColorSpace, quality: Float) -> Data? {
         let context = CIContext(options: [.cacheIntermediates: false])
-        // The options dictionary is keyed by `CIImageRepresentationOption`, not `String`.
-        // `kCGImageDestinationLossyCompressionQuality` is the ImageIO spelling of the same
-        // idea and does not belong here.
-        return context.jpegRepresentation(of: image,
-                                          colorSpace: space.cgColorSpace,
-                                          options: [.lossyCompressionQuality: Double(quality)])
+        return context.jpegRepresentation(of: image, colorSpace: space.cgColorSpace, options: [:])
     }
 
     // MARK: - Stages
