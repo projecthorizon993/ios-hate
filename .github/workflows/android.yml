@@ -92,6 +92,7 @@ jobs:
 
       - name: Upload unit test log
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: LumaFrame-Android-Test-Log
@@ -100,6 +101,8 @@ jobs:
 
       - name: Upload unit test results
         if: always()
+        # Diagnostics, not a deliverable: an artifact service timeout must not fail the run.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: LumaFrame-Android-Test-Results

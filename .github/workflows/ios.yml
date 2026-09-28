@@ -107,6 +107,10 @@ jobs:
 
       - name: Upload test log
         if: always()
+        # A log upload is diagnostics, not a deliverable. It must never be the reason a
+        # run reports failure, and GitHub's artifact service does intermittently time
+        # out on an 8 KB file.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: LumaFrame-iOS-Test-Log
@@ -163,14 +167,6 @@ jobs:
             exit "$BUILD_STATUS"
           fi
 
-      - name: Upload compiler diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: LumaFrame-Compiler-Diagnostics
-          path: ${{ runner.temp }}/xcodebuild.log
-          if-no-files-found: warn
-
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
@@ -184,8 +180,20 @@ jobs:
           test -f "$RUNNER_TEMP/LumaFrame-Unsigned.ipa"
 
       - name: Upload unsigned IPA
+        # The deliverable, and therefore the step that is allowed to fail the run. It is
+        # placed before the log uploads for that reason: a flaky artifact service on a
+        # diagnostics file must not cost the build the IPA.
         uses: actions/upload-artifact@v4
         with:
           name: LumaFrame-Unsigned-IPA
           path: ${{ runner.temp }}/LumaFrame-Unsigned.ipa
           if-no-files-found: error
+
+      - name: Upload compiler diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaFrame-Compiler-Diagnostics
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: warn
