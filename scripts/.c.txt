@@ -1,11 +1,9 @@
-﻿Copy the LUT sample buffer as bytes, and surface Gradle's real cause
+﻿Stop set -e from killing the Android failure handler
 
-Data(lut.samples) does not compile: Data initialises from bytes and Float is
-not UInt8. CIColorCube wants the raw 32-bit float bit patterns, so the sample
-buffer is copied verbatim through withUnsafeBufferPointer. A test asserting the
-byte count was also wrong by a factor of three, missing the RGB per sample.
+set -e is re-enabled before the failure block, and a grep that matches nothing
+exits 1. Inside a pipeline that aborts the step immediately, so the handler died
+on its first grep and printed nothing at all: no annotations, no summary, exit 1.
+Every command in the block now explicitly tolerates failure, and the same fix
+goes into the assembleDebug step.
 
-Android: Gradle puts the actual cause on the line after '* What went wrong:',
-with no prefix, so a grep for known prefixes produced an annotation reading only
-the header. The block after the header is now extracted, so the reason arrives
-with it.
+Also fixes a static member called on an instance in LUTProcessor.

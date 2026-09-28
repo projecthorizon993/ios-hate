@@ -62,7 +62,7 @@ struct LUTProcessor {
         // `Data(lut.samples)` does not compile: `Data` initialises from bytes, and
         // `Float` is not `UInt8`. CIColorCube wants the raw 32-bit float bit patterns,
         // so the sample buffer is copied verbatim rather than converted.
-        guard let cubeData = cubeData(for: lut) else { throw LUTApplicationError.notUsable }
+        guard let cubeData = Self.cubeData(for: lut) else { throw LUTApplicationError.notUsable }
         var parameters: [String: Any] = [
             kCIInputImageKey: image,
             "inputCubeDimension": CGFloat(lut.size),
