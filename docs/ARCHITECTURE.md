@@ -17,7 +17,7 @@ implemented. Read this before writing any feature.
 | 3 | Style system + Styles screen | Pending |
 | 4 | Pro mode, RAW, Pro panel | Pending |
 | 5 | ML layer + mask-based style blending | Pending |
-| 6 | CI, lean tests, manual checklist | Partially done (CI green on iOS, Android red) |
+| 6 | CI, lean tests, manual checklist | Partially done (CI green on iOS; Android red, on its own branch) |
 
 **Nothing in Steps 1–5 is verified until the Step 0 report is collected from the
 iPhone 11 Pro Max, the iPhone SE 2022 and the Galaxy S21 Ultra.** The gate is still
@@ -38,8 +38,9 @@ Stated precisely so Step 2 is not built on a false assumption:
 - The reports collected from the three devices before this rewrite came from a
   **pre-rewrite binary that no longer exists**, so none of the values in them describe
   the current code.
-- Android has never been built. It is red for reasons unrelated to iOS and has not
-  been looked at since the `sdkmanager` fix.
+- Android is on the `android-step0` branch and off main. Its Step 0 probe has never
+  compiled: unresolved Camera2 keys and Kotlin type errors remain. It is finished
+  there, on its own timeline, rather than on every commit to the iOS app.
 
 ### 1.1 What Step 1 settled on iOS
 
@@ -251,7 +252,11 @@ Storage/      Step 1 — DONE. CaptureMetadata (EXIF + recipe), PhotoStore
 Diagnostics/  Step 0 — DONE. Report model, probes, ViewModel, screen, exporter
 ```
 
-### Android — `android/app/src/main/java/com/example/lumaframe/`
+### Android — a separate repository, on the `android-step0` branch
+
+**Not in this repository any more.** The Android target lives on its own branch
+pending the split described in section 9. It is recorded here because the design
+constraints in section 2.1 and 2.2 were derived from it, and they still apply.
 
 ```text
 MainActivity.kt
@@ -262,12 +267,17 @@ processing/ Step 2/5
 styles/     Step 3
 ml/         Step 5 — MlProcessor interface, LiteRtProcessor, BackendCache
 storage/    Step 1
-diagnostics/ Step 0 — DONE. Report model, probes, ViewModel, screen, exporter
+diagnostics/ Step 0. Report model, probes, ViewModel, screen, exporter
 ```
 
-`Diagnostics/` is the one module that already exists on both sides, and it is
-deliberately **self-contained**: it has no dependency on the camera, processing or
-ML layers, so the app can show a report even if those layers are broken.
+Its Step 0 probe is **not finished**: it was written without ever compiling and still
+has unresolved Camera2 keys. It is worked through on that branch rather than here, so
+that a commit to the iOS app is not attached to an unrelated red check.
+
+`Diagnostics/` is the one module that exists on both sides, and it is deliberately
+**self-contained**: it has no dependency on the camera, processing or ML layers, so the
+app can show a report even if those layers are broken. That self-containment is also
+what makes it the right starting point for the format-contract fixtures in section 9.4.
 
 ---
 
@@ -356,7 +366,9 @@ Never log image contents, file names, or user identifiers.
 No SwiftPM dependencies. The old vendored `MijickCameraView` is no longer used; the
 viewfinder is a plain `UIView` wrapped in `UIViewRepresentable`.
 
-### Android — `android/gradle/libs.versions.toml`
+### Android — on the `android-step0` branch
+
+Kept here because the versions are the reason for two of the hard rules above.
 
 | | Version | Note |
 | --- | --- | --- |
