@@ -60,14 +60,19 @@ enum CapabilityCollector {
     /// is contained, and a failure becomes a visible line in the report naming the probe
     /// that failed — which is also what tells the next person where to look.
     private static func contained(_ name: String, _ body: () -> [ReportSection]) -> [ReportSection] {
-        let produced = LumaFrameSafety.perform(body)
-        if let failure = produced {
+        // `LumaFrameSafety.perform` takes a void block, so the sections are collected
+        // into a local rather than returned from the closure.
+        var produced: [ReportSection] = []
+        let failure = LumaFrameSafety.perform {
+            produced = body()
+        }
+        if let failure {
             AppLog.fail(AppLog.diagnostics, "probe \(name) raised \(failure)")
             var section = ReportSection("Probe failed")
             section.add(ReportEntry(name, failure, .fail))
             return [section]
         }
-        return []
+        return produced
     }
 
     // MARK: - Summary
