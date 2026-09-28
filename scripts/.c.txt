@@ -1,0 +1,10 @@
+﻿Build the cube through the string filter API, and make Android failures readable
+
+CIColorCube is a filter name, not a Swift type, so the initialiser call was a
+compile error. It is now built with CIFilter(name:) and the four documented
+parameter keys, which is the part of Core Image that is stable across SDKs.
+
+The Android job now reports Gradle-level failures as annotations, not just
+Kotlin 'e: ' lines. A dependency or configuration failure says nothing of the
+sort, so a run that failed for that reason looked like an unexplained red check
+with nothing readable anywhere.

@@ -55,19 +55,21 @@ struct LUTProcessor {
         // texture upload and filter pass on every frame while a look is switched off.
         guard intensity > 0 else { return image }
 
-        let cube = CIColorCube(
-            dimension: lut.size,
-            data: Data(lut.samples),
-            colorSpace: imageSpace.cgColorSpace
-        )
-        guard let graded = image.applyingFilter("CIColorCube",
-                                                parameters: [
-                                                    "inputCubeData": cube,
-                                                    "inputColorSpace": imageSpace.cgColorSpace
-                                                ]) else {
-            // Core Image returns nil for an unsupported filter rather than raising, so
-            // this is a real branch and the only correct answer is to not apply it.
-            AppLog.fail(AppLog.processing, "CIColorCube returned nil; LUT not applied")
+        // `CIColorCube` is a filter *name*, not a Swift type, so it is built through the
+        // string-based API. That is deliberate: the typed `CIFilter` builtins are
+        // generated per SDK and guessing at one is a compile error waiting to happen,
+        // whereas the string form and these four keys are part of the filter's contract.
+        let cube = CIFilter(name: "CIColorCube", parameters: [
+            kCIInputImageKey: image,
+            "inputCubeDimension": CGFloat(lut.size),
+            "inputCubeData": Data(lut.samples),
+            "inputColorSpace": imageSpace.cgColorSpace
+        ])
+        guard let graded = cube?.outputImage else {
+            // Core Image returns nil for an unknown filter or bad parameters rather
+            // than raising, so this is a real branch and the only correct answer is to
+            // not apply the table.
+            AppLog.fail(AppLog.processing, "CIColorCube produced no output; LUT not applied")
             throw LUTApplicationError.notUsable
         }
 

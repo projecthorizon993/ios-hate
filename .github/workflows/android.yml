@@ -95,18 +95,41 @@ jobs:
       - name: Run unit tests
         run: |
           set -uo pipefail
+          LOG="$RUNNER_TEMP/gradle-test.log"
           set +e
-          gradle --no-daemon --stacktrace testDebugUnitTest 2>&1 | tee "$RUNNER_TEMP/gradle-test.log"
+          gradle --no-daemon --stacktrace testDebugUnitTest 2>&1 | tee "$LOG"
           STATUS=${PIPESTATUS[0]}
           set -e
           if [ "$STATUS" -ne 0 ]; then
+            # Gradle fails for two very different reasons: a Kotlin compile error, which
+            # starts with "e: ", and a build configuration or dependency resolution
+            # failure, which says nothing of the sort. Reporting only the first kind
+            # leaves the second looking like an unexplained red check, so both are
+            # surfaced, and a run with neither falls back to the tail of the output.
             {
-              echo "### Kotlin compiler diagnostics"
-              grep -E "^e: |error:|FAILED|Execution failed" "$RUNNER_TEMP/gradle-test.log" | sort -u || true
+              echo "### Gradle diagnostics"
+              grep -E "^e: |error:|FAILURE:|What went wrong|Could not |Caused by:|Execution failed|Unsupported|requires Gradle|minimum supported" "$LOG" \
+                | sort -u | head -80 || true
+              echo
+              echo "<details><summary>Last 100 lines of Gradle output</summary>"
+              echo
+              echo '```'
+              tail -n 100 "$LOG"
+              echo '```'
+              echo "</details>"
             } >> "$GITHUB_STEP_SUMMARY"
-            grep -E "^e: " "$RUNNER_TEMP/gradle-test.log" | sort -u | while IFS= read -r diagnostic; do
-              printf '::error title=Kotlin compiler::%s\n' "$diagnostic"
-            done
+
+            ERRORS="$(grep -E "^e: |FAILURE:|What went wrong|Could not |Unsupported" "$LOG" | sort -u || true)"
+            if [ -n "$ERRORS" ]; then
+              echo "$ERRORS" | head -20 | while IFS= read -r diagnostic; do
+                printf '::error title=Gradle::%s\n' "$diagnostic"
+              done
+            else
+              tail -n 60 "$LOG" | tr '\n' '\036' | sed 's/\x1E/\\n/g' | tr '\036' '\n' \
+                | fold -w 900 | while IFS= read -r chunk; do
+                  printf '::error title=Gradle output (tail)::%s\n' "$chunk"
+                done
+            fi
             exit "$STATUS"
           fi
 
@@ -132,7 +155,20 @@ jobs:
           if-no-files-found: warn
 
       - name: Assemble debug APK
-        run: gradle --no-daemon --stacktrace assembleDebug
+        run: |
+          set -uo pipefail
+          LOG="$RUNNER_TEMP/gradle-apk.log"
+          set +e
+          gradle --no-daemon --stacktrace assembleDebug 2>&1 | tee "$LOG"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            grep -E "^e: |FAILURE:|What went wrong|Could not |Unsupported" "$LOG" | sort -u | head -20 \
+              | while IFS= read -r diagnostic; do
+                printf '::error title=Gradle::%s\n' "$diagnostic"
+              done
+            exit "$STATUS"
+          fi
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
