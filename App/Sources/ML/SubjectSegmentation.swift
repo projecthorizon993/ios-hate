@@ -18,9 +18,13 @@ import Vision
 /// frames out of date. A mask that is 100 ms old is a better mask than no mask.
 enum SubjectSegmentation {
 
-    /// How often a mask is recomputed. 2 Hz is fast enough that a face entering frame is
+    /// How often a mask is recomputed. 0.5 s is fast enough that a face entering frame is
     /// picked up promptly and slow enough to be close to free.
-    static let cadence: TimeInterval = 0.5
+    ///
+    /// A `Double` and not a `TimeInterval`, because `TimeInterval` is `Duration` in this
+    /// SDK and does not compose with `DispatchTime`'s arithmetic. Written as 0.5 s, not
+    /// 500 ms, and the unit is the seconds one.
+    static let cadence: Double = 0.5
 
     /// Longest edge the segmentation sees. Person segmentation is robust well below the
     /// capture resolution, and the cost is linear in pixels.
@@ -102,9 +106,9 @@ enum SubjectSegmentation {
         let base = CVPixelBufferGetBaseAddress(mask)
         guard let base, CVPixelBufferGetPlaneCount(mask) == 0 else { return nil }
 
-        let width = CVPixelBufferGetWidthOfMask(mask)
-        let height = CVPixelBufferGetHeightOfMask(mask)
-        let bytesPerRow = CVPixelBufferGetBytesPerRowOfMask(mask)
+        let width = CVPixelBufferGetWidth(mask)
+        let height = CVPixelBufferGetHeight(mask)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(mask)
         let data = Data(bytes: base, count: bytesPerRow * height)
 
         let bitmapInfo: CGBitmapInfo
@@ -160,11 +164,14 @@ enum SubjectSegmentation {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
-        let width = CVPixelBufferGetWidthOfMask(buffer)
-        let height = CVPixelBufferGetHeightOfMask(buffer)
-        let bytesPerRow = CVPixelBufferGetBytesPerRowOfMask(buffer)
+        let width = CVPixelBufferGetWidth(buffer)
+        let height = CVPixelBufferGetHeight(buffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
         guard width > 0, height > 0 else { return nil }
 
+        // Bound once, from the raw pointer, and used directly thereafter. Binding it again
+        // at the second pass is what the compiler rejects: the value is already
+        // `UnsafeMutablePointer<UInt8>`, which has no `assumingMemoryBound`.
         let pointer = base.assumingMemoryBound(to: UInt8.self)
         let step = max(1, Int((Double(width * height) / Double(max(1, budget))).squareRoot().rounded()))
 
@@ -187,7 +194,7 @@ enum SubjectSegmentation {
         var sumSquares: Double = 0
         y = 0
         while y < height {
-            let row = pointer.assumingMemoryBound(to: UInt8.self).advanced(by: y * bytesPerRow)
+            let row = pointer.advanced(by: y * bytesPerRow)
             var x = 0
             while x < width {
                 let delta = Double(row[x]) - Double(mean)
