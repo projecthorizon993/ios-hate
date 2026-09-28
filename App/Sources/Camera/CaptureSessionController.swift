@@ -4,15 +4,25 @@ import UIKit
 
 /// Owns the `AVCaptureSession` and every transition between its states.
 ///
-/// Concurrency: every mutation AVFoundation is not thread-safe about happens on
-/// `sessionQueue`; only the published state is hopped to the main actor. Nothing else
-/// touches `session`, `videoInput`, or `device.activeFormat`.
+/// Concurrency, stated precisely because the compiler enforces it:
+///
+/// - This type is **deliberately not `@MainActor`**. It does its work on
+///   `sessionQueue`, so an actor annotation would be a lie about where the work
+///   happens, and it produced seventeen "main actor-isolated property can not be
+///   referenced from a Sendable closure" warnings that are all the same warning.
+/// - `session`, `videoInput`, `photoOutput` and `extraOutputs` are touched **only on
+///   `sessionQueue`**. `session` is additionally read from the main thread by the
+///   preview layer, which AVFoundation explicitly allows.
+/// - `state`, `configuration` and `onStateChange` are touched **only on the main
+///   queue**. `publish` is therefore the single writer, and every caller reaches it
+///   through a `DispatchQueue.main.async`.
+///
+/// Nothing else in the app mutates the session.
 ///
 /// The state machine exists so the UI never has to guess. `docs/DESIGN_SPEC.md`
 /// requires that switching modes crossfades the chrome and never restarts the session,
 /// which is only enforceable if "the session is up" is an explicit fact rather than an
 /// assumption spread across the view.
-@MainActor
 final class CaptureSessionController: NSObject {
 
     /// Coarse state, enough for the UI to know what to show. A device that interrupts
@@ -53,21 +63,26 @@ final class CaptureSessionController: NSObject {
         var exposureRange: ExposureRange
     }
 
+    /// Main-queue only. `publish` is the single writer.
     private(set) var state: State = .idle
+    /// Main-queue only. Assigned once, by the owner, before the session starts.
     var onStateChange: ((State) -> Void)?
 
     /// The session, for `AVCaptureVideoPreviewLayer` and nothing else. Mutating it from
     /// outside this type is a bug; the log and the code review are the enforcement.
     let session = AVCaptureSession()
 
+    /// Main-queue only.
     private(set) var configuration: Configuration?
 
     private let sessionQueue = DispatchQueue(label: "com.example.LumaFrame.session", qos: .userInitiated)
+    /// `sessionQueue` only.
     private var videoInput: AVCaptureDeviceInput?
+    /// `sessionQueue` only.
     private var photoOutput: AVCapturePhotoOutput?
+    /// `sessionQueue` only.
     private var extraOutputs: [AVCaptureOutput] = []
     private var observers: [NSObjectProtocol] = []
-    private var rotationAngle: CGFloat = 90
 
     // MARK: - Lifecycle
 
@@ -88,9 +103,11 @@ final class CaptureSessionController: NSObject {
     /// a consumer such as the preview meter is already attached on the very first
     /// frame. Adding one later would drop frames and, on some devices, force a
     /// renegotiation.
+    /// Handed back on the main queue, so the owner can assign straight into its own
+    /// main-actor state without a hop of its own.
     func configure(facing: CameraFacing,
                    extraOutputs: [AVCaptureOutput],
-                   completion: @escaping (Result<Configuration, Error>) -> Void) {
+                   completion: @escaping @MainActor (Result<Configuration, Error>) -> Void) {
         publish(.configuring)
 
         // `AVCaptureOutput` is not `Sendable`, and the session queue block is. The

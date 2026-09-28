@@ -291,12 +291,15 @@ final class CameraStep1Tests: XCTestCase {
 
         XCTAssertEqual(parsed.version, CaptureMetadata.recipeVersion)
         XCTAssertEqual(parsed.fields["mode"], "auto")
+        // Whole numbers print without a decimal point; fractional ones keep two. The
+        // recipe is a persisted format, so the representation has to be stable rather
+        // than the shortest one that happens to round-trip.
         XCTAssertEqual(parsed.fields["iso"], "400")
         XCTAssertEqual(parsed.fields["sh"], "0.008333")
-        XCTAssertEqual(parsed.fields["ev"], "-0.3")
+        XCTAssertEqual(parsed.fields["ev"], "-0.30")
         XCTAssertEqual(parsed.fields["rs"], "24.0")
         XCTAssertEqual(parsed.fields["lens"], "wide")
-        XCTAssertEqual(parsed.fields["zoom"], "1.5")
+        XCTAssertEqual(parsed.fields["zoom"], "1.50")
         XCTAssertEqual(parsed.fields["q"], "quality")
         XCTAssertEqual(parsed.fields["proraw"], "1")
         XCTAssertEqual(parsed.fields["space"], "display-p3")
