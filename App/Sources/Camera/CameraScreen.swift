@@ -39,12 +39,19 @@ struct CameraScreen: View {
         }
         .onDisappear {
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
-            model.stop()
+            Task { await model.stop() }
             // If the screen goes away while the report sheet is still up, the device
             // must not be marked as released: something else now owns the app.
             if !isShowingReport { model.resumeAfterDiagnostics() }
         }
-        .sheet(isPresented: $isShowingReport, onDismiss: presentReport) { ReportScreen() }    }
+        // `onDismiss` resumes the camera. It used to be wired to `presentReport`, which
+        // means dismissing the sheet tore the camera down and immediately presented the
+        // sheet again — an endless handover loop, each pass reconfiguring the session,
+        // for as long as the user tried to close it.
+        .sheet(isPresented: $isShowingReport, onDismiss: { model.resumeAfterDiagnostics() }) {
+            ReportScreen()
+        }
+    }
 
     // MARK: - Viewfinder
 
@@ -290,8 +297,13 @@ struct CameraScreen: View {
     /// the button action rather than here means the handover happens exactly once per
     /// presentation and cannot be left half-done by a cancellation.
     private func presentReport() {
-        model.releaseForDiagnostics()
-        isShowingReport = true
+        // Awaited before the sheet appears. The report opens a capture session of its
+        // own, so the handover has to be complete first; showing the sheet first is what
+        // let the two sessions overlap.
+        Task { @MainActor in
+            await model.releaseForDiagnostics()
+            isShowingReport = true
+        }
     }
 
     /// A banner is a status line, not something the user has to dismiss by hand while

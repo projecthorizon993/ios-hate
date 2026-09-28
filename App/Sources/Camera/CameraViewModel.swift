@@ -125,11 +125,17 @@ final class CameraViewModel: ObservableObject {
     /// Gives the device up entirely, so the capability report can open a session of its
     /// own. This is a full teardown — inputs and outputs removed — not a `stopRunning`,
     /// because a stopped-but-configured session still counts as holding the device.
-    func releaseForDiagnostics() {
+    ///
+    /// `async`, and awaited before the report is allowed to start. This handover used to
+    /// be fire-and-forget: the teardown was queued on the session queue, `markReleased()`
+    /// ran straight afterwards, and the report then opened a second session while this one
+    /// still held the hardware. Nothing ordered the two. Now the caller cannot proceed
+    /// until the teardown has actually completed.
+    func releaseForDiagnostics() async {
         AppLog.note(AppLog.camera, "releasing the camera for diagnostics")
         readoutTimer?.invalidate()
         readoutTimer = nil
-        sessionController.tearDown()
+        await sessionController.tearDown()
         CameraRelease.shared.markReleased()
     }
 
@@ -140,10 +146,10 @@ final class CameraViewModel: ObservableObject {
         configure()
     }
 
-    func stop() {
+    func stop() async {
         readoutTimer?.invalidate()
         readoutTimer = nil
-        sessionController.tearDown()
+        await sessionController.tearDown()
     }
 
     private func finishConfiguration(_ configuration: CaptureSessionController.Configuration) {

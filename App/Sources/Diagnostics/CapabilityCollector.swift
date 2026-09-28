@@ -28,6 +28,12 @@ enum CapabilityCollector {
                         logLimit: Int?,
                         display: DeviceProbe.DisplayFacts,
                         cameraIsOwned: Bool) async -> Outcome {
+        // Breadcrumbs on disk before anything runs. The report has crashed the app on
+        // device without leaving anything to read, and the in-memory log dies with the
+        // process, so this is the only record of how far the run got.
+        ProbeTrace.begin()
+        let started = DispatchTime.now().uptimeNanoseconds
+
         let result = await Task.detached(priority: .userInitiated) { () -> Outcome in
             AppLog.note(AppLog.diagnostics, "capability probe: start")
 
@@ -37,6 +43,14 @@ enum CapabilityCollector {
             sections.append(contentsOf: contained("coreml") { [CoreMLProbe.coreMLSection(modelURL: modelURL)] })
             sections.append(contentsOf: contained("vision") { [CoreMLProbe.visionSection()] })
             sections.append(contentsOf: contained("render benchmark") { [DeviceProbe.renderBenchmark()] })
+
+            // Checked after the render benchmark specifically. A jetsam kill is
+            // indistinguishable from a crash unless the footprint at that point is known.
+            if let used = MemoryProbe.usedMegabytes() {
+                ProbeTrace.memory(used)
+                AppLog.note(AppLog.diagnostics,
+                            "capability probe: footprint \(Int(used)) MB after probes")
+            }
 
             let report = CapabilityReport(generatedAt: Date(),
                                           platform: display.systemName + " " + display.systemVersion
@@ -50,6 +64,10 @@ enum CapabilityCollector {
             return Outcome(report: report, logLines: AppLog.recentLines(limit: logLimit))
         }.value
 
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000.0
+        AppLog.note(AppLog.diagnostics,
+                    "capability probe: finished in \(Int(elapsed)) ms")
+        ProbeTrace.finish()
         return result
     }
 
@@ -66,16 +84,26 @@ enum CapabilityCollector {
     private static func contained(_ name: String, body: @escaping () -> [ReportSection]) -> [ReportSection] {
         // `LumaFrameSafety.perform` takes a void block, so the sections are collected
         // into a local rather than returned from the closure.
+        //
+        // Every entry and exit is written to the on-disk trace. A probe that never appears
+        // was never reached and a probe with an `ENTER` and no `LEAVE` is where the app
+        // died, which is the whole question this file exists to answer.
         var produced: [ReportSection] = []
+        ProbeTrace.entering(name)
+        let started = DispatchTime.now().uptimeNanoseconds
         let failure = LumaFrameSafety.perform {
             produced = body()
         }
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000.0
+
         if let failure {
             AppLog.fail(AppLog.diagnostics, "probe \(name) raised \(failure)")
+            ProbeTrace.failed(name, failure)
             var section = ReportSection("Probe failed")
             section.add(ReportEntry(name, failure, .fail))
             return [section]
         }
+        ProbeTrace.leaving(name, milliseconds: elapsed)
         return produced
     }
 
