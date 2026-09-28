@@ -37,7 +37,7 @@ final class CameraViewModel: ObservableObject {
         var exposureTargetOffset: Float = 0
         var zoomFactor: CGFloat = 1
         var lensLabel: String?
-        var focalLength35mm: Double?
+        var relativeScale: Double?
     }
 
     /// A transient message. Not an alert — the camera screen must never put a modal over
@@ -169,19 +169,18 @@ final class CameraViewModel: ObservableObject {
         value.shutterSeconds = CMTimeGetSeconds(device.exposureDuration)
         value.exposureTargetOffset = device.exposureTargetOffset
         value.zoomFactor = device.videoZoomFactor
-        value.focalLength35mm = BackCameraCapabilities.describe(device).focalLength35mm
-        let active = activeCamera(focalLength35mm: value.focalLength35mm)
+        value.relativeScale = BackCameraCapabilities.describe(device).relativeScale
+        let active = activeCamera(relativeScale: value.relativeScale)
         value.lensLabel = active.flatMap { capabilities.zoomLabel(for: $0) }
         readout = value
     }
 
-    /// Closest reported lens to the focal length the device is actually running at.
-    /// The device may be mid-zoom between two lenses, so this is a match, not an
-    /// identity.
-    private func activeCamera(focalLength35mm: Double?) -> BackCameraCapabilities? {
-        guard let focalLength35mm else { return nil }
+    /// Closest reported lens to the reach the device is actually running at. The
+    /// device may be mid-zoom between two lenses, so this is a match, not an identity.
+    private func activeCamera(relativeScale: Double?) -> BackCameraCapabilities? {
+        guard let relativeScale else { return nil }
         return capabilities.backCameras.min {
-            abs($0.focalLength35mm - focalLength35mm) < abs($1.focalLength35mm - focalLength35mm)
+            abs($0.relativeScale - relativeScale) < abs($1.relativeScale - relativeScale)
         }
     }
 
@@ -218,8 +217,8 @@ final class CameraViewModel: ObservableObject {
         metadata.iso = readout.iso > 0 ? readout.iso : nil
         metadata.shutterSeconds = readout.shutterSeconds > 0 ? readout.shutterSeconds : nil
         metadata.exposureTargetOffset = Double(readout.exposureTargetOffset)
-        metadata.lensFocalLength35mm = readout.focalLength35mm
-        metadata.lensKind = activeCamera(focalLength35mm: readout.focalLength35mm)?.kind.rawValue
+        metadata.lensRelativeScale = readout.relativeScale
+        metadata.lensKind = activeCamera(relativeScale: readout.relativeScale)?.kind.rawValue
         metadata.zoomFactor = Double(readout.zoomFactor)
         metadata.frontCamera = facing == .front
         metadata.colorSpace = capabilities.wideGamut ? "display-p3" : "srgb"
@@ -237,10 +236,12 @@ final class CameraViewModel: ObservableObject {
                                                  metadata: capture.metadata)
                 latestPhoto = saved
                 storedBytes = PhotoStore.totalBytes()
-                // The badge follows what the hardware confirmed, so a request that was
-                // downgraded is visible instead of being claimed anyway.
-                if capture.resolvedQuality == .quality, capabilities.photoQualitySupported {
-                    hdr = .capturedWithQualityPriority
+                // The badge records that a quality-priority capture was requested on a
+                // format that supports it. The resolution is not readable back from
+                // `AVCaptureResolvedPhotoSettings`, so this is a request, not a result.
+                if capture.metadata.photoQualityPrioritization == "quality",
+                   capabilities.photoQualitySupported {
+                    hdr = .qualityRequested
                 }
                 refreshThumbnail(from: capture.data)
             } catch {
@@ -252,13 +253,14 @@ final class CameraViewModel: ObservableObject {
     }
 
     /// Thumbnail generation is off the main actor: it decodes a full resolution capture.
-    /// Only the encoded bytes cross back, because `UIImage` is not `Sendable`.
+    /// Only the encoded bytes cross back, because `UIImage` is not `Sendable`, and
+    /// `self` is never captured inside the detached task.
     private func refreshThumbnail(from data: Data) {
-        Task.detached(priority: .utility) { [weak self] in
+        Task.detached(priority: .utility) {
             let encoded = PhotoStore.thumbnail(from: data)
             await MainActor.run {
                 guard let encoded, let image = UIImage(data: encoded) else { return }
-                self?.thumbnail = image
+                self.thumbnail = image
             }
         }
     }
@@ -311,20 +313,21 @@ final class CameraViewModel: ObservableObject {
         }
         defer { device.unlockForConfiguration() }
 
-        // One-shot autofocus, then lock. `setFocusMode` throws rather than raising, so it
-        // is handled with `do`/`catch` here and not through `LumaFrameSafety`, which only
-        // traps Objective-C exceptions.
+        // These mode properties raise an Objective-C exception when the device is not
+        // locked rather than throwing a Swift error, so they go through
+        // `LumaFrameSafety`, which converts the exception into a log line.
         if device.isFocusModeSupported(.autoFocus) {
-            do { try device.setFocusMode(.autoFocus) } catch {
-                AppLog.warn(AppLog.camera, "focus: auto focus rejected \(error.localizedDescription)")
+            if let failure = LumaFrameSafety.perform({ device.focusMode = .autoFocus }) {
+                AppLog.warn(AppLog.camera, "focus: auto focus rejected \(failure)")
             }
         }
         if let failure = LumaFrameSafety.perform({ device.focusPointOfInterest = point }) {
             AppLog.warn(AppLog.camera, "focus: point rejected \(failure)")
             return
         }
-        do { try device.focusMode = .locked } catch {
-            AppLog.warn(AppLog.camera, "focus: lock rejected \(error.localizedDescription)")
+        if let failure = LumaFrameSafety.perform({ device.focusMode = .locked }) {
+            AppLog.warn(AppLog.camera, "focus: lock rejected \(failure)")
+            return
         }
         Haptics.focusLocked()
         AppLog.note(AppLog.camera, "focus locked at device point \(point.x), \(point.y)")

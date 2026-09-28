@@ -26,7 +26,11 @@ struct CaptureMetadata: Equatable, Sendable {
     var iso: Float?
     var shutterSeconds: Double?
     var exposureTargetOffset: Double?
-    var lensFocalLength35mm: Double?
+    /// The active lens's relative scale, as derived by
+    /// `BackCameraCapabilities.relativeScale(of:)`. **Not** a 35 mm focal length:
+    /// iOS does not expose one, and storing a relative number under a name that
+    /// promises millimetres would make the file lie to whatever reads it later.
+    var lensRelativeScale: Double?
     var lensKind: String?
     var zoomFactor: Double?
     var frontCamera: Bool = false
@@ -60,7 +64,7 @@ struct CaptureMetadata: Equatable, Sendable {
         if let iso { parts.append("iso=\(ReportFormat.number(Double(iso)))") }
         if let shutterSeconds { parts.append("sh=\(String(format: "%.6f", shutterSeconds))") }
         if let offset = exposureTargetOffset { parts.append("ev=\(ReportFormat.number(offset))") }
-        if let focal = lensFocalLength35mm { parts.append("f=\(String(format: "%.1f", focal))") }
+        if let scale = lensRelativeScale { parts.append("rs=\(String(format: "%.1f", scale))") }
         if let lensKind { parts.append("lens=\(lensKind)") }
         if let zoomFactor { parts.append("zoom=\(ReportFormat.number(zoomFactor))") }
         parts.append("q=\(photoQualityPrioritization)")

@@ -93,9 +93,14 @@ final class CaptureSessionController: NSObject {
                    completion: @escaping (Result<Configuration, Error>) -> Void) {
         publish(.configuring)
 
+        // `AVCaptureOutput` is not `Sendable`, and the session queue block is. The
+        // outputs are handed over exactly once, by the owner that created them, and
+        // are never mutated inside the block, so this is the one place the unchecked
+        // claim is honest. Every other hop in this type passes plain values.
+        let box = OutputBox(extraOutputs)
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            let result = self.configureLocked(facing: facing, extraOutputs: extraOutputs)
+            let result = self.configureLocked(facing: facing, extraOutputs: box.outputs)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 switch result {
@@ -116,7 +121,7 @@ final class CaptureSessionController: NSObject {
     func stop() {
         sessionQueue.async { [weak self] in
             guard let self, self.session.isRunning else { return }
-            let failure = LumaFrameSafety.perform { self.session.stopRunning() }
+            let failure = LumaFrameSafety.perform({ self.session.stopRunning() })
             if let failure {
                 AppLog.warn(AppLog.camera, "stopRunning raised \(failure)")
             }
@@ -154,7 +159,7 @@ final class CaptureSessionController: NSObject {
         session.commitConfiguration()
         guard case .success(let configuration) = configured else { return configured }
 
-        if let failure = LumaFrameSafety.perform { session.startRunning() } {
+        if let failure = LumaFrameSafety.perform({ self.session.startRunning() }) {
             return .failure(CameraError.startFailed(failure))
         }
         guard session.isRunning else {
@@ -277,14 +282,17 @@ final class CaptureSessionController: NSObject {
         return device.activeFormat
     }
 
+    /// The capture-mode setters on `AVCaptureDevice` are plain properties, not throwing
+    /// methods, and they raise an Objective-C exception rather than throwing a Swift
+    /// error when the device is not locked. So each one is guarded by a support check
+    /// and then run through `LumaFrameSafety`, which is the wrapper that actually
+    /// converts a raised exception into a log line.
     private func setExposureMode(_ mode: AVCaptureDevice.ExposureMode,
                                  on device: AVCaptureDevice,
                                  name: String) {
         guard device.isExposureModeSupported(mode) else { return }
-        do {
-            try device.setExposureMode(mode)
-        } catch {
-            AppLog.warn(AppLog.camera, "\(name) mode rejected: \(error.localizedDescription)")
+        if let failure = LumaFrameSafety.perform({ device.exposureMode = mode }) {
+            AppLog.warn(AppLog.camera, "\(name) mode rejected: \(failure)")
         }
     }
 
@@ -292,10 +300,8 @@ final class CaptureSessionController: NSObject {
                               on device: AVCaptureDevice,
                               name: String) {
         guard device.isFocusModeSupported(mode) else { return }
-        do {
-            try device.setFocusMode(mode)
-        } catch {
-            AppLog.warn(AppLog.camera, "\(name) mode rejected: \(error.localizedDescription)")
+        if let failure = LumaFrameSafety.perform({ device.focusMode = mode }) {
+            AppLog.warn(AppLog.camera, "\(name) mode rejected: \(failure)")
         }
     }
 
@@ -303,10 +309,8 @@ final class CaptureSessionController: NSObject {
                                      on device: AVCaptureDevice,
                                      name: String) {
         guard device.isWhiteBalanceModeSupported(mode) else { return }
-        do {
-            try device.setWhiteBalanceMode(mode)
-        } catch {
-            AppLog.warn(AppLog.camera, "\(name) mode rejected: \(error.localizedDescription)")
+        if let failure = LumaFrameSafety.perform({ device.whiteBalanceMode = mode }) {
+            AppLog.warn(AppLog.camera, "\(name) mode rejected: \(failure)")
         }
     }
 
@@ -384,7 +388,9 @@ final class CaptureSessionController: NSObject {
             object: session,
             queue: .main
         ) { [weak self] note in
-            let error = note.userInfo?[AVCaptureSession.errorKey] as? NSError
+            // The userInfo key is the global `AVCaptureSessionErrorKey`; there is no
+            // `AVCaptureSession.errorKey` member.
+            let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
             Task { @MainActor in
                 self?.publish(.failed(reason: error?.localizedDescription ?? "Camera runtime error"))
                 if let error {
@@ -421,7 +427,7 @@ final class CaptureSessionController: NSObject {
     private func restart() {
         sessionQueue.async { [weak self] in
             guard let self, !self.session.isRunning else { return }
-            if let failure = LumaFrameSafety.perform { self.session.startRunning() } {
+            if let failure = LumaFrameSafety.perform({ self.session.startRunning() }) {
                 AppLog.fail(AppLog.camera, "restart failed: \(failure)")
                 return
             }
@@ -456,6 +462,13 @@ final class CaptureSessionController: NSObject {
 }
 
 // MARK: - Errors
+
+/// Carries the caller's outputs across a queue boundary. See `configure` for why the
+/// unchecked `Sendable` claim is sound here.
+private final class OutputBox: @unchecked Sendable {
+    let outputs: [AVCaptureOutput]
+    init(_ outputs: [AVCaptureOutput]) { self.outputs = outputs }
+}
 
 enum CameraError: LocalizedError, Equatable {
     case noDevice(CameraFacing)

@@ -69,6 +69,13 @@ enum Theme {
         static func duration(_ base: Double) -> Double {
             UIAccessibility.isReduceMotionEnabled ? 0 : base
         }
+
+        /// The same rule expressed for SwiftUI's `animation(_:value:)`, which takes an
+        /// `Animation?` and not a `Double`. `nil` removes the animation entirely, which
+        /// is what a reduced-motion setting should do rather than animating at 0 s.
+        static func animation(_ base: Double) -> Animation? {
+            UIAccessibility.isReduceMotionEnabled ? nil : .easeOut(duration: base)
+        }
     }
 }
 

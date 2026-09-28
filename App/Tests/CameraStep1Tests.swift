@@ -12,23 +12,25 @@ final class CameraStep1Tests: XCTestCase {
 
     private func makeCamera(_ uniqueID: String,
                             kind: BackCameraCapabilities.Kind,
-                            focalLength35mm: Double,
-                            virtualZoomFactors: [Double] = [],
+                            relativeScale: Double,
+                            hasOpticalZoomSteps: Bool = false,
                             flash: Bool = false) -> BackCameraCapabilities {
         BackCameraCapabilities(uniqueID: uniqueID,
                                kind: kind,
-                               focalLength35mm: focalLength35mm,
-                               virtualZoomFactors: virtualZoomFactors,
+                               relativeScale: relativeScale,
+                               hasOpticalZoomSteps: hasOpticalZoomSteps,
                                minimumFocusDistance: -1,
                                flashAvailable: flash)
     }
 
+    /// Relative scales chosen so the ratios are the same numbers a real phone would
+    /// produce: an ultra wide at about half the wide, and a tele at about 3x.
     private func makeTripleLens() -> CameraCapabilities {
         var capabilities = CameraCapabilities()
         capabilities.backCameras = [
-            makeCamera("uw", kind: .ultraWide, focalLength35mm: 13),
-            makeCamera("w", kind: .wide, focalLength35mm: 24, virtualZoomFactors: [1, 2, 3, 4, 5], flash: true),
-            makeCamera("t", kind: .telephoto, focalLength35mm: 77)
+            makeCamera("uw", kind: .ultraWide, relativeScale: 13),
+            makeCamera("w", kind: .wide, relativeScale: 24, hasOpticalZoomSteps: true, flash: true),
+            makeCamera("t", kind: .telephoto, relativeScale: 77)
         ]
         capabilities.rawPixelTypes = [0x31324241]
         capabilities.proRawSupported = true
@@ -42,7 +44,7 @@ final class CameraStep1Tests: XCTestCase {
 
     func testSingleBackCameraHasNoLensSelector() {
         var capabilities = CameraCapabilities()
-        capabilities.backCameras = [makeCamera("w", kind: .wide, focalLength35mm: 24)]
+        capabilities.backCameras = [makeCamera("w", kind: .wide, relativeScale: 24)]
 
         XCTAssertFalse(capabilities.lensSelector.isAvailable)
         XCTAssertEqual(capabilities.lensSelector.reason, "Single camera — no lens switching")
@@ -51,9 +53,9 @@ final class CameraStep1Tests: XCTestCase {
 
     func testSingleBackCameraHasNoZoomStepsOrOpticalRange() {
         var capabilities = CameraCapabilities()
-        capabilities.backCameras = [makeCamera("w", kind: .wide, focalLength35mm: 24)]
+        capabilities.backCameras = [makeCamera("w", kind: .wide, relativeScale: 24)]
 
-        XCTAssertFalse(capabilities.physicalLenses.contains { $0.virtualZoomFactors.count > 1 })
+        XCTAssertFalse(capabilities.physicalLenses.contains { $0.hasOpticalZoomSteps })
         XCTAssertEqual(capabilities.opticalZoom.reason, "No optical zoom range reported")
     }
 
@@ -98,7 +100,7 @@ final class CameraStep1Tests: XCTestCase {
         var capabilities = CameraCapabilities()
         XCTAssertFalse(capabilities.flash.isAvailable)
 
-        capabilities.backCameras = [makeCamera("w", kind: .wide, focalLength35mm: 24, flash: true)]
+        capabilities.backCameras = [makeCamera("w", kind: .wide, relativeScale: 24, flash: true)]
         XCTAssertTrue(capabilities.flash.isAvailable)
     }
 
@@ -129,7 +131,7 @@ final class CameraStep1Tests: XCTestCase {
 
     func testZoomLabelIsHiddenWhenTheReferenceLensIsUnknown() {
         var capabilities = CameraCapabilities()
-        capabilities.backCameras = [makeCamera("x", kind: .unknown, focalLength35mm: 0)]
+        capabilities.backCameras = [makeCamera("x", kind: .unknown, relativeScale: 0)]
 
         XCTAssertNil(capabilities.zoomLabel(for: capabilities.backCameras[0]))
     }
@@ -139,9 +141,9 @@ final class CameraStep1Tests: XCTestCase {
     func testPhysicalLensesWinOverCompositeDevices() {
         var capabilities = CameraCapabilities()
         capabilities.backCameras = [
-            makeCamera("composite", kind: .composite, focalLength35mm: 24),
-            makeCamera("uw", kind: .ultraWide, focalLength35mm: 13),
-            makeCamera("w", kind: .wide, focalLength35mm: 24)
+            makeCamera("composite", kind: .composite, relativeScale: 24),
+            makeCamera("uw", kind: .ultraWide, relativeScale: 13),
+            makeCamera("w", kind: .wide, relativeScale: 24)
         ]
 
         XCTAssertEqual(capabilities.physicalLenses.map(\.uniqueID), ["uw", "w"])
@@ -149,20 +151,24 @@ final class CameraStep1Tests: XCTestCase {
 
     func testCompositeSurvivesWhenNothingElseWasDiscovered() {
         var capabilities = CameraCapabilities()
-        capabilities.backCameras = [makeCamera("composite", kind: .composite, focalLength35mm: 24)]
+        capabilities.backCameras = [makeCamera("composite", kind: .composite, relativeScale: 24)]
 
         XCTAssertEqual(capabilities.physicalLenses.map(\.uniqueID), ["composite"])
     }
 
     // MARK: - HDR badge is derived
 
-    func testHDRBadgeRefusesToClaimFramesWeDidNotMerge() {
+    func testHDRBadgeNeverClaimsAResolutionItCannotObserve() {
         // `.ready` says the hardware can. It does not say the system did anything.
         XCTAssertEqual(HDRStatus.ready.label, "HDR ready")
-        XCTAssertEqual(HDRStatus.capturedWithQualityPriority.label, "HDR quality")
+        // The resolved quality prioritisation is not readable from
+        // `AVCaptureResolvedPhotoSettings`, so the third state is worded as a request.
+        XCTAssertEqual(HDRStatus.qualityRequested.label, "HDR requested")
         XCTAssertEqual(HDRStatus.unsupported.label, "HDR n/a")
         XCTAssertTrue(HDRStatus.unsupported.isMuted)
         XCTAssertFalse(HDRStatus.ready.isMuted)
+        // There is no "frames merged" state at all, because the app merges none.
+        XCTAssertEqual(HDRStatus.allCases.count, 3)
     }
 
     func testQualityPriorityIsOnlyRequestedWhereTheFormatSupportsIt() {
@@ -273,7 +279,7 @@ final class CameraStep1Tests: XCTestCase {
         metadata.iso = 400
         metadata.shutterSeconds = 1.0 / 120.0
         metadata.exposureTargetOffset = -0.3
-        metadata.lensFocalLength35mm = 24
+        metadata.lensRelativeScale = 24
         metadata.lensKind = "wide"
         metadata.zoomFactor = 1.5
         metadata.photoQualityPrioritization = "quality"
@@ -288,7 +294,7 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertEqual(parsed.fields["iso"], "400")
         XCTAssertEqual(parsed.fields["sh"], "0.008333")
         XCTAssertEqual(parsed.fields["ev"], "-0.3")
-        XCTAssertEqual(parsed.fields["f"], "24.0")
+        XCTAssertEqual(parsed.fields["rs"], "24.0")
         XCTAssertEqual(parsed.fields["lens"], "wide")
         XCTAssertEqual(parsed.fields["zoom"], "1.5")
         XCTAssertEqual(parsed.fields["q"], "quality")
@@ -321,7 +327,7 @@ final class CameraStep1Tests: XCTestCase {
         var metadata = CaptureMetadata(mode: "auto")
         metadata.iso = 800
         metadata.shutterSeconds = 1.0 / 60.0
-        metadata.lensFocalLength35mm = 24
+        metadata.lensRelativeScale = 24
 
         let dictionary = metadata.dictionary()
         let exif = try XCTUnwrap(dictionary[kCGImagePropertyExifDictionary as String] as? [String: Any])
@@ -333,7 +339,7 @@ final class CameraStep1Tests: XCTestCase {
         // The focal length lives in the recipe, not in an EXIF key, because this SDK has
         // no `kCGImagePropertyExifFocalLengthIn35mmFilm`. If it ever comes back, the
         // recipe is still the source of truth and this assertion keeps the two in step.
-        XCTAssertTrue(comment.contains("f=24.0"))
+        XCTAssertTrue(comment.contains("rs=24.0"))
         XCTAssertNotNil(dictionary[kCGImagePropertyTIFFDictionary as String])
     }
 

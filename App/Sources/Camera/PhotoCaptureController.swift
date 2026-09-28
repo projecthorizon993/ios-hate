@@ -48,9 +48,9 @@ final class PhotoCaptureController: NSObject {
         var data: Data
         var container: PhotoContainer
         var metadata: CaptureMetadata
-        /// What AVFoundation actually did, used for the log and the HDR badge.
-        var resolvedQuality: AVCapturePhotoOutput.QualityPrioritization
-        var resolvedProRaw: Bool
+        /// Measured, not requested: `AVCapturePhoto.isRawPhoto` is the one resolution
+        /// signal AVFoundation actually exposes here.
+        var isRawPhoto: Bool
     }
 
     let output = AVCapturePhotoOutput()
@@ -73,23 +73,17 @@ final class PhotoCaptureController: NSObject {
     /// `NSInvalidArgumentException` — the exact failure `LumaFrameSafety` exists for.
     func configureOutput(capabilities: CameraCapabilities) {
         let available = output.availablePhotoCodecTypes
-        AppLog.note(AppLog.camera,
-                    "photo codecs available: \(available.map { "\($0.rawValue)" }.joined(separator: ", "))")
-
-        guard let codec = Self.preferredCodec(for: output) else {
-            AppLog.warn(AppLog.camera, "no photo codec available; the output default will be used")
-            return
-        }
-        output.availablePhotoCodecTypes = [codec]
-        AppLog.note(AppLog.camera, "photo codec set: \(codec.rawValue)")
+        let codecText = available.map { "\($0.rawValue)" }.joined(separator: ", ")
+        AppLog.note(AppLog.camera, "photo codecs available: \(codecText)")
+        AppLog.note(AppLog.camera, "photo codec will be: \(Self.preferredCodec(for: output)?.rawValue ?? "output default")")
 
         guard capabilities.proRawSupported else {
             if output.isAppleProRAWEnabled {
-                _ = LumaFrameSafety.perform { output.isAppleProRAWEnabled = false }
+                _ = LumaFrameSafety.perform({ self.output.isAppleProRAWEnabled = false })
             }
             return
         }
-        if let failure = LumaFrameSafety.perform({ output.isAppleProRAWEnabled = true }) {
+        if let failure = LumaFrameSafety.perform({ self.output.isAppleProRAWEnabled = true }) {
             AppLog.warn(AppLog.camera, "ProRAW could not be enabled: \(failure)")
         } else {
             AppLog.note(AppLog.camera, "ProRAW enabled")
@@ -122,10 +116,12 @@ final class PhotoCaptureController: NSObject {
             fail(Failure.noCodec)
             return
         }
-        guard output.isReadyForPhotoCapture else {
+        // `captureReadiness` is the supported readiness signal. `isReadyForPhotoCapture`
+        // does not exist on this type.
+        guard output.captureReadiness == .ready else {
             // Not an error state to hide, and not a failure to blame on the user: the
             // sensor is still settling. Saying so beats pretending a capture happened.
-            AppLog.warn(AppLog.camera, "shutter ignored: output not ready for capture")
+            AppLog.warn(AppLog.camera, "shutter ignored: capture readiness is \(output.captureReadiness.rawValue)")
             fail(Failure.notReady)
             return
         }
@@ -140,36 +136,43 @@ final class PhotoCaptureController: NSObject {
         }
 
         isCapturing = true
-        pendingMetadata = metadata
-        pendingRequest = request
 
         // The file records the **request**, because that is all that exists at the moment
-        // the settings are built. AVFoundation resolves quality and ProRAW afterwards and
-        // the resolution lands in the log and in the badge, not retroactively in the file.
-        metadata.photoQualityPrioritization = request.preferQuality ? "quality" : "balanced"
-        metadata.proRaw = request.proRaw
-        metadata.raw = request.raw
+        // the settings are built. AVFoundation resolves quality afterwards and the
+        // resolution lands in the log, not retroactively in the file.
+        var recorded = metadata
+        recorded.photoQualityPrioritization = request.preferQuality ? "quality" : "balanced"
+        recorded.proRaw = request.proRaw
+        recorded.raw = request.raw
+        pendingMetadata = recorded
+        pendingRequest = request
 
-        // The codec is the one chosen in `configureOutput`, so the settings are built
-        // from the same value the output was restricted to.
         let codec = Self.preferredCodec(for: output) ?? AVVideoCodecType.jpeg
-        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: codec])
-        settings.photoQualityPrioritization = request.preferQuality ? .quality : .balanced
-        settings.isFlashEnabled = request.flash == .on && output.supportedFlashModes.contains(.on)
-        if request.proRaw { settings.isAppleProRAWEnabled = true }
+        // RAW capture needs the dedicated initialiser; there is no
+        // `rawPixelFormatType` property to assign on a plain settings object.
+        let settings: AVCapturePhotoSettings
         if request.raw, let raw = Self.rawPixelType(for: output, proRaw: request.proRaw) {
-            settings.rawPixelFormatType = raw
+            settings = AVCapturePhotoSettings(rawPixelFormatType: raw)
+        } else {
+            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: codec])
         }
+        settings.photoQualityPrioritization = request.preferQuality ? .quality : .balanced
+
+        let wantsFlash = request.flash == .on && output.supportedFlashModes.contains(.on)
+        settings.flashMode = wantsFlash ? .on : .off
+        // There is no per-settings ProRAW switch: ProRAW is a property of the output,
+        // already set in `configureOutput` from the reported capability.
+
         // The recipe travels with the file. AVFoundation merges this into the image
         // metadata it writes, which is what makes a capture re-renderable in step 9
         // without the original having been altered.
-        settings.metadata = metadata.dictionary()
+        settings.metadata = recorded.dictionary()
 
+        let quality = request.preferQuality ? "quality" : "balanced"
+        let flash = wantsFlash ? "on" : "off"
         AppLog.note(AppLog.camera,
-                    "capture requested: codec=\(codec.rawValue) "
-                    + "quality=\(request.preferQuality ? "quality" : "balanced") "
-                    + "flash=\(settings.isFlashEnabled ? "on" : "off") raw=\(request.raw) "
-                    + "proRAW=\(request.proRaw) mode=\(metadata.mode)")
+                    "capture requested: codec=\(codec.rawValue) quality=\(quality) flash=\(flash) "
+                    + "raw=\(request.raw) proRAW=\(request.proRaw) mode=\(recorded.mode)")
 
         // `onCapture` is the single result channel, so a rejected press reports through
         // exactly the same path as a finished one and the UI has one code path.
@@ -182,7 +185,7 @@ final class PhotoCaptureController: NSObject {
     /// Rejects a press before the session is entered, so `onProgressChange` never has to
     /// be balanced for a capture that never started.
     private func fail(_ failure: Failure) {
-        AppLog.fail(AppLog.camera, "capture rejected: \(failure.localizedDescription ?? "unknown")")
+        AppLog.fail(AppLog.camera, "capture rejected: \(failure.localizedDescription)")
         onCapture?(.failure(failure))
     }
 
@@ -204,31 +207,23 @@ final class PhotoCaptureController: NSObject {
     @MainActor
     private func deliver(data: Data,
                          container: PhotoContainer,
-                         resolvedQuality: AVCapturePhotoOutput.QualityPrioritization,
-                         resolvedProRaw: Bool,
+                         isRawPhoto: Bool,
                          dimensions: CMVideoDimensions) {
-        var metadata = pendingMetadata ?? CaptureMetadata(mode: "auto")
-        // Record what actually happened, not what was asked for. The badge reads this,
-        // and the mismatch against the request is logged rather than hidden.
-        metadata.photoQualityPrioritization = resolvedQuality == .quality ? "quality" : "balanced"
-        metadata.proRaw = resolvedProRaw
-        metadata.pixelWidth = dimensions.width
-        metadata.pixelHeight = dimensions.height
-        metadata.container = container.rawValue
-        if let request = pendingRequest {
-            if request.proRaw != resolvedProRaw {
-                AppLog.warn(AppLog.camera, "ProRAW request \(request.proRaw) resolved to \(resolvedProRaw)")
-            }
-            if (request.preferQuality ? "quality" : "balanced") != metadata.photoQualityPrioritization {
-                AppLog.warn(AppLog.camera,
-                            "quality request \(request.preferQuality) resolved to \(metadata.photoQualityPrioritization)")
-            }
+        var recorded = pendingMetadata ?? CaptureMetadata(mode: "auto")
+        recorded.pixelWidth = Int(dimensions.width)
+        recorded.pixelHeight = Int(dimensions.height)
+        recorded.container = container.rawValue
+        // `photo.isRawPhoto` is the one resolution signal AVFoundation actually exposes,
+        // so it is recorded as measured. Quality prioritisation is **not** readable back
+        // from `AVCaptureResolvedPhotoSettings` on this SDK, so the file keeps the value
+        // that was requested and the badge is worded as a request, not a result.
+        if let request = pendingRequest, request.raw != isRawPhoto {
+            AppLog.warn(AppLog.camera, "RAW request \(request.raw) produced isRawPhoto=\(isRawPhoto)")
         }
         finish(.success(Capture(data: data,
                                 container: container,
-                                metadata: metadata,
-                                resolvedQuality: resolvedQuality,
-                                resolvedProRaw: resolvedProRaw)))
+                                metadata: recorded,
+                                isRawPhoto: isRawPhoto)))
     }
 }
 
@@ -266,18 +261,22 @@ extension PhotoCaptureController: AVCapturePhotoCaptureDelegate {
             return
         }
 
+        // `AVCaptureResolvedPhotoSettings` exposes the resolved dimensions and the
+        // unique ID, but **not** `photoQualityPrioritization` or `isAppleProRAWEnabled`
+        // on this SDK. The raw flag is readable from the photo itself, so that is what
+        // is logged; the quality priority is a request that cannot be confirmed, and
+        // `HDRStatus` is worded accordingly.
         let resolved = photo.resolvedSettings
+        let width = Int(resolved.photoDimensions.width)
+        let height = Int(resolved.photoDimensions.height)
         AppLog.note(AppLog.camera,
-                    "capture resolved: \(resolved.photoDimensions.width)x\(resolved.photoDimensions.height) "
-                    + "quality=\(resolved.photoQualityPrioritization == .quality ? "quality" : "balanced") "
-                    + "proRAW=\(resolved.isAppleProRAWEnabled) "
-                    + "bytes=\(data.count) container=\(container.rawValue)")
+                    "capture resolved: \(width)x\(height) raw=\(photo.isRawPhoto) "
+                    + "bytes=\(data.count) container=\(container.rawValue) id=\(resolved.uniqueID)")
 
         Task { @MainActor [weak self] in
             self?.deliver(data: data,
                           container: container,
-                          resolvedQuality: resolved.photoQualityPrioritization,
-                          resolvedProRaw: resolved.isAppleProRAWEnabled,
+                          isRawPhoto: photo.isRawPhoto,
                           dimensions: resolved.photoDimensions)
         }
     }

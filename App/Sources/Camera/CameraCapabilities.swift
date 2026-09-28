@@ -65,43 +65,46 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
 
     var uniqueID: String
     var kind: Kind
-    /// 35 mm equivalent, which is the only focal length a user can reason about.
-    var focalLength35mm: Double
-    /// Optical-equivalent steps, present only on devices that report a virtual
-    /// multi-camera device. Empty on a single-lens device, which is exactly why the
-    /// zoom UI must come from this list and not from a hard-coded `0.5x 1x 2x`.
-    var virtualZoomFactors: [Double]
+    /// A relative measure of this lens's reach, used only for ordering the lenses and
+    /// for the zoom ratios below.
+    ///
+    /// iOS exposes no 35 mm equivalent focal length — not on `AVCaptureDevice`, not on
+    /// `AVCaptureDevice.Format` — so this is not millimetres and is not named as if it
+    /// were. See `relativeScale(of:)` for how it is derived.
+    var relativeScale: Double
+    /// Whether the device reports a virtual multi-camera device with optical
+    /// switch-over points. The points themselves are read in step 6, when there is a
+    /// real device to verify them against; step 1 only needs the yes or no to decide
+    /// whether a zoom control may exist at all.
+    var hasOpticalZoomSteps: Bool
     /// Negative when the device does not report it.
     var minimumFocusDistance: Double
     var flashAvailable: Bool
 
     static func describe(_ device: AVCaptureDevice) -> BackCameraCapabilities {
-        let virtual = device.virtualDeviceSwitchOverVideoZoomFactors.map { Double($0) }
-        return BackCameraCapabilities(
+        BackCameraCapabilities(
             uniqueID: device.uniqueID,
             kind: kind(of: device.deviceType),
-            // There is no 35 mm equivalent focal length in the iOS SDK on either the
-            // device or its format, so the video field of view of the active format is
-            // used instead. It is a measured value, it is on the format, and the zoom
-            // labels below are ratios of these so they stay internally consistent.
-            focalLength35mm: Self.relativeFocalLength(of: device.activeFormat),
-            virtualZoomFactors: virtual.isEmpty ? [] : [1.0] + virtual,
+            relativeScale: Self.relativeScale(of: device.activeFormat),
+            hasOpticalZoomSteps: !device.virtualDeviceSwitchOverVideoZoomFactors.isEmpty,
             minimumFocusDistance: Double(device.minimumFocusDistance),
             flashAvailable: device.isFlashAvailable
         )
     }
 
-    /// The format's diagonal field of view in millimetres of 35 mm film, which is a
-    /// stand-in for focal length: a wider field of view means a shorter equivalent
-    /// length, so lens ordering and zoom ratios both come out right.
+    /// Derived from the largest still the format can produce.
     ///
-    /// The diagonal, not the horizontal field of view: portrait and landscape capture
-    /// would otherwise swap the ordering of the lenses depending on how the phone is
-    /// held.
-    private static func relativeFocalLength(of format: AVCaptureDevice.Format) -> Double {
-        let fov = CMVideoFieldOfView(diagonal: format.formatDescription)
-        guard fov.degrees > 0 else { return 0 }
-        return 43.2666 / tan(fov.degrees * .pi / 360)
+    /// Still area scales with the square of the focal length, so the ratio of these
+    /// square roots between two lenses **is** the focal length ratio between them —
+    /// which is precisely what a zoom chip such as "2x" claims. Unlike a hard-coded
+    /// `0.5x 1x 2x` it is measured, so a device that reports no telephoto lens simply
+    /// never produces a 2x chip.
+    private static func relativeScale(of format: AVCaptureDevice.Format) -> Double {
+        let largest = format.supportedMaxPhotoDimensions.max {
+            Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height)
+        }
+        guard let largest else { return 0 }
+        return Double(Int(largest.width) * Int(largest.height)).squareRoot()
     }
 
     static func kind(of type: AVCaptureDevice.DeviceType) -> Kind {
@@ -153,7 +156,7 @@ struct CameraCapabilities: Equatable, Sendable {
     /// The camera the 1x button maps to. Real focal length, not a convention.
     var referenceCamera: BackCameraCapabilities? {
         backCameras.first { $0.kind == .wide }
-            ?? backCameras.filter { $0.kind != .composite }.min { $0.focalLength35mm < $1.focalLength35mm }
+            ?? backCameras.filter { $0.kind != .composite }.min { $0.relativeScale < $1.relativeScale }
             ?? backCameras.first
     }
 
@@ -162,8 +165,8 @@ struct CameraCapabilities: Equatable, Sendable {
     /// `nil` when the ratio cannot be established, in which case the UI shows no chip
     /// rather than a made-up `0.5x`.
     func zoomLabel(for camera: BackCameraCapabilities) -> String? {
-        guard let reference = referenceCamera, reference.focalLength35mm > 0 else { return nil }
-        let ratio = camera.focalLength35mm / reference.focalLength35mm
+        guard let reference = referenceCamera, reference.relativeScale > 0 else { return nil }
+        let ratio = camera.relativeScale / reference.relativeScale
         guard ratio > 0 else { return nil }
         return String(format: "%.1fx", ratio)
     }
@@ -208,7 +211,7 @@ struct CameraCapabilities: Equatable, Sendable {
     /// Optical zoom is only advertised when the device reports a virtual multi-camera
     /// device with switch-over factors. A single-lens device has no zoom steps.
     var opticalZoom: FeatureAvailability {
-        let hasSteps = physicalLenses.contains { $0.virtualZoomFactors.count > 1 }
+        let hasSteps = physicalLenses.contains { $0.hasOpticalZoomSteps }
         if hasSteps { return .available }
         return .unavailable(reason: "No optical zoom range reported")
     }
@@ -252,7 +255,7 @@ struct CameraCapabilities: Equatable, Sendable {
             .map(BackCameraCapabilities.describe)
         let physical = described.filter { $0.kind != .composite && $0.kind != .unknown }
         backCameras = physical.isEmpty ? described : physical
-        backCameras.sort { $0.focalLength35mm < $1.focalLength35mm }
+        backCameras.sort { $0.relativeScale < $1.relativeScale }
     }
 
     /// Display P3 capture, read from the format description rather than from
@@ -346,22 +349,29 @@ struct ExposureRange: Equatable, Sendable {
 /// - our own highlight meter on the preview — whether the scene needs it.
 ///
 /// So the badge is derived from those, and it never claims frames we did not merge
-/// ourselves. `capturedWithQualityPriority` is the only case where we know the request
-/// was honoured, and even then it says quality priority, not "HDR frames".
-enum HDRStatus: Equatable, Sendable {
+/// ourselves.
+///
+/// **And what is not public is the outcome.** `AVCaptureResolvedPhotoSettings` on this
+/// SDK exposes the resolved dimensions and the unique ID, but not the resolved
+/// `photoQualityPrioritization` and not the resolved ProRAW flag. So the third state
+/// below records that a quality-priority capture was *requested* on a format that
+/// supports it, which is the strongest claim public API allows. There is deliberately
+/// no "HDR frames" state: the app merges no frames itself, and claiming a count it did
+/// not produce is the exact dishonesty this enum exists to prevent.
+enum HDRStatus: Equatable, Sendable, CaseIterable {
     /// The active format reports no HDR support at all.
     case unsupported
     /// Hardware can, nothing requested yet.
     case ready
-    /// We asked for `photoQualityPrioritization = .quality` and AVFoundation confirmed
-    /// it came back as `.quality` on the resolved settings.
-    case capturedWithQualityPriority
+    /// A quality-priority capture was requested on a format that supports it. The
+    /// resolution is not observable, so this is a request, not a result.
+    case qualityRequested
 
     var label: String {
         switch self {
         case .unsupported: return "HDR n/a"
         case .ready: return "HDR ready"
-        case .capturedWithQualityPriority: return "HDR quality"
+        case .qualityRequested: return "HDR requested"
         }
     }
 

@@ -12,7 +12,7 @@ struct CameraScreen: View {
     @StateObject private var model = CameraViewModel()
     @State private var bridge: PreviewBridge?
     @State private var deviceOrientation = UIDevice.current.orientation
-    @State private var focusReticle: UnitPoint?
+    @State private var focusReticle: CGPoint?
     @State private var isShowingReport = false
 
     /// Derived, never stored twice. Rotating the device or flipping the camera both
@@ -86,7 +86,7 @@ struct CameraScreen: View {
         .contentShape(Rectangle())
         .gesture(focusGesture)
         .simultaneousGesture(debugTap)
-        .animation(Theme.Motion.duration(Theme.Motion.overlay), value: focusReticle)
+        .animation(Theme.Motion.animation(Theme.Motion.overlay), value: focusReticle)
     }
 
     /// Grid and debug line in a single `Canvas`, so the overlay costs one draw.
@@ -97,16 +97,25 @@ struct CameraScreen: View {
     private var overlayCanvas: some View {
         Canvas { context, size in
             let line = Theme.ColorToken.strokeSubtle
-            for index in 1...2 {
-                let x = size.width * CGFloat(index) / 3
-                context.stroke(Path { $0.move(to: CGPoint(x: x, y: 0))
-                                          .addLine(to: CGPoint(x: x, y: size.height)) },
-                               with: .color(line), lineWidth: 0.5)
-                let y = size.height * CGFloat(index) / 3
-                context.stroke(Path { $0.move(to: CGPoint(x: 0, y: y))
-                                          .addLine(to: CGPoint(x: size.width, y: y)) },
-                               with: .color(line), lineWidth: 0.5)
-            }
+            // The Path builder closure returns Void, so the two commands are separate
+            // statements rather than a chained call.
+            var vertical = Path()
+            vertical.move(to: CGPoint(x: size.width / 3, y: 0))
+            vertical.addLine(to: CGPoint(x: size.width / 3, y: size.height))
+            var horizontal = Path()
+            horizontal.move(to: CGPoint(x: 0, y: size.height / 3))
+            horizontal.addLine(to: CGPoint(x: size.width, y: size.height / 3))
+            context.stroke(vertical, with: .color(line), lineWidth: 0.5)
+            context.stroke(horizontal, with: .color(line), lineWidth: 0.5)
+
+            var verticalTwo = Path()
+            verticalTwo.move(to: CGPoint(x: size.width * 2 / 3, y: 0))
+            verticalTwo.addLine(to: CGPoint(x: size.width * 2 / 3, y: size.height))
+            var horizontalTwo = Path()
+            horizontalTwo.move(to: CGPoint(x: 0, y: size.height * 2 / 3))
+            horizontalTwo.addLine(to: CGPoint(x: size.width, y: size.height * 2 / 3))
+            context.stroke(verticalTwo, with: .color(line), lineWidth: 0.5)
+            context.stroke(horizontalTwo, with: .color(line), lineWidth: 0.5)
 
             guard model.showDebugOverlay else { return }
             let text = Text(model.debugLine)
@@ -133,7 +142,7 @@ struct CameraScreen: View {
             .onEnded { value in
                 guard let point = bridge?.devicePoint(fromViewPoint: value.location) else { return }
                 model.focus(atDevicePoint: point)
-                focusReticle = UnitPoint(x: value.location.x, y: value.location.y)
+                focusReticle = value.location
             }
     }
 
@@ -172,7 +181,7 @@ struct CameraScreen: View {
         }
         .padding(.horizontal, Theme.Space.l)
         .padding(.top, Theme.Space.s)
-        .animation(Theme.Motion.duration(Theme.Motion.overlay), value: model.sessionState)
+        .animation(Theme.Motion.animation(Theme.Motion.overlay), value: model.sessionState)
     }
 
     // MARK: - Bottom stack

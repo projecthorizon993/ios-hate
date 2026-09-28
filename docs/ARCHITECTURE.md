@@ -36,12 +36,25 @@ them:
 - **`isVideoHDREnabled` is never written.** It is the only writable HDR knob and it
   affects video streaming only, so setting it would make the badge claim something it
   cannot deliver (see 2.4).
-- **The badge has exactly three states** — `HDR n/a`, `HDR ready`, `HDR quality` — and
-  the last one only appears when AVFoundation's *resolved* settings came back as
-  `.quality`. There is no "HDR frames" state, because the app merges no frames in
-  Step 1.
-- **The badge follows the hardware, not the request.** A request that was downgraded
-  logs a warning and leaves the badge where the hardware put it.
+- **The badge has exactly three states** — `HDR n/a`, `HDR ready`, `HDR requested`.
+  The third appears only after a quality-priority capture on a format that reports
+  high photo quality. It says **requested**, not resolved, because
+  `AVCaptureResolvedPhotoSettings` on this SDK exposes the resolved dimensions and
+  the unique ID but **not** the resolved `photoQualityPrioritization` and not the
+  resolved ProRAW flag. The outcome is simply not observable through public API, so
+  there is no state that can honestly report it, and no "HDR frames" state because
+  the app merges no frames itself.
+- **There is no 35 mm equivalent focal length on iOS** — not on `AVCaptureDevice`,
+  not on `AVCaptureDevice.Format`. Lens ordering and the zoom ratios are derived
+  instead from the largest still each format can produce: still area scales with the
+  square of the focal length, so the ratio of the square roots between two lenses
+  **is** their focal length ratio, which is exactly what a `2x` chip claims. The
+  value is stored as `relativeScale` and recorded in the recipe as `rs=`, never
+  under a name that promises millimetres.
+- **The optical-zoom switch-over points are not read in Step 1**, only their
+  presence. The conversion out of `virtualDeviceSwitchOverVideoZoomFactors` is a
+  boxed integer type whose element type is not part of any public contract, so the
+  numbers wait for Step 6 and a real device.
 - **Zoom chips are measured ratios** against the reported wide lens, and are hidden
   entirely when the ratio cannot be established.
 - **`isVideoZoomEnabled` and pinch zoom are not in Step 1**; zoom is a Step 6 concern

@@ -76,27 +76,34 @@ enum CaptureFormatChooser {
     /// `supportedMaxPhotoDimensions` is iOS 16+ and is the only way to know the still
     /// size; the video dimensions are a different number and are not a substitute.
     static func stillPixelCount(_ format: AVCaptureDevice.Format) -> Int {
+        // `CMVideoDimensions` uses Int32, so the product is widened before it is used as
+        // an Int sort key.
         let dimensions = format.supportedMaxPhotoDimensions
-        if let largest = dimensions.max(by: { $0.width * $0.height < $1.width * $1.height }) {
-            return largest.width * largest.height
+        if let largest = dimensions.max(by: { Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height) }) {
+            return Int(largest.width) * Int(largest.height)
         }
         return videoPixelCount(format)
     }
 
     static func videoPixelCount(_ format: AVCaptureDevice.Format) -> Int {
         let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-        return dimensions.width * dimensions.height
+        return Int(dimensions.width) * Int(dimensions.height)
     }
 
     /// One-line description for the log, so a capture can be traced back to the exact
     /// format that produced it. Never used in the UI.
     static func describe(_ format: AVCaptureDevice.Format) -> String {
-        let still = format.supportedMaxPhotoDimensions
-            .max { $0.width * $0.height < $1.width * $1.height }
-        let stillText = still.map { "\($0.width)x\($0.height)" } ?? "n/a"
-        return "\(stillText) still | \(ReportFormat.fourCC(CMFormatDescriptionGetMediaSubType(format.formatDescription))) "
-            + "video | highQuality=\(format.isHighPhotoQualitySupported) "
-            + "highest=\(format.isHighestPhotoQualitySupported) hdr=\(format.isVideoHDRSupported) "
-            + "binned=\(format.isVideoBinned) maxShutter=\(ReportFormat.shutter(CMTimeGetSeconds(format.maxExposureDuration)))"
+        let largest = format.supportedMaxPhotoDimensions.max {
+            Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height)
+        }
+        let stillText = largest.map { "\($0.width)x\($0.height)" } ?? "n/a"
+        let fourCC = ReportFormat.fourCC(CMFormatDescriptionGetMediaSubType(format.formatDescription))
+        let maxShutter = ReportFormat.shutter(CMTimeGetSeconds(format.maxExposureDuration))
+        return "\(stillText) still | \(fourCC) video | "
+            + "highQuality=\(format.isHighPhotoQualitySupported) "
+            + "highest=\(format.isHighestPhotoQualitySupported) "
+            + "hdr=\(format.isVideoHDRSupported) "
+            + "binned=\(format.isVideoBinned) "
+            + "maxShutter=\(maxShutter)"
     }
 }
