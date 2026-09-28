@@ -243,15 +243,19 @@ final class ProcessedPreviewRenderer: NSObject, MTKViewDelegate {
 
     var metalView: MTKView { view }
 
-    /// `MTKViewDelegate` requires this, and it is not optional boilerplate: the drawable
-    /// is recreated on every size change, so without it the view renders into a texture
-    /// that is no longer attached to anything and the preview goes black on rotation.
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        redraw()
+    /// Draws the latest processed frame, if there is one.
+    ///
+    /// `redraw()` is the public entry point and only *asks* for a draw. The work happens in
+    /// `draw(in:)`, which is the delegate's required method — `MTKView` owns when a
+    /// drawable exists, and reaching for `currentDrawable` from outside the delegate means
+    /// rendering into a texture the view is not presenting.
+    func redraw() {
+        view.setNeedsDisplay()
     }
 
-    /// Draws the latest processed frame, if there is one.
-    func redraw() {
+    /// The one required member of `MTKViewDelegate`. `enableSetNeedsDisplay` is on and the
+    /// view is paused, so this is called only when `redraw()` or a size change asks for it.
+    func draw(in view: MTKView) {
         guard let image = source?.lastStill(),
               let drawable = view.currentDrawable,
               let commandBuffer = view.device?.makeCommandBuffer()
@@ -268,5 +272,12 @@ final class ProcessedPreviewRenderer: NSObject, MTKViewDelegate {
 
         commandBuffer.present(drawable)
         commandBuffer.commit()
+    }
+
+    /// The drawable is recreated on every size change, so the view renders into a texture
+    /// that is no longer attached to anything unless it is asked for a draw again — which
+    /// is what makes the preview go black on rotation if this is left out.
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        redraw()
     }
 }
