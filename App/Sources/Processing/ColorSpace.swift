@@ -26,10 +26,18 @@ enum ColorSpace: Equatable, Sendable {
         destination
     }
 
+    /// The concrete Core Graphics colour space for this case.
+    ///
+    /// `linearSRGB` used to return the gamma-encoded sRGB space, which is the same object
+    /// as `.sRGB` — so any pipeline stage that asked the enum to convert for it got a
+    /// gamma space back and silently did no conversion at all. Tone curves are supposed
+    /// to run in linear light, so that made the whole working space a no-op. `linearSRGB`
+    /// is a distinct color space and is now returned as one.
     var cgColorSpace: CGColorSpace {
         switch self {
-        case .sRGB, .linearSRGB: return CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        case .sRGB: return CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         case .displayP3: return CGColorSpace(name: CGColorSpace.displayP3) ?? CGColorSpaceCreateDeviceRGB()
+        case .linearSRGB: return CGColorSpace(name: CGColorSpace.linearSRGB) ?? CGColorSpaceCreateDeviceRGB()
         }
     }
 

@@ -1,27 +1,26 @@
 import AVFoundation
+import CoreImage
 import Foundation
 import UIKit
 
-/// The mode switcher. Step 1 ships Auto only, and the other two entries stay visible
-/// but disabled: they are part of the shipped design, and `docs/DESIGN_SPEC.md` requires
-/// the chrome not to move when a mode is added.
-enum CameraMode: String, CaseIterable, Equatable {
-    case auto
-    case pro
-    case looks
+    /// The mode switcher. Step 1 shipped Auto only; Step 3 added Looks and Step 4 added
+    /// Pro. All three are implemented, and each still reports what it cannot do on the
+    /// current device rather than presenting a control that would do nothing.
+    enum CameraMode: String, CaseIterable, Equatable {
+        case auto
+        case pro
+        case looks
 
-    var label: String {
-        switch self {
-        case .auto: return "Auto"
-        case .pro: return "Pro"
-        case .looks: return "Looks"
+        var label: String {
+            switch self {
+            case .auto: return "Auto"
+            case .pro: return "Pro"
+            case .looks: return "Looks"
+            }
         }
-    }
 
-    /// Step 1 implements Auto. Pro is Step 4 and Looks is Step 3, so both report why
-    /// they are unavailable rather than pretending to be switchable.
-    var isImplemented: Bool { self == .auto }
-}
+        var isImplemented: Bool { true }
+    }
 
 /// Everything the camera screen renders, in one observable object.
 ///
@@ -60,6 +59,24 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var canFlip = false
     @Published var showDebugOverlay = false
 
+    // MARK: - Processing (Steps 2, 3, 4, 5)
+
+    /// The recipe. **One value, read by the preview and by the save path**, which is the
+    /// only way a look can be guaranteed to look the same in the photo as it did on
+    /// screen. Neither caller may hold its own copy.
+    @Published private(set) var settings = ProcessingSettings.none
+
+    /// The looks the user can pick, built-ins first then their own imports.
+    @Published private(set) var looks: [Look] = []
+
+    /// The live processed preview. Created once and reused; `ProcessedPreview` owns a
+    /// `CIContext` and a video output, and both are far too expensive to make per frame.
+    let processedPreview = ProcessedPreview()
+
+    /// Bumped whenever the processed preview should redraw. SwiftUI will not redraw a
+    /// `MTKView` on its own.
+    @Published private(set) var previewRedrawToken = 0
+
     /// Flash is `off` / `on` only. `AVCapturePhotoSettings` has no auto flash, so an
     /// "Auto" option here would be a control that silently does nothing.
     @Published private(set) var flashMode: AVCaptureDevice.FlashMode = .off
@@ -67,6 +84,7 @@ final class CameraViewModel: ObservableObject {
     private let sessionController = CaptureSessionController()
     private let photo = PhotoCaptureController()
     private let meter = PreviewMeter()
+    private let lookLibrary = LookLibrary.shared
 
     /// The photo output, exposed only so the session can attach it.
     var captureSession: AVCaptureSession { sessionController.session }
@@ -165,6 +183,8 @@ final class CameraViewModel: ObservableObject {
         capabilities = probed
 
         photo.configureOutput(capabilities: probed)
+        looks = lookLibrary.all
+        pushSettingsToPreview()
         startReadout()
         storedBytes = PhotoStore.totalBytes()
 
@@ -174,6 +194,81 @@ final class CameraViewModel: ObservableObject {
                     + "flash=\(probed.flash.isAvailable) "
                     + "hdr=\(self.hdr.label)")
     }
+
+    // MARK: - Recipe
+
+    /// The single place the recipe changes.
+    ///
+    /// Every mutator funnels through here so the preview is pushed exactly once and the
+    /// value the preview is showing and the value a capture will use cannot diverge.
+    private func updateSettings(_ transform: (inout ProcessingSettings) -> Void) {
+        var copy = settings
+        transform(&copy)
+        settings = copy.clamped()
+        pushSettingsToPreview()
+    }
+
+    private func pushSettingsToPreview() {
+        let recipe = settings
+        // The preview arrives in the video pipeline's own space and leaves as sRGB for
+        // display. A P3 capture is handled in the save path, where the file's real colour
+        // space is known.
+        processedPreview.update(settings: recipe,
+                                inputSpace: .sRGB,
+                                outputSpace: .sRGB)
+        previewRedrawToken += 1
+        AppLog.note(AppLog.processing, "recipe: \(recipe.summarise())")
+    }
+
+    /// Picks a look. `nil` means Original, which is the identity recipe and therefore gets
+    /// the cheap direct preview path back.
+    func select(look: Look?) {
+        updateSettings { $0.look = look }
+        if let look {
+            AppLog.note(AppLog.processing, "look selected: \(look.name)")
+        }
+    }
+
+    func setLookIntensity(_ value: Float) {
+        updateSettings { $0.lookIntensity = value }
+    }
+
+    func setTone(_ tone: ToneCurve) {
+        // A dialled-in correction is exactly the case where the native pipeline's own
+        // white balance must not also be assumed, so the recipe records it explicitly.
+        updateSettings { $0.tone = tone.isIdentity ? nil : tone }
+    }
+
+    func setGrain(_ value: Float) {
+        updateSettings { $0.grain = value }
+    }
+
+    func setSharpen(_ value: Float) {
+        updateSettings { $0.sharpen = value }
+    }
+
+    /// Imports a `.cube` the user picked, and selects it if it parses.
+    func importLook(cube data: Data, filename: String) -> Bool {
+        guard let look = lookLibrary.addImported(cube: data, filename: filename) else {
+            present("That lookup table could not be used", isError: true)
+            return false
+        }
+        looks = lookLibrary.all
+        select(look: look)
+        return true
+    }
+
+    func removeImportedLook(_ look: Look) {
+        lookLibrary.removeImported(look)
+        looks = lookLibrary.all
+        if settings.look?.id == look.id {
+            select(look: nil)
+        }
+    }
+
+    /// `true` when the recipe does nothing, which is when the app uses the direct preview
+    /// layer instead of the processed one.
+    var isProcessingActive: Bool { !settings.isIdentity && processedPreview.isAvailable }
 
     // MARK: - Readout
 
@@ -257,10 +352,17 @@ final class CameraViewModel: ObservableObject {
     private func handle(_ result: Result<PhotoCaptureController.Capture, Error>) {
         switch result {
         case .success(let capture):
+            // The original bytes are always written untouched, and the recipe travels in
+            // the metadata beside them. A processed version is written as a *separate*
+            // file rather than replacing the original, so any photo can be re-rendered
+            // later from the untouched capture — which is the whole reason the original is
+            // kept. See `docs/ARCHITECTURE.md` step 9.
             do {
+                var metadata = capture.metadata
+                metadata.processing = settings
                 let saved = try PhotoStore.write(capture.data,
                                                  container: capture.container,
-                                                 metadata: capture.metadata)
+                                                 metadata: metadata)
                 latestPhoto = saved
                 storedBytes = PhotoStore.totalBytes()
                 // The badge records that a quality-priority capture was requested on a
@@ -271,11 +373,67 @@ final class CameraViewModel: ObservableObject {
                     hdr = .qualityRequested
                 }
                 refreshThumbnail(from: capture.data)
+
+                if !settings.isIdentity {
+                    writeProcessedVersion(of: capture, beside: saved)
+                }
             } catch {
                 present(error.localizedDescription, isError: true)
             }
         case .failure(let error):
             present(error.localizedDescription, isError: true)
+        }
+    }
+
+    /// Renders and writes the processed version of a capture.
+    ///
+    /// This calls the same `ProcessingPipeline` the preview calls, with the same
+    /// `ProcessingSettings` value, which is the guarantee that the photo matches what was
+    /// on screen. A failure writes nothing and says so: a missing processed file is
+    /// recoverable, a wrong one is not.
+    private func writeProcessedVersion(of capture: PhotoCaptureController.Capture,
+                                       beside original: SavedPhoto) {
+        // RAW and ProRAW are not re-rendered here. A RAW file is the sensor's own data and
+        // processing it into a JPEG would destroy the reason the user asked for RAW, so the
+        // recipe is recorded in the metadata and the RAW is left alone. That is a decision
+        // to revisit in Step 9, not something to guess at now.
+        guard !capture.isRawPhoto else {
+            AppLog.note(AppLog.processing, "RAW capture kept unprocessed; recipe stored in metadata")
+            return
+        }
+        let recipe = settings
+        let source = capture.data
+
+        Task.detached(priority: .userInitiated) {
+            let pipeline = ProcessingPipeline()
+            guard let ciImage = CIImage(data: source) else {
+                AppLog.fail(AppLog.processing, "processed version: capture data was not an image")
+                return
+            }
+            let outputSpace: ColorSpace = capture.metadata.container == PhotoContainer.heic.rawValue
+                ? .displayP3
+                : .sRGB
+            let rendered = pipeline.renderOrOriginal(ciImage,
+                                                    settings: recipe,
+                                                    inputSpace: .sRGB,
+                                                    outputSpace: outputSpace)
+            guard let data = ProcessingPipeline.encodeJPEG(rendered,
+                                                           space: outputSpace,
+                                                           quality: 0.95) else {
+                AppLog.fail(AppLog.processing, "processed version: could not encode")
+                return
+            }
+            do {
+                var metadata = capture.metadata
+                metadata.processing = recipe
+                metadata.derivedFrom = original.id
+                let saved = try PhotoStore.write(data,
+                                                 container: .jpeg,
+                                                 metadata: metadata)
+                AppLog.note(AppLog.processing, "processed version written: \(saved.describeForLog)")
+            } catch {
+                AppLog.fail(AppLog.processing, "processed version not written: \(error.localizedDescription)")
+            }
         }
     }
 

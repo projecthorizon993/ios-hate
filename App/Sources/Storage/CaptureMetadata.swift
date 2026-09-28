@@ -45,6 +45,17 @@ struct CaptureMetadata: Equatable, Sendable {
     var colorSpace: String = "srgb"
     var hdrStatus: String = "unsupported"
 
+    /// The processing recipe, as of Step 2 onwards. `nil` on a capture taken with nothing
+    /// applied, which is the common case and is recorded as absence rather than as a
+    /// zeroed struct: "no look was applied" and "a look was applied at zero intensity" are
+    /// different facts about a photo and only one of them is usually true.
+    var processing: ProcessingSettings?
+
+    /// Set on a derived file to point at the untouched capture it came from. Lets a gallery
+    /// (Step 9) present "original" and "processed" as two views of one photo rather than
+    /// as two unrelated files.
+    var derivedFrom: UUID?
+
     /// Never logged whole: it is the only place the file records a device-ish value and
     /// `AppLog` must not carry image content.
     var summariseForLog: String {
@@ -73,7 +84,39 @@ struct CaptureMetadata: Equatable, Sendable {
         if frontCamera { parts.append("front=1") }
         if !colorSpace.isEmpty { parts.append("space=\(colorSpace)") }
         if !hdrStatus.isEmpty { parts.append("hdr=\(hdrStatus)") }
+        if let derivedFrom { parts.append("derived=\(derivedFrom.uuidString)") }
+        // The recipe itself is written as one compact blob rather than flattened into
+        // individual keys. Flattening would mean inventing a key per ToneCurve field and
+        // then maintaining that mapping forever; a versioned JSON payload means a new
+        // field needs no reader change, and a reader that meets a version it does not know
+        // can decline rather than misread.
+        if let processing, let encoded = Self.encodeProcessing(processing) {
+            parts.append("proc=\(encoded)")
+        }
         return parts.joined(separator: ";")
+    }
+
+    /// Percent-encoded so the `;` and `=` separators cannot be forged by a value.
+    private static func encodeProcessing(_ settings: ProcessingSettings) -> String? {
+        guard let data = try? JSONEncoder().encode(settings) else { return nil }
+        return data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// The inverse of `encodeProcessing`. Returns `nil` for anything unreadable rather
+    /// than throwing, because a file from a future version must degrade to "no recipe"
+    /// and never to a crash.
+    static func decodeProcessing(_ token: String) -> ProcessingSettings? {
+        var standard = token
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        // base64 needs the padding back, and it was stripped because `=` is a separator.
+        let remainder = standard.count % 4
+        if remainder > 0 { standard += String(repeating: "=", count: 4 - remainder) }
+        guard let data = Data(base64Encoded: standard) else { return nil }
+        return try? JSONDecoder().decode(ProcessingSettings.self, from: data)
     }
 
     /// Parses a string produced by `recipeString`. Total by design: a malformed recipe in
