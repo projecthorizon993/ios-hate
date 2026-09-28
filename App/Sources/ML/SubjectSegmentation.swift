@@ -1,3 +1,4 @@
+import CoreImage
 import CoreML
 import Foundation
 import Vision
