@@ -62,6 +62,9 @@
 				A02A2A153CFFED4CEFEDA4D9,
 				A46FA81BF8D2894BBEE02C5A,
 				A87A7D5BF5DFE40C21C7490A,
+				A50834C49441CBFBC3A616C4,
+				AB4F5DE7F7B2FBF6D015A601,
+				AF7FD765128CFFD4B16917C9,
 				A5BC11F303052291E6FB2C1B,
 				AEB620EE64789952E59B006A,
 				AB174A3B018201C704EA6219,
@@ -71,6 +74,7 @@
 				A549153AEC2703901FADC6CE,
 				ADA0DEBE0747651E8E6C6109,
 				AC938FD7C68ED288AC7E4FED,
+				AD2B88580548E280FD38F0B1,
 				A7681A1A19F9BB62FD3BBEEF,
 				A10000000000000000000058
 			);
@@ -272,6 +276,9 @@
 				C9567CE8C0EE524653499FA9,
 				CBC555BBDADBCEB25D89CCED,
 				C1389DB9408908EB53F4801C,
+				C7D0780ABD89F9BB7E0CA5E1,
+				CF93BFA51E0FF98C4D788C23,
+				C08A489679DF1A5BC07ECEE2,
 				CA974A731C2FD5B4E35E7AEB,
 				C8F0875D32195865344EC1F9,
 				C4AA261019E06676EC934AA8,
@@ -286,6 +293,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D7EA069DAB30A429FBAE2818,
+				D8343F3D69C04F13AD71A04B,
 				D0D1942134E71C67DBB59C17,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -463,6 +471,24 @@
 			path = App/Sources/Diagnostics/ShareSheet.swift;
 			sourceTree = "<group>";
 		};
+		A50834C49441CBFBC3A616C4 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Processing/CubeLUT.swift;
+			sourceTree = "<group>";
+		};
+		AB4F5DE7F7B2FBF6D015A601 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Processing/CubeLUTError.swift;
+			sourceTree = "<group>";
+		};
+		AF7FD765128CFFD4B16917C9 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Processing/CubeLUTParser.swift;
+			sourceTree = "<group>";
+		};
 		A5BC11F303052291E6FB2C1B = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -515,6 +541,12 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Tests/CameraStep1Tests.swift;
+			sourceTree = "<group>";
+		};
+		AD2B88580548E280FD38F0B1 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Tests/CubeLUTParserTests.swift;
 			sourceTree = "<group>";
 		};
 		A7681A1A19F9BB62FD3BBEEF = {
@@ -611,6 +643,18 @@
 			isa = PBXBuildFile;
 			fileRef = A87A7D5BF5DFE40C21C7490A;
 		};
+		C7D0780ABD89F9BB7E0CA5E1 = {
+			isa = PBXBuildFile;
+			fileRef = A50834C49441CBFBC3A616C4;
+		};
+		CF93BFA51E0FF98C4D788C23 = {
+			isa = PBXBuildFile;
+			fileRef = AB4F5DE7F7B2FBF6D015A601;
+		};
+		C08A489679DF1A5BC07ECEE2 = {
+			isa = PBXBuildFile;
+			fileRef = AF7FD765128CFFD4B16917C9;
+		};
 		CA974A731C2FD5B4E35E7AEB = {
 			isa = PBXBuildFile;
 			fileRef = A5BC11F303052291E6FB2C1B;
@@ -638,6 +682,10 @@
 		D7EA069DAB30A429FBAE2818 = {
 			isa = PBXBuildFile;
 			fileRef = AC938FD7C68ED288AC7E4FED;
+		};
+		D8343F3D69C04F13AD71A04B = {
+			isa = PBXBuildFile;
+			fileRef = AD2B88580548E280FD38F0B1;
 		};
 		D0D1942134E71C67DBB59C17 = {
 			isa = PBXBuildFile;

@@ -11,17 +11,35 @@ implemented. Read this before writing any feature.
 
 | Step | Scope | Status |
 | --- | --- | --- |
-| 0 | Architecture + Capability Report (both platforms) | **Done** — run it on all 3 devices and paste output back |
-| 1 | Auto mode with native HDR + camera screen UI (iOS) | **Implemented, awaiting device verification** |
-| 2 | LUT engine (`.cube` parser, GPU 3D LUT, intensity) | Pending |
+| 0 | Architecture + Capability Report (both platforms) | **Code done, device data still missing** |
+| 1 | Auto mode with native HDR + camera screen UI (iOS) | **Code done + CI green; on-device unverified** |
+| 2 | LUT engine (`.cube` parser, GPU 3D LUT, intensity) | In progress |
 | 3 | Style system + Styles screen | Pending |
 | 4 | Pro mode, RAW, Pro panel | Pending |
 | 5 | ML layer + mask-based style blending | Pending |
-| 6 | CI, lean tests, manual checklist | Partially done (CI exists) |
+| 6 | CI, lean tests, manual checklist | Partially done (CI green on iOS, Android red) |
 
-**Nothing in Steps 1–5 may be built before the Step 0 report is collected from the
-iPhone 11 Pro Max, the iPhone SE 2022 and the Galaxy S21 Ultra.** Every feature below
-is gated on what that report actually says.
+**Nothing in Steps 1–5 is verified until the Step 0 report is collected from the
+iPhone 11 Pro Max, the iPhone SE 2022 and the Galaxy S21 Ultra.** The gate is still
+open: the report has never completed a run on a device, and the three-device
+comparison that every capability-gated decision below rests on does not exist yet.
+Code for Step 1 is written and compiles; nothing about it has been observed working.
+
+### 1.0 Where Step 1 actually stands
+
+Stated precisely so Step 2 is not built on a false assumption:
+
+- `Unit tests` and `Build unsigned IPA` are both **green** on `main`.
+- The app has **never run to completion on a device.** The first attempt to open the
+  capability report hung the main thread for ~600 ms and was killed by the watchdog.
+  Two causes were found and fixed — main-thread-only UIKit read from the detached
+  probe, and a second `AVCaptureSession` contending with the live one — but **that fix
+  has itself never been run on a device.**
+- The reports collected from the three devices before this rewrite came from a
+  **pre-rewrite binary that no longer exists**, so none of the values in them describe
+  the current code.
+- Android has never been built. It is red for reasons unrelated to iOS and has not
+  been looked at since the `sdkmanager` fix.
 
 ### 1.1 What Step 1 settled on iOS
 
