@@ -138,21 +138,20 @@ final class ProcessingPipelineTests: XCTestCase {
     /// image with the colours swapped, which is exactly the kind of bug that survives a
     /// visual check.
     ///
-    /// `.noColour` is the right look to check: it maps every channel to the same luma, so
-    /// the *only* thing that can make the first two samples differ is red moving first.
-    /// If green moved first the two samples would be identical in red and differ in green.
+    /// `Warmth` is the right look for this, and the choice matters: `No Colour` maps every
+    /// channel to the same luma, so *all three* channels of a sample change together and it
+    /// cannot distinguish which axis moved first. Warmth offsets each channel differently,
+    /// so if red moves first then green and blue are identical between the cube origin and
+    /// its neighbour while red is not. Transposed order would invert that: green and blue
+    /// would differ and red would not.
     func testGeneratedTablesHaveRedVaryingFastest() throws {
-        let table = try XCTUnwrap(GeneratedLooks.table(for: .noColour))
+        let table = try XCTUnwrap(GeneratedLooks.table(for: .warmth))
         let s = Array(table.samples.prefix(6))
 
-        // Sample 0 is the cube origin and sample 1 is one step along the first-varying
-        // axis. Identical in green and blue, different in red.
-        XCTAssertNotEqual(s[0], s[3], "the first axis should be red")
+        XCTAssertNotEqual(s[0], s[3], "the first axis should be red, and red should move")
         XCTAssertEqual(s[1], s[4], "green must not move first")
         XCTAssertEqual(s[2], s[5], "blue must not move first")
-
-        // And the direction: the first axis runs from black to white, not the reverse.
-        XCTAssertGreaterThan(s[3], s[0])
+        XCTAssertGreaterThan(s[3], s[0], "the first axis runs black to white, not back")
     }
 
     /// `.noColour` deliberately lifts blacks rather than crushing them, so a pure luma copy
