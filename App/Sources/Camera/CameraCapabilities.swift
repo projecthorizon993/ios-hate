@@ -80,7 +80,9 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
         return BackCameraCapabilities(
             uniqueID: device.uniqueID,
             kind: kind(of: device.deviceType),
-            focalLength35mm: Double(device.nominalFocalLengthIn35mmFilm),
+            // A property of the format, not of the device. The active format is the
+            // honest answer for "what focal length is this lens running at".
+            focalLength35mm: Double(device.activeFormat.nominalFocalLengthIn35mmFilm),
             virtualZoomFactors: virtual.isEmpty ? [] : [1.0] + virtual,
             minimumFocusDistance: Double(device.minimumFocusDistance),
             flashAvailable: device.isFlashAvailable

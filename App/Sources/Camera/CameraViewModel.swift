@@ -169,7 +169,7 @@ final class CameraViewModel: ObservableObject {
         value.shutterSeconds = CMTimeGetSeconds(device.exposureDuration)
         value.exposureTargetOffset = device.exposureTargetOffset
         value.zoomFactor = device.videoZoomFactor
-        value.focalLength35mm = Double(device.nominalFocalLengthIn35mmFilm)
+        value.focalLength35mm = Double(device.activeFormat.nominalFocalLengthIn35mmFilm)
         let active = activeCamera(focalLength35mm: value.focalLength35mm)
         value.lensLabel = active.flatMap { capabilities.zoomLabel(for: $0) }
         readout = value

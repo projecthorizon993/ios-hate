@@ -111,11 +111,17 @@ enum AVFoundationProbe {
         let title = "Device " + describeType(device.deviceType) + " [\(device.position)]"
         var section = ReportSection(title)
 
+        // Five of the properties below live on `AVCaptureDevice.Format`, not on
+        // `AVCaptureDevice`. The probe reads them off the active format, which is the
+        // honest answer anyway: a capability like white-balance locking is a property
+        // of a format, and the same lens can have it on one format and not another.
+        let format = device.activeFormat
+
         section.add(ReportEntry("deviceType raw", device.deviceType.rawValue))
         section.add(ReportEntry("position", "\(device.position)"))
         section.add(ReportEntry("uniqueID", device.uniqueID, .note))
         section.add(ReportEntry("nominal focal length (35mm equiv)",
-                               ReportFormat.number(Double(device.nominalFocalLengthIn35mmFilm), decimals: 1) + " mm"))
+                               ReportFormat.number(Double(format.nominalFocalLengthIn35mmFilm), decimals: 1) + " mm"))
         section.add(ReportEntry("format count", device.formats.count))
         section.add(ReportEntry("is flash available", device.isFlashAvailable))
         section.add(ReportEntry("is smooth auto focus supported", device.isSmoothAutoFocusSupported))
@@ -126,12 +132,11 @@ enum AVFoundationProbe {
                                    ? "\(device.minimumFocusDistance) mm"
                                    : "n/a"))
         section.add(ReportEntry("is lens stabilization during bracketed capture supported",
-                               device.isLensStabilizationDuringBracketedCaptureSupported))
-        section.add(ReportEntry("is externally synchronized", device.isExternallySynchronized, .note))
+                               format.isLensStabilizationDuringBracketedCaptureSupported))
+        section.add(ReportEntry("is externally synchronized", format.isExternallySynchronized, .note))
 
         // Current configuration. Without a running session these are the format
         // defaults, which is still the correct answer for "what can this do".
-        let format = device.activeFormat
         section.add(ReportEntry("active format fourCC",
                                ReportFormat.fourCC(CMFormatDescriptionGetMediaSubType(format.formatDescription))))
         section.add(ReportEntry("active format", describeFormat(format)))
@@ -144,8 +149,8 @@ enum AVFoundationProbe {
         section.add(ReportEntry("exposure duration (current)",
                                ReportFormat.shutter(CMTimeGetSeconds(device.exposureDuration))))
         section.add(ReportEntry("exposure target offset range",
-                               ReportFormat.range(Double(device.supportedExposureTargetOffsetRange.lowerBound),
-                                                  Double(device.supportedExposureTargetOffsetRange.upperBound))))
+                               ReportFormat.range(Double(format.supportedExposureTargetOffsetRange.lowerBound),
+                                                  Double(format.supportedExposureTargetOffsetRange.upperBound))))
         section.add(ReportEntry("exposure target offset (current)",
                                ReportFormat.number(Double(device.exposureTargetOffset))))
         section.add(ReportEntry("exposure modes",
@@ -154,7 +159,7 @@ enum AVFoundationProbe {
                                ReportFormat.list(focusModes(device).map { "\($0)" })))
         section.add(ReportEntry("white balance modes",
                                ReportFormat.list(whiteBalanceModes(device).map { "\($0)" })))
-        section.add(ReportEntry("is white balance lock supported", device.isWhiteBalanceLockSupported))
+        section.add(ReportEntry("is white balance lock supported", format.isWhiteBalanceLockSupported))
         section.add(ReportEntry("is exposure mode custom supported",
                                device.isExposureModeSupported(.custom), .good))
         section.add(ReportEntry("is focus mode locked (lens position) supported",

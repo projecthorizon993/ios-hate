@@ -40,6 +40,15 @@ struct ReportEntry: Identifiable, Equatable, Sendable {
         self.value = value ? "yes" : "no"
         self.level = level ?? (value ? .good : .info)
     }
+
+    /// Counts are measurements like any other. A separate initialiser rather than
+    /// stringifying at the call site, so `ReportFormat` stays out of the probes and a
+    /// count is never printed through a formatter that rounds it.
+    init(_ label: String, _ value: Int, _ level: ReportLevel = .info) {
+        self.label = label
+        self.value = String(value)
+        self.level = level
+    }
 }
 
 struct ReportSection: Identifiable, Equatable, Sendable {
