@@ -55,6 +55,8 @@ final class ProcessedPreview: NSObject {
     private var lastRendered: CIImage?
 
     override init() {
+        // Before `super.init()`: `output` and the delegate hand-off both need a fully
+        // initialised `self`, and Swift will not let `super.init()` run twice.
         pipeline = ProcessingPipeline()
         metalDevice = MTLCreateSystemDefaultDevice()
         if let device = metalDevice {
@@ -66,12 +68,12 @@ final class ProcessedPreview: NSObject {
             context = CIContext()
             AppLog.warn(AppLog.processing, "no Metal device; stills will be processed on the CPU")
         }
+        super.init()
         output.alwaysDiscardsLateVideoFrames = true
         output.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
         output.setSampleBufferDelegate(self, queue: queue)
-        super.init()
     }
 
     /// `false` when there is no Metal device, in which case the caller should keep the
@@ -230,10 +232,12 @@ final class ProcessedPreviewRenderer: NSObject, MTKViewDelegate {
 
     init?(metalDevice: MTLDevice) {
         guard metalDevice.makeCommandQueue() != nil else { return nil }
+        // `context` is assigned before `super.init()` because Swift requires every stored
+        // property to be initialised by the time the superclass initialiser runs.
+        context = CIContext(mtlDevice: metalDevice)
         view = MTKView(frame: .zero, device: metalDevice)
         super.init()
 
-        context = CIContext(mtlDevice: metalDevice)
         view.device = metalDevice
         view.framebufferOnly = false
         // `framebufferOnly = false` because the pipeline writes into the drawable's

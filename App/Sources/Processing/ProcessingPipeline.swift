@@ -261,7 +261,9 @@ struct ProcessingPipeline {
 
     private func feather(_ mask: CIImage, in extent: CGRect) -> CIImage {
         guard maskFeather > 0 else { return mask }
-        let radius = max(1, min(extent.width, extent.height) * maskFeather)
+        // `maskFeather` is a Float, the extent is CGFloat, and the result is a radius in
+        // points, so the widening is explicit rather than left to inference.
+        let radius = max(1, min(extent.width, extent.height) * CGFloat(maskFeather))
         return mask.applyingFilter("CIGaussianBlur", parameters: [
             kCIInputImageKey: mask,
             kCIInputRadiusKey: radius
@@ -306,11 +308,12 @@ struct ProcessingPipeline {
         // Zeroing the colour vectors and putting the amount in the alpha column scales
         // monochrome noise by it. The alpha position is the fourth component, which is
         // the only part of a `CIColorMatrix` vector that is not an RGB coefficient.
+        let amountVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(amount))
         let scaled = noise.applyingFilter("CIColorMatrix", parameters: [
             kCIInputImageKey: noise,
-            "inputRVector": CIVector(x: 0, y: 0, z: 0, w: amount),
-            "inputGVector": CIVector(x: 0, y: 0, z: 0, w: amount),
-            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: amount)
+            "inputRVector": amountVector,
+            "inputGVector": amountVector,
+            "inputBVector": amountVector
         ])
         return try stage("grain", image, [
             kCIInputImageKey: image,
@@ -319,6 +322,12 @@ struct ProcessingPipeline {
     }
 
     /// Colour space conversion, named explicitly at the call site.
+    ///
+    /// The keys are string literals because there is no Swift constant for them. This is
+    /// the *same trap* the LUT code fell into once already: `inputColorSpace` is a key on
+    /// `CIColorSpace` and is **not** a key on `CIColorCube`, and having been bitten by
+    /// that, they are written out rather than reached for by habit. The whole call is
+    /// inside `stage`, so a wrong key is a logged refusal rather than a crash.
     private func convert(_ image: CIImage,
                          from: ColorSpace,
                          to: ColorSpace,
@@ -326,8 +335,8 @@ struct ProcessingPipeline {
         guard from != to else { return image }
         return try stage(stageName, image, [
             kCIInputImageKey: image,
-            kCIInputColorSpaceKey: from.cgColorSpace,
-            kCIOutputColorSpaceKey: to.cgColorSpace
+            "inputColorSpace": from.cgColorSpace,
+            "outputColorSpace": to.cgColorSpace
         ])
     }
 

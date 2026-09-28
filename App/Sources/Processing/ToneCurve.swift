@@ -58,9 +58,14 @@ struct ToneCurve: Equatable, Codable, Sendable {
     /// `CIVector(x: 6500, y: 0)` is the D65 white point in the units
     /// `CITemperatureAndTint` uses, and it is the documented value for "no change" —
     /// passing a zero vector instead would shift everything wildly.
+    ///
+    /// The components are `CGFloat`; the offsets are `Float` because that is what the
+    /// slider and the metadata carry. The conversion is explicit rather than inferred.
     var neutralVector: CIVector { CIVector(x: 6500, y: 0) }
 
-    var targetNeutralVector: CIVector { CIVector(x: 6500 + temperatureOffset, y: tintOffset) }
+    var targetNeutralVector: CIVector {
+        CIVector(x: CGFloat(6500) + CGFloat(temperatureOffset), y: CGFloat(tintOffset))
+    }
 
     /// `CIExposureAdjust`'s EV input, from a 0…1 slider.
     ///
