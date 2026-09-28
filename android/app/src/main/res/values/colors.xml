@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- docs/DESIGN_SPEC.md: surface.base, accent.active, text.primary -->
+    <color name="surface_base">#FF0B0B0C</color>
+    <color name="surface_raised">#FF17181A</color>
+    <color name="accent_active">#FFF2C14E</color>
+    <color name="text_primary">#FFF2F3F5</color>
+    <color name="ic_launcher_background">#FF0B0B0C</color>
+</resources>

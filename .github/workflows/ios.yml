@@ -1,4 +1,4 @@
-name: iOS Unsigned IPA
+name: iOS
 
 on:
   workflow_dispatch:
@@ -7,17 +7,87 @@ on:
       - "main"
       - "fresh-rewrite"
       - "avfoundation-core"
-
+    paths-ignore:
+      - "android/**"
+      - "docs/**"
     tags:
       - "v*"
   pull_request:
     branches:
       - "main"
 
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  test:
+    name: Unit tests
+    # macos-14 defaults to Xcode 15.4 and is unsupported from 2026-11-02.
+    # macos-15 defaults to Xcode 16.4 and also has Xcode 26.3 installed.
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify project file matches disk
+        run: node scripts/generate-pbxproj.mjs --check
+
+      - name: Validate project file structure
+        run: node scripts/validate-pbxproj.mjs
+
+      - name: Check Swift source balance
+        run: node scripts/check-swift-balance.mjs
+
+      - name: Select a simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          UDID="$(xcrun simctl list devices available \
+            | grep -E 'iPhone' \
+            | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' \
+            | head -1)"
+          if [ -z "$UDID" ]; then
+            echo "no available iPhone simulator on this runner" >&2
+            exit 1
+          fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "using simulator $UDID"
+
+      - name: Run unit tests
+        run: |
+          set -uo pipefail
+          DERIVED_DATA="$RUNNER_TEMP/DerivedData"
+          set +e
+          xcodebuild test \
+            -project LumaFrame.xcodeproj \
+            -scheme LumaFrame \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$RUNNER_TEMP/xcodebuild-test.log"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            grep -E "error:|failed|XCTAssert" "$RUNNER_TEMP/xcodebuild-test.log" || true
+            exit "$STATUS"
+          fi
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaFrame-iOS-Test-Log
+          path: ${{ runner.temp }}/xcodebuild-test.log
+          if-no-files-found: warn
+
   build:
     name: Build unsigned IPA
-    runs-on: macos-14
+    needs: test
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -27,20 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -version
-          set +e
-          xcodebuild -list -project LumaFrame.xcodeproj 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
-          LIST_STATUS=${PIPESTATUS[0]}
-          set -e
-          if [ "$LIST_STATUS" -ne 0 ]; then
-            {
-              echo "### xcodebuild -project validation"
-              cat "$RUNNER_TEMP/xcodebuild.log"
-            } >> "$GITHUB_STEP_SUMMARY"
-            while IFS= read -r diagnostic; do
-              printf '::error title=Xcode validation::%s\n' "$diagnostic"
-            done < "$RUNNER_TEMP/xcodebuild.log"
-            exit "$LIST_STATUS"
-          fi
+          xcodebuild -list -project LumaFrame.xcodeproj
 
       - name: Compile unsigned iOS application
         run: |

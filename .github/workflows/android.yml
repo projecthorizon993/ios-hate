@@ -1,0 +1,89 @@
+name: Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+      - "fresh-rewrite"
+      - "avfoundation-core"
+    paths-ignore:
+      - "App/**"
+      - "docs/**"
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - "main"
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Unit tests and debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The Gradle wrapper JAR is a binary and is not committed. Installing the exact
+      # pinned distribution keeps the build reproducible. Run `gradle wrapper` locally
+      # and commit gradlew + gradle-wrapper.jar to remove this step.
+      - name: Install pinned Gradle
+        run: |
+          set -euo pipefail
+          GRADLE_VERSION="$(sed -n 's/^distributionUrl=.*gradle-\(.*\)-bin\.zip$/\1/p' gradle/wrapper/gradle-wrapper.properties)"
+          echo "Gradle $GRADLE_VERSION"
+          curl -fsSL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o /tmp/gradle.zip
+          sudo unzip -q /tmp/gradle.zip -d /opt
+          echo "/opt/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Accept Android SDK licenses
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-android-${{ hashFiles('android/gradle/libs.versions.toml') }}
+          restore-keys: gradle-${{ runner.os }}-android-
+
+      - name: Run unit tests
+        run: gradle --no-daemon --stacktrace testDebugUnitTest
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaFrame-Android-Test-Results
+          path: |
+            android/app/build/reports/tests/
+            android/app/build/test-results/
+          if-no-files-found: warn
+
+      - name: Assemble debug APK
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaFrame-Debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

@@ -40,17 +40,40 @@
 		A10000000000000000000003 = {
 			isa = PBXGroup;
 			children = (
-				A10000000000000000000010,
-				A10000000000000000000011,
-				A10000000000000000000012,
-				A10000000000000000000063,
-				A10000000000000000000067,
-				A10000000000000000000069,
-				C10000000000000000000001,
-				C10000000000000000000002,
-				C10000000000000000000003,
-				A10000000000000000000023,
-				A10000000000000000000058
+				A7A90ACB24107C131EF7144E,
+				AE560125322348780D5B9325,
+				A3F9FE803B170A02B6475E09,
+				AB94144D587B10334707370D,
+				A9D674D8CE54183D05A72EBF,
+				A4B1482221086C475487BED0,
+				A08A456D717FF17BE38E7044,
+				A986C89EE8122E2C72D79F88,
+				ACEC5D6A97BE2B90FE24678A,
+				A6351A4D6FD7C5F3DE6C5653,
+				A13290FFC0709B92BC31D9A2,
+				A93C2BC80AA6B2A2B957FE07,
+				A3DDE0A0989729BF8A7048E5,
+				A8DF73D8C2935C8B865035B8,
+				AA15B182A01ECEF25F499396,
+				AE3AA951A82811C6F5B59AE4,
+				A73BF38D30A4CDFFDCD09A8C,
+				AFD192E62FD31061D495CB30,
+				A02A2A153CFFED4CEFEDA4D9,
+				A46FA81BF8D2894BBEE02C5A,
+				A87A7D5BF5DFE40C21C7490A,
+				A5BC11F303052291E6FB2C1B,
+				AEB620EE64789952E59B006A,
+				AB174A3B018201C704EA6219,
+				AF5DA351FBF73C7FBFF2B805,
+				AFA822C55F0EB6711410EAA3,
+				A5E20936E5F8525DAA7DFD3A,
+				A549153AEC2703901FADC6CE,
+				ADA0DEBE0747651E8E6C6109,
+				AC938FD7C68ED288AC7E4FED,
+				A7681A1A19F9BB62FD3BBEEF,
+				A10000000000000000000058,
+				A10000000000000000000024,
+				A10000000000000000000025
 			);
 			name = LumaFrame;
 			sourceTree = "<group>";
@@ -138,7 +161,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.LumaFrame;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "App/Sources/Camera/LumaFrame-Bridging-Header.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Sources/Support/LumaFrame-Bridging-Header.h";
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
@@ -159,190 +182,10 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.LumaFrame;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "App/Sources/Camera/LumaFrame-Bridging-Header.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Sources/Support/LumaFrame-Bridging-Header.h";
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
-		};
-		A10000000000000000000010 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/App/LumaFrameApp.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000011 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Camera/CameraScreen.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000012 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Camera/IntegratedCameraView.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000023 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Tests/LumaFrameTests.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000024 = {
-			isa = PBXFileReference;
-			explicitFileType = wrapper.application;
-			includeInIndex = 0;
-			path = LumaFrame.app;
-			sourceTree = BUILT_PRODUCTS_DIR;
-		};
-		A10000000000000000000025 = {
-			isa = PBXFileReference;
-			explicitFileType = wrapper.cfbundle;
-			includeInIndex = 0;
-			path = LumaFrameTests.xctest;
-			sourceTree = BUILT_PRODUCTS_DIR;
-		};
-		A10000000000000000000026 = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A10000000000000000000009,
-				A10000000000000000000035
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A10000000000000000000027 = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A10000000000000000000040,
-				A10000000000000000000041,
-				A10000000000000000000042,
-				A10000000000000000000064,
-				A10000000000000000000068,
-				A10000000000000000000070,
-				C10000000000000000000004
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A10000000000000000000028 = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A10000000000000000000029 = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A10000000000000000000053
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A10000000000000000000030 = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A10000000000000000000054,
-				A10000000000000000000055
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A10000000000000000000031 = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A10000000000000000000056
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A10000000000000000000032 = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A10000000000000000000033 = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A10000000000000000000034 = {
-			isa = PBXTargetDependency;
-			target = A10000000000000000000005;
-			targetProxy = A10000000000000000000057;
-		};
-		A10000000000000000000040 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000010;
-		};
-		A10000000000000000000041 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000011;
-		};
-		A10000000000000000000042 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000012;
-		};
-		A10000000000000000000063 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Camera/NativeCameraService.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000064 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000063;
-		};
-		A10000000000000000000067 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Camera/NativeColorSettings.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000068 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000067;
-		};
-		A10000000000000000000069 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = "App/Sources/Camera/NativeColorEngine.swift";
-			sourceTree = "<group>";
-		};
-		A10000000000000000000070 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000069;
-		};
-		C10000000000000000000001 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.c.h;
-			path = "App/Sources/Camera/LumaFrameSafety.h";
-			sourceTree = "<group>";
-		};
-		C10000000000000000000002 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.c.objc;
-			path = "App/Sources/Camera/LumaFrameSafety.m";
-			sourceTree = "<group>";
-		};
-		C10000000000000000000003 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.c.h;
-			path = "App/Sources/Camera/LumaFrame-Bridging-Header.h";
-			sourceTree = "<group>";
-		};
-		C10000000000000000000004 = {
-			isa = PBXBuildFile;
-			fileRef = C10000000000000000000002;
-		};
-		A10000000000000000000053 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000058;
 		};
 		A10000000000000000000054 = {
 			isa = XCBuildConfiguration;
@@ -372,9 +215,114 @@
 			};
 			name = Release;
 		};
-		A10000000000000000000056 = {
-			isa = PBXBuildFile;
-			fileRef = A10000000000000000000023;
+		A10000000000000000000024 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.application;
+			includeInIndex = 0;
+			path = LumaFrame.app;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		A10000000000000000000025 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			includeInIndex = 0;
+			path = LumaFrameTests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		A10000000000000000000026 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000009,
+				A10000000000000000000035
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000030 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000054,
+				A10000000000000000000055
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000027 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C15352A586C2134E09B448B6,
+				CA989FE2240D664E2733F871,
+				C09CBF3F68320016356FC1DB,
+				CB60C54261C26C739BE10EDC,
+				CC4BE04410BDB19C788C79E7,
+				C14AD38C0F9C5DD49F829C7D,
+				C241B9A9353C2A7EFCAF0D21,
+				CDE3B1D6B126969DC101E534,
+				C60927296F1CDD49E8A685C9,
+				C261AE566CA25491BA9D300C,
+				C6907871D060BA394FCBA123,
+				CE440584A046EA2ED99BBAF4,
+				C51CC1AE42E91FF1A12557C7,
+				CCE63BAEA758D0C9BB9AB9A6,
+				C4154B853A94A9A8B76BF960,
+				C5746E540D7D8C66FB225411,
+				C3335EBEB15A39A57687F196,
+				C14F55B0BA7335DEE40563B0,
+				C9567CE8C0EE524653499FA9,
+				CBC555BBDADBCEB25D89CCED,
+				C1389DB9408908EB53F4801C,
+				CA974A731C2FD5B4E35E7AEB,
+				C8F0875D32195865344EC1F9,
+				C4AA261019E06676EC934AA8,
+				C1F850435B6C78A454F5B4BC,
+				C6FEE4DA81F4AE9A32EEE859,
+				CE7682ADF4BECB5A828EAE47,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000031 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D7EA069DAB30A429FBAE2818,
+				D0D1942134E71C67DBB59C17,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000028 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000032 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000029 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000053,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000033 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000034 = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000005;
+			targetProxy = A10000000000000000000057;
 		};
 		A10000000000000000000057 = {
 			isa = PBXContainerItemProxy;
@@ -383,10 +331,316 @@
 			remoteGlobalIDString = A10000000000000000000005;
 			remoteInfo = LumaFrame;
 		};
+		A7A90ACB24107C131EF7144E = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/App/LumaFrameApp.swift;
+			sourceTree = "<group>";
+		};
+		AE560125322348780D5B9325 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/App/RootView.swift;
+			sourceTree = "<group>";
+		};
+		A3F9FE803B170A02B6475E09 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Camera/CameraCapabilities.swift;
+			sourceTree = "<group>";
+		};
+		AB94144D587B10334707370D = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Camera/CameraScreen.swift;
+			sourceTree = "<group>";
+		};
+		A9D674D8CE54183D05A72EBF = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Camera/CameraViewModel.swift;
+			sourceTree = "<group>";
+		};
+		A4B1482221086C475487BED0 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Camera/CaptureFormatChooser.swift;
+			sourceTree = "<group>";
+		};
+		A08A456D717FF17BE38E7044 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Camera/CaptureSessionController.swift;
+			sourceTree = "<group>";
+		};
+		A986C89EE8122E2C72D79F88 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Camera/PhotoCaptureController.swift;
+			sourceTree = "<group>";
+		};
+		ACEC5D6A97BE2B90FE24678A = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Camera/PreviewMeter.swift;
+			sourceTree = "<group>";
+		};
+		A6351A4D6FD7C5F3DE6C5653 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Camera/PreviewView.swift;
+			sourceTree = "<group>";
+		};
+		A13290FFC0709B92BC31D9A2 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/DesignSystem/Theme.swift;
+			sourceTree = "<group>";
+		};
+		A93C2BC80AA6B2A2B957FE07 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Diagnostics/AVFoundationProbe.swift;
+			sourceTree = "<group>";
+		};
+		A3DDE0A0989729BF8A7048E5 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Diagnostics/CapabilityCollector.swift;
+			sourceTree = "<group>";
+		};
+		A8DF73D8C2935C8B865035B8 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Diagnostics/CoreMLProbe.swift;
+			sourceTree = "<group>";
+		};
+		AA15B182A01ECEF25F499396 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Diagnostics/DeviceProbe.swift;
+			sourceTree = "<group>";
+		};
+		AE3AA951A82811C6F5B59AE4 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Diagnostics/Report.swift;
+			sourceTree = "<group>";
+		};
+		A73BF38D30A4CDFFDCD09A8C = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Diagnostics/ReportExporter.swift;
+			sourceTree = "<group>";
+		};
+		AFD192E62FD31061D495CB30 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Diagnostics/ReportScreen.swift;
+			sourceTree = "<group>";
+		};
+		A02A2A153CFFED4CEFEDA4D9 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Diagnostics/ReportSectionView.swift;
+			sourceTree = "<group>";
+		};
+		A46FA81BF8D2894BBEE02C5A = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Diagnostics/ReportViewModel.swift;
+			sourceTree = "<group>";
+		};
+		A87A7D5BF5DFE40C21C7490A = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Diagnostics/ShareSheet.swift;
+			sourceTree = "<group>";
+		};
+		A5BC11F303052291E6FB2C1B = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Storage/CaptureMetadata.swift;
+			sourceTree = "<group>";
+		};
+		AEB620EE64789952E59B006A = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Storage/PhotoStore.swift;
+			sourceTree = "<group>";
+		};
+		AB174A3B018201C704EA6219 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Support/AppLog.swift;
+			sourceTree = "<group>";
+		};
+		AF5DA351FBF73C7FBFF2B805 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Support/Haptics.swift;
+			sourceTree = "<group>";
+		};
+		AFA822C55F0EB6711410EAA3 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.c.objc;
+			path = App/Sources/Support/LumaFrameSafety.m;
+			sourceTree = "<group>";
+		};
+		A5E20936E5F8525DAA7DFD3A = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Support/MemoryProbe.swift;
+			sourceTree = "<group>";
+		};
+		A549153AEC2703901FADC6CE = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.c.h;
+			path = "App/Sources/Support/LumaFrame-Bridging-Header.h";
+			sourceTree = "<group>";
+		};
+		ADA0DEBE0747651E8E6C6109 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.c.h;
+			path = App/Sources/Support/LumaFrameSafety.h;
+			sourceTree = "<group>";
+		};
+		AC938FD7C68ED288AC7E4FED = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Tests/CameraStep1Tests.swift;
+			sourceTree = "<group>";
+		};
+		A7681A1A19F9BB62FD3BBEEF = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Tests/ReportTextTests.swift;
+			sourceTree = "<group>";
+		};
+		C15352A586C2134E09B448B6 = {
+			isa = PBXBuildFile;
+			fileRef = A7A90ACB24107C131EF7144E;
+		};
+		CA989FE2240D664E2733F871 = {
+			isa = PBXBuildFile;
+			fileRef = AE560125322348780D5B9325;
+		};
+		C09CBF3F68320016356FC1DB = {
+			isa = PBXBuildFile;
+			fileRef = A3F9FE803B170A02B6475E09;
+		};
+		CB60C54261C26C739BE10EDC = {
+			isa = PBXBuildFile;
+			fileRef = AB94144D587B10334707370D;
+		};
+		CC4BE04410BDB19C788C79E7 = {
+			isa = PBXBuildFile;
+			fileRef = A9D674D8CE54183D05A72EBF;
+		};
+		C14AD38C0F9C5DD49F829C7D = {
+			isa = PBXBuildFile;
+			fileRef = A4B1482221086C475487BED0;
+		};
+		C241B9A9353C2A7EFCAF0D21 = {
+			isa = PBXBuildFile;
+			fileRef = A08A456D717FF17BE38E7044;
+		};
+		CDE3B1D6B126969DC101E534 = {
+			isa = PBXBuildFile;
+			fileRef = A986C89EE8122E2C72D79F88;
+		};
+		C60927296F1CDD49E8A685C9 = {
+			isa = PBXBuildFile;
+			fileRef = ACEC5D6A97BE2B90FE24678A;
+		};
+		C261AE566CA25491BA9D300C = {
+			isa = PBXBuildFile;
+			fileRef = A6351A4D6FD7C5F3DE6C5653;
+		};
+		C6907871D060BA394FCBA123 = {
+			isa = PBXBuildFile;
+			fileRef = A13290FFC0709B92BC31D9A2;
+		};
+		CE440584A046EA2ED99BBAF4 = {
+			isa = PBXBuildFile;
+			fileRef = A93C2BC80AA6B2A2B957FE07;
+		};
+		C51CC1AE42E91FF1A12557C7 = {
+			isa = PBXBuildFile;
+			fileRef = A3DDE0A0989729BF8A7048E5;
+		};
+		CCE63BAEA758D0C9BB9AB9A6 = {
+			isa = PBXBuildFile;
+			fileRef = A8DF73D8C2935C8B865035B8;
+		};
+		C4154B853A94A9A8B76BF960 = {
+			isa = PBXBuildFile;
+			fileRef = AA15B182A01ECEF25F499396;
+		};
+		C5746E540D7D8C66FB225411 = {
+			isa = PBXBuildFile;
+			fileRef = AE3AA951A82811C6F5B59AE4;
+		};
+		C3335EBEB15A39A57687F196 = {
+			isa = PBXBuildFile;
+			fileRef = A73BF38D30A4CDFFDCD09A8C;
+		};
+		C14F55B0BA7335DEE40563B0 = {
+			isa = PBXBuildFile;
+			fileRef = AFD192E62FD31061D495CB30;
+		};
+		C9567CE8C0EE524653499FA9 = {
+			isa = PBXBuildFile;
+			fileRef = A02A2A153CFFED4CEFEDA4D9;
+		};
+		CBC555BBDADBCEB25D89CCED = {
+			isa = PBXBuildFile;
+			fileRef = A46FA81BF8D2894BBEE02C5A;
+		};
+		C1389DB9408908EB53F4801C = {
+			isa = PBXBuildFile;
+			fileRef = A87A7D5BF5DFE40C21C7490A;
+		};
+		CA974A731C2FD5B4E35E7AEB = {
+			isa = PBXBuildFile;
+			fileRef = A5BC11F303052291E6FB2C1B;
+		};
+		C8F0875D32195865344EC1F9 = {
+			isa = PBXBuildFile;
+			fileRef = AEB620EE64789952E59B006A;
+		};
+		C4AA261019E06676EC934AA8 = {
+			isa = PBXBuildFile;
+			fileRef = AB174A3B018201C704EA6219;
+		};
+		C1F850435B6C78A454F5B4BC = {
+			isa = PBXBuildFile;
+			fileRef = AF5DA351FBF73C7FBFF2B805;
+		};
+		C6FEE4DA81F4AE9A32EEE859 = {
+			isa = PBXBuildFile;
+			fileRef = AFA822C55F0EB6711410EAA3;
+		};
+		CE7682ADF4BECB5A828EAE47 = {
+			isa = PBXBuildFile;
+			fileRef = A5E20936E5F8525DAA7DFD3A;
+		};
+		D7EA069DAB30A429FBAE2818 = {
+			isa = PBXBuildFile;
+			fileRef = AC938FD7C68ED288AC7E4FED;
+		};
+		D0D1942134E71C67DBB59C17 = {
+			isa = PBXBuildFile;
+			fileRef = A7681A1A19F9BB62FD3BBEEF;
+		};
+		A10000000000000000000053 = {
+			isa = PBXBuildFile;
+			fileRef = A10000000000000000000058;
+		};
 		A10000000000000000000058 = {
 			isa = PBXFileReference;
 			lastKnownFileType = folder.assetcatalog;
-			path = "App/Resources/Assets.xcassets";
+			path = App/Resources/Assets.xcassets;
 			sourceTree = "<group>";
 		};
 	};

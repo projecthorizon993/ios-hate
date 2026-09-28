@@ -4,7 +4,7 @@ import SwiftUI
 struct LumaFrameApp: App {
     var body: some Scene {
         WindowGroup {
-            CameraScreen()
+            RootView()
         }
     }
 }

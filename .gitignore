@@ -6,3 +6,23 @@ xcuserdata/
 *.ipa
 *.p12
 *.mobileprovision
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+android/.idea/
+*.apk
+*.aab
+*.iml
+
+# OS / editor
+Thumbs.db
+.vscode/
+node_modules/
+
+# Local scratch, not source
+decompiled/
+*.ips
