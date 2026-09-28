@@ -115,7 +115,11 @@ jobs:
 
   build:
     name: Build unsigned IPA
-    needs: test
+    # Deliberately not `needs: test`. The unit tests and the IPA are independent
+    # questions, and the IPA is what gets installed on a device to check real camera
+    # behaviour, so a red test run must not be the reason there is nothing to install.
+    # Both jobs fail loudly on their own if their own step fails.
+    if: ${{ !cancelled() }}
     runs-on: macos-15
     timeout-minutes: 30
     steps:
