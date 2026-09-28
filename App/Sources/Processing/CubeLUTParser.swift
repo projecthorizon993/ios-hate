@@ -78,9 +78,9 @@ enum CubeLUTParser {
                 size = try validatedSize(after: keyword, in: line, lineNumber)
                 kind = .threeDimensional
             case "DOMAIN_MIN":
-                domainMin = try floats(in: line, lineNumber)
+                domainMin = try values(after: keyword, in: line, lineNumber)
             case "DOMAIN_MAX":
-                domainMax = try floats(in: line, lineNumber)
+                domainMax = try values(after: keyword, in: line, lineNumber)
             default:
                 // An unknown **uppercase** keyword is a vendor extension and is skipped:
                 // real `.cube` files carry them, and refusing them would reject valid
@@ -198,6 +198,18 @@ enum CubeLUTParser {
             values.append(value)
         }
         return values
+    }
+
+    /// The numbers that follow a directive keyword on the same line.
+    ///
+    /// The keyword itself is dropped first. Parsing the whole line would fail on
+    /// `DOMAIN_MIN 0.0 0.0 0.0` because the keyword is not a number, which is how the
+    /// first version of this parser rejected every table it was given.
+    private static func values(after keyword: String,
+                               in line: String,
+                               _ lineNumber: Int) throws -> [Float] {
+        let rest = line.dropFirst(keyword.count)
+        return try floats(in: String(rest), lineNumber)
     }
 
     private static func floats(in line: String, _ lineNumber: Int) throws -> [Float] {

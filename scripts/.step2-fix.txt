@@ -1,7 +1,0 @@
-Detect .cube data lines without throwing
-
-floats(in:_:) needs a line number and throws, but meeting a directive line is
-expected rather than an error, so using it as the data-line test threw away the
-line number and made the call site wrong. allNumbers(in:) answers the question
-directly and floats(in:_:) keeps its line number for the two DOMAIN directives,
-where a non-number really is a malformed file.

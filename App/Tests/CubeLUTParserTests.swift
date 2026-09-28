@@ -280,8 +280,8 @@ final class CubeLUTParserTests: XCTestCase {
 
     // MARK: - Model invariants
 
-    func testUsabilityRequiresTheSampleCountToMatch() {
-        var lut = try! CubeLUTParser.parse(text: valid2x2x2)
+    func testUsabilityRequiresTheSampleCountToMatch() throws {
+        var lut = try CubeLUTParser.parse(text: valid2x2x2)
         XCTAssertTrue(lut.isUsable)
 
         lut.samples.removeLast(3)
@@ -304,11 +304,16 @@ final class CubeLUTParserTests: XCTestCase {
         for error in errors {
             let message = error.errorDescription ?? ""
             XCTAssertFalse(message.isEmpty, "\(error) has no message")
-            // A user who cannot tell why cannot fix it, and line-bearing errors are the
-            // ones that are actionable.
-            if case .notUTF8 = error {} else {
-                XCTAssertTrue(message.contains("Line") || message.contains("declares"),
-                              "\(error) gives no location: \(message)")
+            // A user who cannot tell why cannot fix it. The three errors with no
+            // location are the ones that genuinely have none: an empty file, a file
+            // that is not text, and a whole-file count mismatch.
+            switch error {
+            case .empty, .notUTF8, .sampleCountMismatch:
+                XCTAssertFalse(message.contains("Line"),
+                               "\(error) claims a line it cannot have")
+            default:
+                XCTAssertNotNil(error.line, "\(error) has no line but is not a whole-file failure")
+                XCTAssertTrue(message.contains("Line"), "\(error) gives no location: \(message)")
             }
         }
     }
