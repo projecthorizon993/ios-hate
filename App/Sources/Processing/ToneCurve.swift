@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Foundation
 
 /// The manual corrections, as a value the user can dial in.

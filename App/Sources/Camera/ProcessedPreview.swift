@@ -27,7 +27,10 @@ import MetalKit
 ///   costs the same as previewing at 720p on a phone that is already thermally limited.
 /// - **No work on the main actor.** Capture, processing and encoding all happen on a
 ///   dedicated queue; only the drawable is touched on the main thread.
-final class ProcessedPreview {
+///
+/// Inherits `NSObject` because `AVCaptureVideoDataOutputSampleBufferDelegate` is an
+/// Objective-C protocol, and Swift will not let a plain class declare that conformance.
+final class ProcessedPreview: NSObject {
 
     /// Longest edge of the preview the processor sees. Well above a screen's needs and far
     /// below a sensor frame, which is the whole point.
@@ -68,6 +71,7 @@ final class ProcessedPreview {
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
         output.setSampleBufferDelegate(self, queue: queue)
+        super.init()
     }
 
     /// `false` when there is no Metal device, in which case the caller should keep the
@@ -233,6 +237,13 @@ final class ProcessedPreviewRenderer: NSObject, MTKViewDelegate {
     }
 
     var metalView: MTKView { view }
+
+    /// `MTKViewDelegate` requires this, and it is not optional boilerplate: the drawable
+    /// is recreated on every size change, so without it the view renders into a texture
+    /// that is no longer attached to anything and the preview goes black on rotation.
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        redraw()
+    }
 
     /// Draws the latest processed frame, if there is one.
     func redraw() {

@@ -77,12 +77,17 @@ struct ProcessingPipeline {
 
     /// Renders one frame.
     ///
+    /// - Parameter subjectMaskImage: the mask for *this* frame, passed separately from
+    ///   the recipe because a `CIImage` is not `Codable` and the recipe is. The recipe
+    ///   carries `SubjectMask`'s statistics so a re-render can record that a subject was
+    ///   found; the pixels are recomputed from the original, not stored.
     /// - Throws: only for reasons the caller should surface. Callers that cannot fail
     ///   should use `renderOrOriginal`, which degrades to the untouched frame.
     func render(_ image: CIImage,
                 settings: ProcessingSettings,
                 inputSpace: ColorSpace,
-                outputSpace: ColorSpace) throws -> CIImage {
+                outputSpace: ColorSpace,
+                subjectMaskImage: CIImage? = nil) throws -> CIImage {
         let recipe = settings.clamped()
         // The fast path, and a real one: on a slow device an identity recipe is the
         // difference between a live preview and a warm one.
@@ -112,7 +117,7 @@ struct ProcessingPipeline {
             result = try applyLook(look, to: result, intensity: recipe.lookIntensity, space: lutSpace)
 
             // 4. Per-region blend, if there is a mask worth trusting.
-            if let mask = recipe.subjectMask, mask.isUsable, let maskImage = mask.image {
+            if let mask = recipe.subjectMask, mask.isUsable, let maskImage = subjectMaskImage {
                 result = try blendBySubject(mask: mask,
                                             maskImage: maskImage,
                                             image: result,
@@ -147,9 +152,14 @@ struct ProcessingPipeline {
     func renderOrOriginal(_ image: CIImage,
                           settings: ProcessingSettings,
                           inputSpace: ColorSpace,
-                          outputSpace: ColorSpace) -> CIImage {
+                          outputSpace: ColorSpace,
+                          subjectMaskImage: CIImage? = nil) -> CIImage {
         do {
-            return try render(image, settings: settings, inputSpace: inputSpace, outputSpace: outputSpace)
+            return try render(image,
+                              settings: settings,
+                              inputSpace: inputSpace,
+                              outputSpace: outputSpace,
+                              subjectMaskImage: subjectMaskImage)
         } catch {
             AppLog.fail(AppLog.processing, "render failed, showing the unprocessed frame: \(error)")
             return image

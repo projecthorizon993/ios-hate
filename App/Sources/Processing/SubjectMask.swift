@@ -1,16 +1,16 @@
-import CoreGraphics
 import Foundation
 
-/// A subject mask from the ML layer, and the two things that decide how it is used.
+/// What Step 5's ML layer found, and whether it is worth acting on.
 ///
-/// This is a **reference plus statistics**, not pixel data. The mask image is transient and
-/// belongs to the frame it was computed for; putting megabytes of pixel buffer into the
-/// capture recipe would make every photo enormous and is not needed to re-render, because
-/// a re-render recomputes the mask from the original.
+/// This is **statistics, not pixel data**, and the distinction is forced rather than
+/// stylistic. A `CVPixelBuffer` is neither `Equatable` nor `Codable`, so a struct that held
+/// one could not be part of a recipe — and a recipe is what has to survive in the photo's
+/// metadata. The mask image itself belongs to the frame it was computed for and is passed
+/// to the pipeline alongside this value, never inside it.
 ///
-/// `coverage` and `confidence` are kept because both change what the pipeline should do:
-/// a mask covering 95% of the frame is a segmentation failure, not a subject, and applying
-/// a look to "the subject" in that case means applying it to everything.
+/// `coverage` and `confidence` are both kept because both change what the pipeline should
+/// do: a mask covering 95% of the frame is a segmentation failure, not a subject, and
+/// applying a look to "the subject" in that case means applying it to everything.
 struct SubjectMask: Equatable, Codable, Sendable {
 
     /// Fraction of the frame the mask covers, 0…1.
@@ -20,9 +20,6 @@ struct SubjectMask: Equatable, Codable, Sendable {
     /// report a score, so this comes from the mask buffer's own statistics and is a
     /// proxy, which is why it is named `confidence` and not `score`.
     var confidence: Float
-
-    /// The pixel buffer, for the frame currently in flight. Never part of the recipe.
-    var image: CVPixelBuffer?
 
     /// A mask covering more than this is treated as "no subject found" rather than as a
     /// segmentation that happened to fill the frame.
