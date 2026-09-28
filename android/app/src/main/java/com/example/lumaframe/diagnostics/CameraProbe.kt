@@ -166,8 +166,6 @@ object CameraProbe {
                 info.sensitivityRange?.let { ReportFormat.range(it.lower.toDouble(), it.upper.toDouble()) }
                     ?: "unknown",
                 if (info.sensitivityRange != null) ReportLevel.GOOD else ReportLevel.FAIL),
-            ReportEntry("max analog sensitivity",
-                info.maxAnalogSensitivity?.toString() ?: "unknown"),
             ReportEntry("exposure time range",
                 info.exposureTimeRange?.let {
                     "${nanos(it.lower)} ... ${nanos(it.upper)}"
@@ -178,9 +176,6 @@ object CameraProbe {
                     "${ReportFormat.number(it.lower / 1_000_000_000.0, 6)} ... " +
                         ReportFormat.number(it.upper / 1_000_000_000.0, 6)
                 } ?: "unknown", ReportLevel.NOTE),
-            ReportEntry("white balance gain range",
-                info.awbGainRange?.let { ReportFormat.range(it.lower.toDouble(), it.upper.toDouble()) }
-                    ?: "unknown"),
             ReportEntry("timestamp source", timestampSourceName(info.timestampSource), ReportLevel.NOTE)
         )
     }
@@ -255,11 +250,12 @@ object CameraProbe {
         val physicalSize: Size? = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
         val pixelArraySize: Size? = characteristics.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
         val sensitivityRange: Range<Int>? = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-        val maxAnalogSensitivity: Int? =
-            characteristics.get(CameraCharacteristics.SENSOR_INFO_MAX_ANALOG_SENSITIVITY)
         val exposureTimeRange: Range<Long>? =
             characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-        val awbGainRange: Range<Int>? = characteristics.get(CameraCharacteristics.CONTROL_AWB_GAINS_RANGE)
+        // There is no public Camera2 key for the AWB gain range and none for a maximum
+        // analog sensitivity, so neither is reported. Inventing a key name to report a
+        // number the API does not expose is exactly the failure this probe exists to
+        // detect in a camera, and it would be absurd to do it here.
         val afModes: IntArray = characteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: IntArray(0)
         val aeModes: IntArray = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: IntArray(0)
         val awbModes: IntArray = characteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES) ?: IntArray(0)
