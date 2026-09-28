@@ -150,7 +150,9 @@ enum CoreMLProbe {
             guard let constraint = description as? MLMultiArrayConstraintDescription else {
                 throw ProbeError.unsupportedInput(name)
             }
-            let elementCount = constraint.shape.reduce(1, *)
+            // `shape` is `[NSNumber]`, so the product has to be taken through
+            // `intValue`. Multiplying the `Int` seed by an `NSNumber` does not compile.
+            let elementCount = constraint.shape.reduce(1) { $0 * $1.intValue }
             let byteCount = elementCount * constraint.dataType.bytes
             let buffer = [UInt8](repeating: 0, count: byteCount)
             let array = try MLMultiArray(data: Data(buffer),
@@ -222,7 +224,9 @@ enum CoreMLProbe {
     }
 }
 
-private extension MLDataType {
+/// The Swift name for the ObjC `MLDataType` enum. `MLDataType` does not exist in Swift,
+/// so the extension below has to be on `MLFeatureType` or nothing type-checks.
+private extension MLFeatureType {
     var bytes: Int {
         switch self {
         case .double: return 8

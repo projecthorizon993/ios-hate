@@ -33,10 +33,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
+
+      # `ubuntu-latest` ships an Android SDK but not `sdkmanager` on PATH, so the license
+      # step below died with exit code 127 before Gradle ever ran. This action installs
+      # the command-line tools and puts them on PATH.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
       # The Gradle wrapper JAR is a binary and is not committed. Installing the exact
       # pinned distribution keeps the build reproducible. Run `gradle wrapper` locally
@@ -53,7 +59,8 @@ jobs:
       - name: Accept Android SDK licenses
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses > /dev/null || true
+          command -v sdkmanager
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Cache Gradle

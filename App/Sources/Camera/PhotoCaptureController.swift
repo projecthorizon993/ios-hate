@@ -49,7 +49,7 @@ final class PhotoCaptureController: NSObject {
         var container: PhotoContainer
         var metadata: CaptureMetadata
         /// What AVFoundation actually did, used for the log and the HDR badge.
-        var resolvedQuality: AVCapturePhotoQualityPrioritization
+        var resolvedQuality: AVCapturePhotoOutput.QualityPrioritization
         var resolvedProRaw: Bool
     }
 
@@ -196,7 +196,7 @@ final class PhotoCaptureController: NSObject {
     @MainActor
     private func deliver(data: Data,
                          container: PhotoContainer,
-                         resolvedQuality: AVCapturePhotoQualityPrioritization,
+                         resolvedQuality: AVCapturePhotoOutput.QualityPrioritization,
                          resolvedProRaw: Bool,
                          dimensions: CMVideoDimensions) {
         var metadata = pendingMetadata ?? CaptureMetadata(mode: "auto")
