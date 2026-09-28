@@ -11,51 +11,58 @@ implemented. Read this before writing any feature.
 
 | Step | Scope | Status |
 | --- | --- | --- |
-| 0 | Architecture + Capability Report (both platforms) | **Code done, device data still missing** |
+| 0 | Architecture + Capability Report (both platforms) | **Code done; report crashes/hangs on device — abandoned** |
 | 1 | Auto mode with native HDR + camera screen UI (iOS) | **Code done + CI green; on-device unverified** |
-| 2 | LUT engine (`.cube` parser, GPU 3D LUT, intensity) | Code done; renderer unverified on device |
-| 3 | Style system + Styles screen | Pending |
-| 4 | Pro mode, RAW, Pro panel | Pending |
-| 5 | ML layer + mask-based style blending | Pending |
+| 2 | LUT engine (`.cube` parser, GPU 3D LUT, intensity) | **Code done + CI green; renderer unverified on device** |
+| 3 | Style system + Looks screen | **Code done + CI green; unverified on device** |
+| 4 | Pro mode, RAW, ProRAW panel | **Code done + CI green; unverified on device** |
+| 5 | ML layer + mask-based style blending | **Code done + CI green; unverified on device** |
 | 6 | CI, lean tests, manual checklist | Partially done (CI green on iOS; Android red, on its own branch) |
 
-**Nothing in Steps 1–5 is verified until the Step 0 report is collected from the
-iPhone 11 Pro Max, the iPhone SE 2022 and the Galaxy S21 Ultra.** The gate is still
-open: the report has never completed a run on a device, and the three-device
-comparison that every capability-gated decision below rests on does not exist yet.
-Code for Step 1 is written and compiles; nothing about it has been observed working.
+**Nothing in Steps 1–5 is verified.** The Step 0 report has been abandoned — it crashed,
+then hung, and was never made to complete on a device. The three-device comparison every
+capability-gated decision below rests on does not exist. All of Steps 1–5 is written,
+compiles, and passes CI; none of it has been observed running.
 
-### 1.0 Where Step 1 actually stands
+The consequence is narrower than it sounds. Capability gating happens **at runtime** from
+what the device reports, so the app does not lie on an SE — it hides the controls that
+cannot work. What is actually lost:
 
-Stated precisely so Step 2 is not built on a false assumption:
+- **Device tiering.** The tier comes from measured GPU and memory numbers, not model
+  strings, and there are no measurements. The render benchmark exists and runs; its numbers
+  have never been read off a real device.
+- **Any written record of what the three test devices do.** The `hw.machine` → marketing
+  name and chip tables in `DeviceProbe` are a display-only lookup and are guesses about
+  hardware, not measurements of it.
+- **The `isProRAWSupported` expectation** for the 11 Pro Max. The code reads it at runtime
+  and gates on it, so the app is correct either way, but the architecture's claim that it
+  is `true` there is an assumption.
+
+None of that blocks Steps 1–5 from working on whatever device they are installed on. It
+means the tiering threshold in section 6 is uncalibrated and the report is not a record
+anyone can rely on.
+
+### 1.0 Where the app actually stands
+
+Stated precisely so nothing downstream is built on a false assumption:
 
 - `Unit tests` and `Build unsigned IPA` are both **green** on `main`.
-- The app has **never run to completion on a device.** The first attempt to open the
-  capability report hung the main thread for ~600 ms and was killed by the watchdog.
-  Two causes were found and fixed — main-thread-only UIKit read from the detached
-  probe, and a second `AVCaptureSession` contending with the live one — and the report
-  then **crashed the app after 6–7 seconds on device**, so neither fix held.
--   The real cause of the crash, found in `e0fd012`, was that **the two fixes were never
-  synchronised with each other.** `CaptureSessionController.tearDown()` dispatched the
-  teardown onto `sessionQueue` and returned, and `releaseForDiagnostics()` then called
-  `markReleased()` straight afterwards. So the capability report was told it owned the
-  camera while the camera was still running with its input attached, and it opened a
-  second `AVCaptureSession` from a detached task with no ordering at all against that
-  queue. One physical camera, two sessions in one process, and a race — which is why
-  adding a boolean flag twice did not hold, and why the 6–7 s delay lined up with the
-  teardown and the probe both blocking. `tearDown()` is now synchronous, and
-  `markReleased()` is only true once it has returned.
-- Two genuine latent bugs found while looking for that, and fixed in `b0a2dfa`, neither
-  of which is established as the crash:
-  - `renderBenchmark` rendered a 2560×1440 frame 21 times in a loop with no
-    `autoreleasepool` and no suspension point, so ~300 MB of `CGImage`s stayed live.
-    `Task.detached` adds no pool of its own. That is a jetsam kill, which presents with
-    no crash log at all, so it cannot be ruled out from the outside either.
-  - The live session probe ran once per discovered device, starting and stopping the
-    camera three or four times in a row. It now runs once, on the logical wide lens, and
-    `stopRunning()` moved into a `defer` so a raise between start and stop cannot leave
-    the hardware held.
-- Until the report completes on a device, none of the three-device comparison exists.
+- **No step has been run on a device.** Everything in Steps 1–5 compiles and passes CI.
+- The capability report was **abandoned**, not fixed. It first hung the main thread, then
+  crashed the app after 6–7 seconds, and then hung again. Three candidate causes were
+  found and fixed by reading the code — a camera handover that was never synchronised, a
+  300 MB autorelease leak in the render benchmark, and a probe that started and stopped
+  the one physical camera three or four times in a row. None of them is established as
+  the cause, because a jetsam kill writes no crash log and the sync work of Apple's
+  Analytics was never obtained. The report is left in the app behind the debug overlay
+  rather than deleted, because its on-disk breadcrumb trace is the right tool if it is
+  ever picked up again.
+- The app log **is** readable on device now: `Documents/LumaFrame-log.txt`, via
+  Files.app. It is written and flushed per line, so the tail survives a crash. This
+  requires `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace` in the
+  Info.plist, without which Documents is invisible in Files.app and the file is
+  unreachable. An earlier version of this file claimed the log was available before
+  either key existed; it was not.
 - The reports collected from the three devices before this rewrite came from a
   **pre-rewrite binary that no longer exists**, so none of the values in them describe
   the current code.
@@ -272,6 +279,66 @@ there is no colour-space-aware variant available here at all. Since the domain g
 above has already established the table's space and the image's space are the same one,
 `CIColorCube` applying in the image's own working space is the correct behaviour rather
 than a fallback — there is nothing to override.
+
+### 3.2 The whole pipeline, and what it costs
+
+One `ProcessingSettings` value, one `ProcessingPipeline.render`, called by **both** the
+preview and the saved photo. Two processing paths is how a look ends up correct on screen
+and wrong in the file, and it is invisible in CI because each path can be individually
+correct.
+
+Stages, in order, and the order is the design:
+
+| # | Stage | Space | Why there |
+| --- | --- | --- | --- |
+| 1 | exposure, white balance, lift/contrast/saturation | **linear sRGB** | A curve in gamma space makes muddy shadows |
+| 2 | the look, at the user's intensity | gamma sRGB | A `.cube` table is authored over gamma-encoded values |
+| 3 | per-region blend, if a subject mask is usable | gamma sRGB | Full look on the subject, 35% on the background |
+| 4 | sharpen, then grain | gamma sRGB | Grain in linear light is invisible in shadows |
+| 5 | output transform | the file's own space | A P3 capture must not be tagged sRGB |
+
+Two rules enforced in code rather than trusted:
+
+- **A correction only runs when the user asked for it.** The native pipeline has already
+  applied white balance and tone mapping; applying ours unconditionally is what makes a
+  photo look washed out.
+- **Highlight recovery is not in this list.** If the native pipeline is already doing HDR
+  fusion, doing it again is the other half of the same problem.
+
+The identity recipe is a **fast path**, not just a correctness one: with nothing to do the
+viewfinder uses `AVCaptureVideoPreviewLayer` directly and no Core Image frame is produced
+at all. That is the state Auto mode sits in, so the expensive path only exists once the
+user has asked for something.
+
+The original bytes are always written untouched. A processed version is written beside
+them as a separate file with `derivedFrom` pointing back, so any photo can be re-rendered
+from its original rather than from a derived one. **RAW is deliberately not re-rendered**
+— the recipe is recorded in its metadata instead, because processing a RAW would destroy
+the reason the user asked for it.
+
+### 3.3 What has to be checked on a device
+
+None of this is checkable in CI, because Core Image returns no output in the headless
+simulator. Each line is a real question, not a formality:
+
+- [ ] Original is pixel-identical to the capture. A non-identity pipeline on an identity
+      recipe would show up here and nowhere else.
+- [ ] A 2×2×2 identity `.cube` leaves a known flat image unchanged.
+- [ ] An obvious table (all red, or an inverted ramp) changes the image visibly.
+- [ ] Strength 0…1 blends monotonically, with 0 an exact no-op.
+- [ ] The result matches the same `.cube` in a reference tool on the same file. This is
+      the only check that byte order and colour space agree, and it is the one that catches
+      a transposed table.
+- [ ] The processed preview and the saved file are the same image. Checked by eye against
+      a reference tool, not by CI.
+- [ ] Preview stays live with a look applied on an 11 Pro Max and on an SE 2022, and does
+      not fall to single-digit frame rates.
+- [ ] A RAW capture is byte-identical to what AVFoundation produced.
+- [ ] The Pro panel on an SE shows "no manual controls" rather than dead switches.
+- [ ] Person segmentation finds a face, and the blend edge is invisible on it.
+- [ ] A scene with no person gets the look applied globally, with no visible seam.
+- [ ] Skin tone holds its hue when a warm look is applied at full strength.
+- [ ] The log file appears in Files.app and contains the lines the run produced.
 
 ---
 
