@@ -455,18 +455,25 @@ final class CameraViewModel: ObservableObject {
         let isCurrent = abs(target - readout.zoomFactor) < 0.01
         let destination: CGFloat = isCurrent ? 1 : target
 
-        // `availableVideoZoomFactors` is the list of factors the device actually accepts.
-        // Asking for anything else raises `NSInvalidArgumentException`, and the trap turns
-        // that into a log line rather than a crash — but it is better to snap to a real
-        // factor so the label and the hardware agree.
-        let available = device.availableVideoZoomFactors
-        guard !available.isEmpty else {
-            AppLog.warn(AppLog.camera, "device reports no video zoom factors; lens switch refused")
-            return
-        }
-        let clamped = available.min { abs($0 - destination) < abs($1 - destination) }
+        // `minAvailableVideoZoomFactor` and `maxAvailableVideoZoomFactor` are the range
+        // the *current configuration* allows. Apple documents that setting
+        // `videoZoomFactor` above the active format's `videoMaxZoomFactor` **always
+        // raises**, and that a value between `maxAvailableVideoZoomFactor` and the
+        // format's maximum silently clamps. So the clamp is against the available range,
+        // and it happens here rather than being left to raise.
+        //
+        // These are `CGFloat` and there is no list of valid factors: an earlier version
+        // used an `availableVideoZoomFactors` array that does not exist.
+        let lower = max(1, device.minAvailableVideoZoomFactor)
+        let upper = max(lower, device.maxAvailableVideoZoomFactor)
+        let clamped = min(max(destination, lower), upper)
 
-        let failure = LumaFrameSafety.perform { device.videoZoomFactor = clamped }
+        // `ramp` rather than an assignment: the assignment jumps, and a lens change that
+        // snaps is a lens change the user cannot follow. The rate is roughly how fast a
+        // real lens ring moves.
+        let failure = LumaFrameSafety.perform {
+            device.ramp(toVideoZoomFactor: clamped, withRate: 4)
+        }
         if let failure {
             AppLog.warn(AppLog.camera, "lens switch to \(clamped)x raised \(failure)")
             present("This camera would not change lens", isError: true)
@@ -475,7 +482,7 @@ final class CameraViewModel: ObservableObject {
         Haptics.selection()
         AppLog.note(AppLog.camera, "lens -> \(clamped)x (\(camera.kind.rawValue))")
         // Read the readout straight back rather than waiting for the next poll, so the
-        // label updates on the same frame as the tap.
+        // label updates as soon as the ramp starts.
         refreshReadout()
     }
 
@@ -543,7 +550,7 @@ final class CameraViewModel: ObservableObject {
         metadata.shutterSeconds = readout.shutterSeconds > 0 ? readout.shutterSeconds : nil
         metadata.exposureTargetOffset = Double(readout.exposureTargetOffset)
         metadata.lensRelativeScale = readout.relativeScale
-        metadata.lensKind = activeCamera(relativeScale: readout.relativeScale)?.kind.rawValue
+        metadata.lensKind = activeCamera(zoomFactor: readout.zoomFactor)?.kind.rawValue
         metadata.zoomFactor = Double(readout.zoomFactor)
         metadata.frontCamera = facing == .front
         metadata.colorSpace = capabilities.wideGamut ? "display-p3" : "srgb"
