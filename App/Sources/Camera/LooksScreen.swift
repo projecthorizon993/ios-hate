@@ -120,28 +120,40 @@ struct LooksScreen: View {
         }
     }
 
+    /// The tile's image, with the selection border and the compare marker.
+    ///
+    /// A `ZStack` rather than two `overlay` calls. `overlay(alignment:)` takes an
+    /// `Alignment`, which is resolved against the concrete type of the view being
+    /// overlaid — and behind a `some View` return that type is erased, so the compiler
+    /// reported "cannot infer contextual base in reference to member 'topTrailing'" and
+    /// then failed on `resizable` for the same reason. A `ZStack` is explicit, needs no
+    /// inference, and is honestly a better description of what this is: a square with
+    /// something on it.
     private func tileImage(_ image: UIImage,
                            isSelected: Bool,
                            isComparing: Bool) -> some View {
         let side = LookThumbnailer.size
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control)
         let border: Color = isSelected ? Theme.ColorToken.accentActive : Theme.ColorToken.strokeSubtle
-        return image
-            .resizable()
-            .aspectRatio(1, contentMode: .fill)
-            .frame(width: side, height: side)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
-            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control)
-                .stroke(border, lineWidth: isSelected ? 2 : 1))
-            .overlay(alignment: .topTrailing) {
-                if isComparing {
-                    Image(systemName: "eye")
-                        .font(.system(size: Theme.TypeSize.caption))
-                        .foregroundStyle(Theme.ColorToken.accentCompare)
-                        .padding(Theme.Space.xs)
-                        .background(Circle().fill(Theme.ColorToken.surfaceBase.opacity(0.7)))
-                        .padding(Theme.Space.xs)
-                }
+
+        return ZStack(alignment: .topTrailing) {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(1, contentMode: .fill)
+                .frame(width: side, height: side)
+                .clipShape(shape)
+                .overlay(shape.stroke(border, lineWidth: isSelected ? 2 : 1))
+
+            if isComparing {
+                Image(systemName: "eye")
+                    .font(.system(size: Theme.TypeSize.caption))
+                    .foregroundStyle(Theme.ColorToken.accentCompare)
+                    .padding(Theme.Space.xs)
+                    .background(Circle().fill(Theme.ColorToken.surfaceBase.opacity(0.7)))
+                    .padding(Theme.Space.xs)
             }
+        }
+        .frame(width: side, height: side)
     }
 
     private func select(_ look: Look?) {
