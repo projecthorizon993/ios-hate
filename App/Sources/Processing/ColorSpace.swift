@@ -65,6 +65,16 @@ enum LUTApplicationError: LocalizedError, Equatable {
     /// The table's declared domain is not the image's colour space.
     case domainMismatch(lut: String, image: String)
 
+    /// The table's domain is log-encoded, or wider than 0…1, so it is not in a colour
+    /// space this pipeline can apply.
+    ///
+    /// Distinct from `domainMismatch` on purpose. A log table is not "in the wrong colour
+    /// space", it is in no colour space this code can name, and telling the user it is
+    /// "linear sRGB" — which is what a non-unit domain used to be reported as — invites
+    /// them to believe a conversion is possible. It is not, and saying so is the whole
+    /// point of reporting it.
+    case logEncodedTable(domain: String)
+
     /// Core Image would not build the filter. Carries the reason because three separate
     /// CI runs were spent on a bare `notUsable` that said nothing about which of the
     /// filter's parameters it disliked.
@@ -79,6 +89,10 @@ enum LUTApplicationError: LocalizedError, Equatable {
         case .domainMismatch(let lut, let image):
             return "This lookup table is in \(lut) and the image is in \(image). "
                 + "Converting between them would change the colours, so it is not done automatically."
+        case .logEncodedTable(let domain):
+            return "This lookup table has the domain \(domain), which is a log or wide encoding "
+                + "rather than a colour space. It would need its camera profile applied first, "
+                + "so it is not applied."
         case .notUsable(let reason):
             return "This lookup table cannot be applied: \(reason)."
         case .intensityOutOfRange(let value):

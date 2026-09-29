@@ -11,12 +11,18 @@ enum ProcessingError: LocalizedError, Equatable {
     case stageFailed(String, stage: String)
     case lookUnavailable(String)
 
+    /// The look's table is log-encoded or wider than 0…1, so there is no colour space to
+    /// render it in. Raised before the frame is converted, so it costs nothing to hit.
+    case lookUsesUnsupportedEncoding(String)
+
     var errorDescription: String? {
         switch self {
         case .stageFailed(let reason, let stage):
             return "The \(stage) step failed: \(reason)"
         case .lookUnavailable(let name):
             return "The look \(name) could not be applied"
+        case .lookUsesUnsupportedEncoding(let name):
+            return "The look \(name) is a log-encoded table and has no colour space to be applied in"
         }
     }
 }
@@ -108,7 +114,7 @@ struct ProcessingPipeline {
 
         // 2 and 3. The look, in the space its table was authored for.
         if let look = recipe.look, recipe.lookIntensity > 0 {
-            let lutSpace = lutDomainSpace(for: look)
+            let lutSpace = try lutDomainSpace(for: look)
             if space != lutSpace {
                 result = try convert(result, from: space, to: lutSpace, stage: "to look space")
                 space = lutSpace
@@ -181,16 +187,48 @@ struct ProcessingPipeline {
     /// explicitly. Until then this parameter is a promise the code does not keep, which is
     /// why it is called out here.
     static func encodeJPEG(_ image: CIImage, space: ColorSpace, quality: Float) -> Data? {
-        let context = CIContext(options: [.cacheIntermediates: false])
+        // The working colour space is stated rather than left to the default. Core
+        // Image's default already is linear sRGB, so this is behaviourally a no-op today —
+        // which is exactly why it is written down. A context whose working space is
+        // implicit is a context whose working space is Core Image's business, and the
+        // colour-managed LUT path in `LUTProcessor` is sensitive to exactly that: it
+        // hands `CIColorCubeWithColorSpace` the table's authored space and relies on the
+        // working space being linear to convert into.
+        let context = CIContext(options: [
+            .cacheIntermediates: false,
+            .workingColorSpace: ColorSpace.linearSRGB.cgColorSpace
+        ])
         return context.jpegRepresentation(of: image, colorSpace: space.cgColorSpace, options: [:])
     }
 
     // MARK: - Stages
 
-    /// The space a look's table is authored in. Every built-in and every accepted import is
-    /// over the unit sRGB domain, so this is gamma sRGB; a log-encoded table is refused at
-    /// apply time rather than converted here.
-    private func lutDomainSpace(for look: Look) -> ColorSpace { .sRGB }
+    /// The space a look's table was authored in, read from the table itself.
+    ///
+    /// This used to be a hardcoded `.sRGB` with a `Look` parameter it never inspected,
+    /// which is a claim about the pipeline rather than a fact about the table. It is now
+    /// derived from the resolved table, which means two things the hardcode could not
+    /// express:
+    ///
+    /// - a log-encoded table is refused **before** the frame is converted to sRGB for its
+    ///   benefit, so a doomed render costs no conversion; and
+    /// - a table that turned up authored in some other space would be honoured rather
+    ///   than forced through sRGB.
+    ///
+    /// There is still no way to detect a P3-authored table, because Adobe `.cube` has no
+    /// directive to say so. That is a property of the format, not of this code, and it is
+    /// why the conversion into the table's space is explicit and logged above.
+    private func lutDomainSpace(for look: Look) throws -> ColorSpace {
+        guard let table = library.resolve(look) else {
+            throw ProcessingError.lookUnavailable(look.name)
+        }
+        guard let space = table.authoredSpace else {
+            AppLog.warn(AppLog.processing,
+                        "look \(look.name) is log-encoded; refusing before conversion")
+            throw ProcessingError.lookUsesUnsupportedEncoding(look.name)
+        }
+        return space
+    }
 
     private func applyTone(_ tone: ToneCurve, to image: CIImage) throws -> CIImage {
         var result = image
