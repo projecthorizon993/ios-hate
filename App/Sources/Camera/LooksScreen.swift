@@ -62,19 +62,30 @@ struct LooksScreen: View {
     }
 
     private func carouselTile(look: Look?, title: String) -> some View {
-        let isSelected = look == nil ? model.settings.look == nil : model.settings.look?.id == look?.id
-        let isComparing = comparingLook?.id == look?.id
-        let rendered = look.flatMap { thumbnails[$0] } ?? LookThumbnailer.placeholder()
+        // The selection and the thumbnail are worked out first, as plain values, rather
+        // than inline in the view. The tile is a large expression tree over an optional
+        // `Look`, and inlining it defeated the type checker's budget — the whole tile
+        // failed to compile rather than one part of it being reported.
+        let isSelected: Bool
+        if let look {
+            isSelected = model.settings.look?.id == look.id
+        } else {
+            isSelected = model.settings.look == nil
+        }
+        let isComparing: Bool = comparingLook?.id == look?.id
+        let rendered: UIImage = look.flatMap { thumbnails[$0] } ?? LookThumbnailer.placeholder()
+        let borderColour = isSelected ? Theme.ColorToken.accentActive : Theme.ColorToken.strokeSubtle
+        let labelColour = isSelected ? Theme.ColorToken.textPrimary : Theme.ColorToken.textSecondary
+        let side = LookThumbnailer.size
 
         return VStack(spacing: Theme.Space.xs) {
             rendered
                 .resizable()
                 .aspectRatio(1, contentMode: .fill)
-                .frame(width: LookThumbnailer.size, height: LookThumbnailer.size)
+                .frame(width: side, height: side)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control)
-                    .stroke(isSelected ? Theme.ColorToken.accentActive : Theme.ColorToken.strokeSubtle,
-                            lineWidth: isSelected ? 2 : 1))
+                    .stroke(borderColour, lineWidth: isSelected ? 2 : 1))
                 .overlay(alignment: .topTrailing) {
                     if isComparing {
                         Image(systemName: "eye")
@@ -88,11 +99,9 @@ struct LooksScreen: View {
 
             Text(title)
                 .font(.system(size: Theme.TypeSize.caption))
-                .foregroundStyle(isSelected
-                                 ? Theme.ColorToken.textPrimary
-                                 : Theme.ColorToken.textSecondary)
+                .foregroundStyle(labelColour)
                 .lineLimit(1)
-                .frame(width: LookThumbnailer.size)
+                .frame(width: side)
         }
         // The scale is the selection affordance the spec calls for: 1.0 selected, 0.85
         // otherwise, so the eye finds the current look without reading the border.

@@ -204,16 +204,17 @@ private struct DialTicks: View {
 
 
     /// Floor for `log10`, because `log10(0)` is negative infinity and would put the whole
-    /// dial in a NaN state. A `Double` because every `log10` and `pow` below is one, and
-    /// mixing the two here is what produced a run of Float/Double errors.
-    private let minimumPositive: Double = 0.0001
+    /// dial in a NaN state. A `Float` because every value it clamps is a `Float`; the
+    /// widening to `Double` happens at the `log10` call, which is the only thing here that
+    /// is a `Double`.
+    private let minimumPositive: Float = 0.0001
 
     private func angleForCurrentValue(_ current: Float) -> Double {
         guard let range = parameter.range(capabilities) else { return Self.start }
-        let low = log10(Double(max(range.lowerBound, minimumPositive.floatValue)))
-        let high = log10(Double(max(range.upperBound, minimumPositive.floatValue)))
+        let low = log10(Double(max(range.lowerBound, minimumPositive)))
+        let high = log10(Double(max(range.upperBound, minimumPositive)))
         let span = max(0.0001, high - low)
-        let fraction = (log10(Double(max(current, minimumPositive.floatValue))) - low) / span
+        let fraction = (log10(Double(max(current, minimumPositive))) - low) / span
         return Self.start + Self.sweep * min(max(fraction, 0.0), 1.0)
     }
 }
@@ -366,13 +367,16 @@ enum ProParameter: String, CaseIterable, Identifiable {
     }
 
     /// One detent, for the accessibility increment action and for keyboard use.
+    ///
+    /// The step is derived inside each branch rather than shared, because the three
+    /// continuous parameters are not the same numeric type: ISO and EV are `Float` and
+    /// shutter is `Double`. A single shared `delta` was the wrong type for one of them
+    /// whichever way it was declared.
     func step(_ model: CameraViewModel, by direction: AccessibilityAdjustmentDirection) {
-        // A `Float`, because every range and every value it is applied to is one. The
-        // first version made this a Double and needed a cast at each of six sites.
-        let delta: Float = direction == .increment ? 1 : -1
         switch self {
         case .iso:
             if let range = model.proCapabilities.isoRange {
+                let delta: Float = direction == .increment ? 1 : -1
                 let base = model.manual.iso ?? range.lowerBound
                 // A third of a stop, which is the smallest change worth hearing.
                 model.setManual(iso: min(max(base * powf(2, delta / 3), range.lowerBound),
@@ -380,12 +384,18 @@ enum ProParameter: String, CaseIterable, Identifiable {
             }
         case .shutter:
             if let range = model.proCapabilities.shutterRange {
+                // Shutter is a `ClosedRange<Double>`, so this branch computes in Double
+                // while ISO and EV compute in Float. The delta is derived per branch from
+                // its own type rather than shared, which is what stops a single `delta`
+                // being the wrong type for two of the three cases.
+                let step = direction == .increment ? 1.0 : -1.0
                 let base = model.manual.shutterSeconds ?? range.upperBound
-                model.setManual(shutterSeconds: min(max(base * powf(2, delta), range.lowerBound),
+                model.setManual(shutterSeconds: min(max(base * pow(2, step), range.lowerBound),
                                                    range.upperBound))
             }
         case .exposure:
             if let range = model.proCapabilities.exposureCompensationRange {
+                let delta: Float = direction == .increment ? 1 : -1
                 let base = model.manual.exposureTargetOffset
                 model.setManual(exposureTargetOffset: min(max(base + delta / 3,
                                                               range.lowerBound),
