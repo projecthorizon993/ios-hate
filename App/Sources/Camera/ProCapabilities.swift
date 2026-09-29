@@ -35,6 +35,21 @@ struct ProCapabilities: Equatable {
     /// rather than a lying one.
     var supportsCustomExposure: Bool = false
 
+    /// Whether the bound device is one of the **composite** multi-lens types, read from
+    /// `device.deviceType` rather than inferred from the answer to the question above.
+    ///
+    /// Recorded because the panel has to tell the user *why* manual exposure is absent, and
+    /// the two possible reasons need different words. "This is a composite device, and
+    /// Apple documents that composites do not support manual exposure" is a fact about the
+    /// hardware. The same sentence said about a device that is not a composite is a
+    /// fabrication — and it is the more likely of the two to be read, because a device can
+    /// lack `.custom` for reasons other than being a composite, and the app cannot tell
+    /// which from here.
+    ///
+    /// Kept as state rather than recomputed in `availabilitySummary`, because the summary is
+    /// shown long after the probe and `AVCaptureDevice` is not available at that point.
+    var isCompositeDevice: Bool = false
+
     var isoRange: ClosedRange<Float>?
     var shutterRange: ClosedRange<Double>?
     var exposureCompensationRange: ClosedRange<Float>?
@@ -57,6 +72,11 @@ struct ProCapabilities: Equatable {
 
         // The single question everything else is conditioned on.
         capabilities.supportsCustomExposure = device.isExposureModeSupported(.custom)
+
+        // Recorded from the type rather than assumed from the answer above, so that the
+        // panel can distinguish "the platform forbids this on a composite" from "this
+        // camera does not support it" and only say the first when it is true.
+        capabilities.isCompositeDevice = ProCapabilities.compositeTypes.contains(device.deviceType)
 
         // A range whose minimum exceeds its maximum is not a range. Some formats report
         // that for a mode they cannot actually use, and an inverted `ClosedRange` would
@@ -128,8 +148,9 @@ struct ProCapabilities: Equatable {
         if !supportsCustomExposure {
             // Said first and said plainly, because on a composite device it is the whole
             // answer, and a panel listing "RAW" and nothing else reads as a bug rather
-            // than as the platform.
-            return "no manual exposure on \(ProCapabilities.compositeReason)"
+            // than as the platform. Which reason is offered depends on what was actually
+            // asked of the device — see `isCompositeDevice`.
+            return "no manual exposure on \(ProCapabilities.reasonManualExposureUnavailable(isComposite: isCompositeDevice))"
         }
         if isoRange != nil { available.append("ISO") }
         if shutterRange != nil { available.append("shutter") }
@@ -143,11 +164,31 @@ struct ProCapabilities: Equatable {
             : available.joined(separator: ", ")
     }
 
-    /// Named once so the reason is consistent wherever it is shown, and so it names the
-    /// platform's reason rather than ours.
-    static let compositeReason =
-        "this camera, which reports itself as a composite multi-lens device. "
-        + "Apple documents that composite devices do not support manual exposure."
+    /// The device types that are composites rather than a single physical lens.
+    ///
+    /// These are the ones Apple documents as refusing `ExposureMode.custom`, and they are
+    /// listed explicitly so that "is this a composite" is answered by a lookup the reader
+    /// can check, not by "does it have more than one lens", which is a guess.
+    static let compositeTypes: [AVCaptureDevice.DeviceType] = [
+        .builtInTripleCamera,
+        .builtInDualWideCamera,
+        .builtInDualCamera
+    ]
+
+    /// Why manual exposure is unavailable, in the only terms that were actually checked.
+    ///
+    /// The composite case can name the platform's documented restriction, because
+    /// `isCompositeDevice` came from `device.deviceType`. Any other device gets the plain
+    /// statement and no theory: the app knows the mode is unsupported and does not know
+    /// why, and saying so is more useful to whoever reads the log than a confident wrong
+    /// reason.
+    static func reasonManualExposureUnavailable(isComposite: Bool) -> String {
+        guard isComposite else {
+            return "this camera, which reports that it does not support manual exposure."
+        }
+        return "this camera, which reports itself as a composite multi-lens device. "
+            + "Apple documents that composite devices do not support manual exposure."
+    }
 }
 
 /// What the user dialled in on the Pro panel.
@@ -181,14 +222,12 @@ struct ManualSettings: Equatable, Codable, Sendable {
     /// deliberately. `.speed` is the mode that honours them.
     var isExposureManual: Bool { iso != nil || shutterSeconds != nil || lockExposure }
 
-
     /// What the user has actually asked to change, for the log and the metadata.
     ///
     /// Deliberately verbose: "user asked for a locked exposure at ISO 100" and "the device
     /// accepted a locked exposure at ISO 100" are different sentences and conflating them
     /// is how a badge ends up promising something the hardware refused.
     var summarise: String {
-
         var parts: [String] = []
         if let iso { parts.append("iso=\(Int(iso))") }
         if let shutterSeconds { parts.append("sh=\(String(format: "%.4f", shutterSeconds))") }

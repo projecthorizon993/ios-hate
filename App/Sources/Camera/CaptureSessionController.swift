@@ -380,9 +380,20 @@ final class CaptureSessionController: NSObject {
         return any
     }
 
-    /// ISO, shutter and exposure bias, in one call, because AVFoundation takes them
-    /// together — setting `.custom` and then writing the values separately is how the
-    /// device ends up briefly in a custom mode with values from the previous mode.
+    /// ISO, shutter and exposure bias, resolved to one pair and written once.
+    ///
+    /// `setExposureModeCustom(duration:iso:)` takes duration and ISO together and there is
+    /// no partial form of it, so a caller that wants to change one of them must also name
+    /// the other. **The value named for the one the user did not choose has to be the
+    /// device's current value.** Substituting a constant — which is what an earlier
+    /// version of this did, writing 1/60 s whenever only ISO was set — applies an exposure
+    /// nobody dialled in, which is the same defect as a control that does nothing, only
+    /// harder to notice because the slider did move.
+    ///
+    /// The bias is written after that call rather than before, and via
+    /// `setExposureTargetOffset` rather than by assigning `exposureMode`. Entering `.custom`
+    /// through the property setter can reset duration and ISO to values this function never
+    /// chose, which would discard the pair written a line earlier.
     private func applyExposure(_ manual: ManualSettings, to device: AVCaptureDevice) -> Bool {
         let format = device.activeFormat
 
@@ -404,48 +415,54 @@ final class CaptureSessionController: NSObject {
 
         var wrote = false
 
-        if let iso = manual.iso {
-            let clamped = isoRange.map { min(max(iso, $0.lowerBound), $0.upperBound) } ?? iso
+        // `.custom` is only entered when there is something to enter it for. A settings
+        // value of `lockExposure` alone locks whatever the device is already running, so
+        // forcing `.custom` first would replace the auto exposure the user did not ask to
+        // change.
+        let wantsCustom = manual.iso != nil
+            || manual.shutterSeconds != nil
+            || manual.exposureTargetOffset != 0
+
+        if wantsCustom {
+            let pair = Self.resolveExposurePair(manual,
+                                                currentSeconds: CMTimeGetSeconds(device.exposureDuration),
+                                                currentISO: device.iso,
+                                                shutterRange: shutterRange,
+                                                isoRange: isoRange)
+
             if let failure = LumaFrameSafety.perform({
                 device.setExposureModeCustom(
-                    duration: CMTime(seconds: 1.0 / 60.0, preferredTimescale: 1_000_000_000),
-                    iso: clamped,
+                    duration: CMTime(seconds: pair.seconds, preferredTimescale: 1_000_000_000),
+                    iso: pair.iso,
                     completionHandler: nil)
             }) {
                 AppLog.warn(AppLog.camera, "manual exposure rejected: \(failure)")
             } else {
                 wrote = true
+                // What was sent, which is not always what was asked for: the clamp may
+                // have moved a value, and an unset one was carried over from the device.
+                // Both halves are in the line because the difference between them is the
+                // thing that has to be explainable from a device log.
+                AppLog.note(AppLog.camera,
+                            "manual exposure applied: iso=\(Int(pair.iso)) shutter=\(pair.seconds)s"
+                            + " requested iso=\(manual.iso.map { String(Int($0)) } ?? "auto")"
+                            + " shutter=\(manual.shutterSeconds.map { String($0) } ?? "auto")")
             }
-        }
 
-        if let seconds = manual.shutterSeconds {
-            let clamped = shutterRange.map { min(max(seconds, $0.lowerBound), $0.upperBound) } ?? seconds
-            if let failure = LumaFrameSafety.perform({
-                device.setExposureModeCustom(
-                    duration: CMTime(seconds: clamped, preferredTimescale: 1_000_000_000),
-                    iso: device.iso,
-                    completionHandler: nil)
-            }) {
-                AppLog.warn(AppLog.camera, "manual shutter rejected: \(failure)")
-            } else {
-                wrote = true
-            }
-        }
-
-        if manual.exposureTargetOffset != 0 {
-            let lower = device.minExposureTargetBias
-            let upper = device.maxExposureTargetBias
-            let clamped = manual.exposureTargetOffset > lower
-                && manual.exposureTargetOffset < upper
-                ? manual.exposureTargetOffset
-                : min(max(manual.exposureTargetOffset, lower), upper)
-            setExposureMode(.custom, on: device, name: "exposure")
-            if let failure = LumaFrameSafety.perform({
-                device.setExposureTargetOffset(clamped)
-            }) {
-                AppLog.warn(AppLog.camera, "manual exposure bias rejected: \(failure)")
-            } else {
-                wrote = true
+            if manual.exposureTargetOffset != 0 {
+                let lower = device.minExposureTargetBias
+                let upper = device.maxExposureTargetBias
+                let clamped = min(max(manual.exposureTargetOffset, lower), upper)
+                if let failure = LumaFrameSafety.perform({
+                    device.setExposureTargetOffset(clamped)
+                }) {
+                    AppLog.warn(AppLog.camera, "manual exposure bias rejected: \(failure)")
+                } else {
+                    wrote = true
+                    AppLog.note(AppLog.camera,
+                                "manual bias applied: \(clamped)EV"
+                                + (clamped == manual.exposureTargetOffset ? "" : " (clamped)"))
+                }
             }
         }
 
@@ -454,6 +471,39 @@ final class CaptureSessionController: NSObject {
             wrote = true
         }
         return wrote
+    }
+
+    /// A duration and an ISO, which is the only shape `setExposureModeCustom` accepts.
+    struct ExposurePair: Equatable {
+        var seconds: Double
+        var iso: Float
+    }
+
+    /// Resolves what to actually send, given what was asked for and what the device is
+    /// doing now.
+    ///
+    /// Pure, and separate from the write, for one reason: the rule worth protecting here is
+    /// **a value the user did not set must come from the device**. That rule cannot be
+    /// tested through `AVCaptureDevice`, which does not exist in a headless test process,
+    /// and an untestable rule is the rule that comes back. Extracted, the bug this replaces
+    /// — writing a fixed 1/60 s whenever only ISO was dialled in — is a two-line test.
+    ///
+    /// The current values are passed in rather than read from a device, and the ranges are
+    /// the live format's rather than the probed ones, because the format can be
+    /// renegotiated between the probe and the write.
+    static func resolveExposurePair(_ manual: ManualSettings,
+                                    currentSeconds: Double,
+                                    currentISO: Float,
+                                    shutterRange: ClosedRange<Double>?,
+                                    isoRange: ClosedRange<Float>?) -> ExposurePair {
+        let requestedISO = manual.iso ?? currentISO
+        let requestedSeconds = manual.shutterSeconds ?? currentSeconds
+        return ExposurePair(
+            seconds: shutterRange.map { min(max(requestedSeconds, $0.lowerBound), $0.upperBound) }
+                ?? requestedSeconds,
+            iso: isoRange.map { min(max(requestedISO, $0.lowerBound), $0.upperBound) }
+                ?? requestedISO
+        )
     }
 
     private func applyFocus(_ manual: ManualSettings, to device: AVCaptureDevice) -> Bool {

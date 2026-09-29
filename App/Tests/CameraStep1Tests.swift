@@ -388,10 +388,100 @@ final class CameraStep1Tests: XCTestCase {
             XCTAssertTrue(mode.isImplemented, "\(mode) should be implemented")
             XCTAssertFalse(mode.label.isEmpty, "\(mode) needs a label")
         }
+        // The mode switcher's order is the chrome, and `DESIGN_SPEC.md` requires it not
+        // to move when a mode is filled in.
         XCTAssertEqual(CameraMode.allCases, [.auto, .pro, .looks])
     }
 
     // MARK: - Manual exposure gating
+
+    /// The regression test for the defect this branch was returned for.
+    ///
+    /// `setExposureModeCustom(duration:iso:)` takes both values in one call and has no
+    /// partial form, so setting only ISO still has to name a shutter. The first version of
+    /// this named a fixed 1/60 s, which meant a user who dialled in ISO alone silently got
+    /// a 1/60 s shutter they never chose — the manual control moving the image to somewhere
+    /// nobody asked for, which is the defect this whole task exists to remove.
+    ///
+    /// The value the user did not set has to be the device's own. That is the whole rule.
+    func testSettingISOAloneLeavesTheShutterWhereTheDeviceHadIt() {
+        // The device is running a fast shutter, which is the case that matters: a
+        // substituted 1/60 is a three-stop error in bright light and invisible in dim.
+        let pair = CaptureSessionController.resolveExposurePair(
+            ManualSettings(iso: 400),
+            currentSeconds: 1.0 / 1000,
+            currentISO: 50,
+            shutterRange: (1.0 / 8000)...(1.0 / 30),
+            isoRange: 25...6400
+        )
+
+        XCTAssertEqual(pair.iso, 400, "the ISO the user dialled in is the ISO sent")
+        XCTAssertEqual(pair.seconds, 1.0 / 1000,
+                       "the shutter the user did not set must be the device's, not a substituted value")
+        XCTAssertNotEqual(pair.seconds, 1.0 / 60,
+                          "1/60 here is the original defect returning")
+    }
+
+    /// The converse, and the reason the rule is symmetric rather than an ISO special case.
+    func testSettingTheShutterAloneLeavesTheISOWhereTheDeviceHadIt() {
+        let pair = CaptureSessionController.resolveExposurePair(
+            ManualSettings(shutterSeconds: 1.0 / 60),
+            currentSeconds: 1.0 / 1000,
+            currentISO: 800,
+            shutterRange: (1.0 / 8000)...(1.0 / 30),
+            isoRange: 25...6400
+        )
+
+        XCTAssertEqual(pair.seconds, 1.0 / 60)
+        XCTAssertEqual(pair.iso, 800, "an unset ISO must not be reset to a default either")
+    }
+
+    /// A bias on its own still has to enter `.custom`, and doing so must not disturb the
+    /// exposure the device was already running — which is what writing the pair first is
+    /// for.
+    func testSettingBiasAloneCarriesTheDevicesOwnExposure() {
+        let pair = CaptureSessionController.resolveExposurePair(
+            ManualSettings(exposureTargetOffset: 1.5),
+            currentSeconds: 1.0 / 250,
+            currentISO: 200,
+            shutterRange: (1.0 / 8000)...(1.0 / 30),
+            isoRange: 25...6400
+        )
+
+        XCTAssertEqual(pair.iso, 200)
+        XCTAssertEqual(pair.seconds, 1.0 / 250)
+    }
+
+    /// Both set means both are honoured, and each is clamped to the live format's range
+    /// rather than to whatever was probed earlier.
+    func testBothValuesAreUsedAndClampedToTheLiveRange() {
+        let pair = CaptureSessionController.resolveExposurePair(
+            ManualSettings(iso: 99999, shutterSeconds: 30),
+            currentSeconds: 1.0 / 250,
+            currentISO: 200,
+            shutterRange: (1.0 / 8000)...(1.0 / 30),
+            isoRange: 25...6400
+        )
+
+        XCTAssertEqual(pair.iso, 6400, "an ISO above the live ceiling clamps to it")
+        XCTAssertEqual(pair.seconds, 1.0 / 30, "a shutter below the live floor clamps to it")
+    }
+
+    /// A device that reports no usable range is still written, unclamped, rather than
+    /// refusing. Refusing would be a behaviour change on hardware the probe could not
+    /// describe, and the exception trap is what catches a bad value, not a missing range.
+    func testAnAbsentRangeLeavesTheValuesUnclamped() {
+        let pair = CaptureSessionController.resolveExposurePair(
+            ManualSettings(iso: 400),
+            currentSeconds: 1.0 / 250,
+            currentISO: 200,
+            shutterRange: nil,
+            isoRange: nil
+        )
+
+        XCTAssertEqual(pair.iso, 400)
+        XCTAssertEqual(pair.seconds, 1.0 / 250)
+    }
 
     /// A composite device cannot do manual exposure, and the panel must not pretend
     /// otherwise.
@@ -452,12 +542,55 @@ final class CameraStep1Tests: XCTestCase {
     /// The summary must name the platform's reason, not just say "nothing available".
     /// A panel reading "no manual controls" on a device that visibly has three lenses is
     /// indistinguishable from a bug.
+    ///
+    /// Built with `isCompositeDevice: true` rather than relying on a default, because the
+    /// composite wording is only true for a device that reported itself as one. The
+    /// converse case is the assertion that matters: a device which is not a composite must
+    /// not be told that it is.
     func testTheSummaryExplainsWhyACompositeDeviceHasNoManualControls() {
-        let compositeLike = ProCapabilities(supportsCustomExposure: false)
-        let summary = compositeLike.availabilitySummary
+        let composite = ProCapabilities(supportsCustomExposure: false, isCompositeDevice: true)
+        let summary = composite.availabilitySummary
 
         XCTAssertTrue(summary.contains("composite"), "summary was: \(summary)")
         XCTAssertTrue(summary.contains("do not support manual exposure"), "summary was: \(summary)")
+    }
+
+    /// The other half of the same rule, and the one an earlier version of this file got
+    /// backwards: the composite explanation is a claim about the hardware, so it may only
+    /// be made about hardware that reported itself as a composite.
+    ///
+    /// `ProCapabilities.probe` needs a live `AVCaptureDevice` and cannot run here, so what
+    /// is pinned is the rule that consumes the recorded flag: no composite, no composite
+    /// claim.
+    func testTheSummaryDoesNotCallANonCompositeDeviceAComposite() {
+        let notComposite = ProCapabilities(supportsCustomExposure: false, isCompositeDevice: false)
+        let summary = notComposite.availabilitySummary
+
+        XCTAssertFalse(summary.contains("composite"),
+                       "a device that did not report as a composite must not be told it is: \(summary)")
+        XCTAssertTrue(summary.contains("does not support manual exposure"),
+                      "the reason must still be stated: \(summary)")
+    }
+
+    /// `isCompositeDevice` has to be recorded from `device.deviceType`, and the types it
+    /// accepts are exactly the composites. A device type list that drifts — by gaining a
+    /// single-lens type, say — would put the composite explanation on hardware it does not
+    /// describe.
+    func testOnlyCompositeDeviceTypesAreTreatedAsComposite() {
+        let composites: [AVCaptureDevice.DeviceType] = [
+            .builtInTripleCamera,
+            .builtInDualWideCamera,
+            .builtInDualCamera
+        ]
+        XCTAssertEqual(ProCapabilities.compositeTypes.sorted { $0.rawValue < $1.rawValue },
+                       composites.sorted { $0.rawValue < $1.rawValue })
+
+        for singleLens: AVCaptureDevice.DeviceType in [.builtInWideAngleCamera,
+                                                       .builtInTelephotoCamera,
+                                                       .builtInUltraWideCamera] {
+            XCTAssertFalse(ProCapabilities.compositeTypes.contains(singleLens),
+                           "\(singleLens.rawValue) is one lens, not a composite")
+        }
     }
 
     /// `photoQualityPrioritization` is decided from this, and `.balanced` would let the
@@ -479,6 +612,10 @@ final class CameraStep1Tests: XCTestCase {
     /// These were two independent expressions once, and they disagreed: the settings got
     /// `.speed` while the recipe said `"balanced"`, so a manual capture's file reported
     /// the opposite of what had been done to it.
+    /// `PhotoCaptureController` is `@MainActor`, so this is too. The project builds in
+    /// Swift 5.9 with minimal concurrency checking, where the mismatch is not diagnosed,
+    /// but the annotation costs nothing and states what the test actually needs.
+    @MainActor
     func testTheRecordedPrioritisationMatchesTheOneApplied() {
         // Built by assignment rather than the memberwise initialiser, because the
         // declaration order of `Request` is not the order these two matter in and a
