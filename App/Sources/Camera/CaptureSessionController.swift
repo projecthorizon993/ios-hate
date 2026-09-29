@@ -336,13 +336,24 @@ final class CaptureSessionController: NSObject {
     /// error when the device is not locked. So each one is guarded by a support check
     /// and then run through `LumaFrameSafety`, which is the wrapper that actually
     /// converts a raised exception into a log line.
+    /// Returns whether the device actually took the mode.
+    ///
+    /// It used to return `Void`, which meant a caller reporting "applied" after calling it
+    /// was reporting a request, not an outcome. That is the specific thing this function's
+    /// own log line warns against, six lines above where it was happening.
+    @discardableResult
     private func setExposureMode(_ mode: AVCaptureDevice.ExposureMode,
                                  on device: AVCaptureDevice,
-                                 name: String) {
-        guard device.isExposureModeSupported(mode) else { return }
+                                 name: String) -> Bool {
+        guard device.isExposureModeSupported(mode) else {
+            AppLog.warn(AppLog.camera, "\(name) mode \(mode) is not supported by this device")
+            return false
+        }
         if let failure = LumaFrameSafety.perform({ device.exposureMode = mode }) {
             AppLog.warn(AppLog.camera, "\(name) mode rejected: \(failure)")
+            return false
         }
+        return true
     }
 
     /// Writes the user's manual settings to the device.
@@ -359,8 +370,13 @@ final class CaptureSessionController: NSObject {
     @discardableResult
     func apply(manual: ManualSettings, to configuration: Configuration) -> Bool {
         let device = configuration.device
-        guard device.lockForConfiguration() != nil else {
-            AppLog.fail(AppLog.camera, "manual: lockForConfiguration failed; not applied")
+        // `lockForConfiguration()` is `throws` and returns `Void`. Comparing it to `nil`
+        // does not compile, and the failure has to come from the `catch`, not from a
+        // sentinel.
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            AppLog.fail(AppLog.camera, "manual: lockForConfiguration failed: \(error.localizedDescription)")
             return false
         }
         defer { device.unlockForConfiguration() }
@@ -391,9 +407,13 @@ final class CaptureSessionController: NSObject {
     /// harder to notice because the slider did move.
     ///
     /// The bias is written after that call rather than before, and via
-    /// `setExposureTargetOffset` rather than by assigning `exposureMode`. Entering `.custom`
+    /// `setExposureTargetBias` rather than by assigning `exposureMode`. Entering `.custom`
     /// through the property setter can reset duration and ISO to values this function never
     /// chose, which would discard the pair written a line earlier.
+    ///
+    /// `exposureTargetOffset` is the read-only *metered* offset from the target, and there
+    /// is no `setExposureTargetOffset`. The writable quantity is the bias, and the
+    /// `min/maxExposureTargetBias` used for the clamp above are its limits.
     private func applyExposure(_ manual: ManualSettings, to device: AVCaptureDevice) -> Bool {
         let format = device.activeFormat
 
@@ -454,7 +474,7 @@ final class CaptureSessionController: NSObject {
                 let upper = device.maxExposureTargetBias
                 let clamped = min(max(manual.exposureTargetOffset, lower), upper)
                 if let failure = LumaFrameSafety.perform({
-                    device.setExposureTargetOffset(clamped)
+                    device.setExposureTargetBias(clamped, completionHandler: nil)
                 }) {
                     AppLog.warn(AppLog.camera, "manual exposure bias rejected: \(failure)")
                 } else {
@@ -467,8 +487,11 @@ final class CaptureSessionController: NSObject {
         }
 
         if manual.lockExposure {
-            setExposureMode(.locked, on: device, name: "exposure")
-            wrote = true
+            // The return value is used, not ignored: a refused lock must not be reported
+            // as applied.
+            if setExposureMode(.locked, on: device, name: "exposure") {
+                wrote = true
+            }
         }
         return wrote
     }
@@ -536,7 +559,7 @@ final class CaptureSessionController: NSObject {
         // and not one this task is allowed to add.
         let gains = device.whiteBalanceGains
         if let failure = LumaFrameSafety.perform({
-            device.setWhiteBalanceModeLocked(mode: .locked, gains: gains)
+            device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
         }) {
             AppLog.warn(AppLog.camera, "manual white balance rejected: \(failure)")
             return false
