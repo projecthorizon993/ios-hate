@@ -59,10 +59,7 @@
 				A9B807F26FFF0D1CE9AE6399,
 				A68230CEB61D9C1121D8B689,
 				A13290FFC0709B92BC31D9A2,
-				A16A78DC6A49B5E024FCF3C6,
-				ACCAC5BECADD9D6CD6270C61,
-				A2FDDBE28212E07C5BD396D4,
-				A76BF2812BBBB217DFB3B4AB,
+				A563FEE293103366B209AFBE,
 				AB3E4B3AD752C9EED53B42F7,
 				A835BFBB706BFECF65143581,
 				A50834C49441CBFBC3A616C4,
@@ -73,7 +70,6 @@
 				AC8B016C6F86342C5160A808,
 				AF0547DF6195E7A263E3B466,
 				AAE0F97D8CE57352E249633B,
-				A5BC11F303052291E6FB2C1B,
 				AEB620EE64789952E59B006A,
 				AB174A3B018201C704EA6219,
 				AF8B792DE0339D5A6861CE02,
@@ -286,10 +282,7 @@
 				C4888E370535EB70A6866A2F,
 				CB0E88CBDD99CD1D81739D45,
 				C6907871D060BA394FCBA123,
-				C495B0E33B8AAAA32C96D76A,
-				CB021E25F76124D8F5CD5ACD,
-				C8D601BA67B59311E3BA79BB,
-				CF475F21734F9F47A1FFDD5F,
+				C6B9F61CF0AE03C3CE413A0F,
 				C11A62BBD24B0AD986FF8EAD,
 				C1D45DCD8B8F1BFC8C869CDE,
 				C7D0780ABD89F9BB7E0CA5E1,
@@ -300,7 +293,6 @@
 				C2A1FBECAA50DFCFF699BB6B,
 				C71E13AF5E13F6481B89EB4E,
 				CDB8F82FA873B01CFE9AB0D3,
-				CA974A731C2FD5B4E35E7AEB,
 				C8F0875D32195865344EC1F9,
 				C4AA261019E06676EC934AA8,
 				C2D8C1C6070AB6B6D35F331B,
@@ -479,28 +471,10 @@
 			path = App/Sources/DesignSystem/Theme.swift;
 			sourceTree = "<group>";
 		};
-		A16A78DC6A49B5E024FCF3C6 = {
+		A563FEE293103366B209AFBE = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Looks/GeneratedLooks.swift;
-			sourceTree = "<group>";
-		};
-		ACCAC5BECADD9D6CD6270C61 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Looks/Look.swift;
-			sourceTree = "<group>";
-		};
-		A2FDDBE28212E07C5BD396D4 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Looks/LookLibrary.swift;
-			sourceTree = "<group>";
-		};
-		A76BF2812BBBB217DFB3B4AB = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Looks/LookThumbnailer.swift;
+			path = App/Sources/Looks/Looks.swift;
 			sourceTree = "<group>";
 		};
 		AB3E4B3AD752C9EED53B42F7 = {
@@ -561,12 +535,6 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Sources/Processing/ToneCurve.swift;
-			sourceTree = "<group>";
-		};
-		A5BC11F303052291E6FB2C1B = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Storage/CaptureMetadata.swift;
 			sourceTree = "<group>";
 		};
 		AEB620EE64789952E59B006A = {
@@ -735,21 +703,9 @@
 			isa = PBXBuildFile;
 			fileRef = A13290FFC0709B92BC31D9A2;
 		};
-		C495B0E33B8AAAA32C96D76A = {
+		C6B9F61CF0AE03C3CE413A0F = {
 			isa = PBXBuildFile;
-			fileRef = A16A78DC6A49B5E024FCF3C6;
-		};
-		CB021E25F76124D8F5CD5ACD = {
-			isa = PBXBuildFile;
-			fileRef = ACCAC5BECADD9D6CD6270C61;
-		};
-		C8D601BA67B59311E3BA79BB = {
-			isa = PBXBuildFile;
-			fileRef = A2FDDBE28212E07C5BD396D4;
-		};
-		CF475F21734F9F47A1FFDD5F = {
-			isa = PBXBuildFile;
-			fileRef = A76BF2812BBBB217DFB3B4AB;
+			fileRef = A563FEE293103366B209AFBE;
 		};
 		C11A62BBD24B0AD986FF8EAD = {
 			isa = PBXBuildFile;
@@ -790,10 +746,6 @@
 		CDB8F82FA873B01CFE9AB0D3 = {
 			isa = PBXBuildFile;
 			fileRef = AAE0F97D8CE57352E249633B;
-		};
-		CA974A731C2FD5B4E35E7AEB = {
-			isa = PBXBuildFile;
-			fileRef = A5BC11F303052291E6FB2C1B;
 		};
 		C8F0875D32195865344EC1F9 = {
 			isa = PBXBuildFile;
