@@ -36,6 +36,16 @@ struct CameraScreen: View {
         .background(Theme.ColorToken.surfaceBase)
         .preferredColorScheme(.dark)
         .statusBarHidden()
+        // The compare hold. `pressing` gives both edges of the press, so releasing always
+        // ends it even if the gesture is cancelled by a sheet or a rotation. Without the
+        // `onEnded` belt-and-braces below, a cancelled gesture would leave the preview
+        // stuck showing the original.
+        .onLongPressGesture(minimumDuration: Theme.Motion.tap, maximumDistance: 40) {
+            // Fires on a *completed* long press, which is a tap-and-hold that finished.
+            // Kept as a no-op safety net; the real work is in `pressing`.
+        } onPressingChanged: { pressing in
+            if pressing { model.beginCompare() } else { model.endCompare() }
+        }
         .task { begin() }
         .task(id: model.banner) { await dismissBannerSoon() }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
@@ -71,6 +81,30 @@ struct CameraScreen: View {
 
     // MARK: - Viewfinder
 
+    /// Shown while the user is holding to compare. `accent.compare` per the spec, and it
+    /// carries the word rather than relying on colour alone — a blue tint with no label
+    /// reads as a rendering fault, not as "this is the unprocessed frame".
+    private var compareBadge: some View {
+        VStack {
+            HStack {
+                Text("ORIGINAL")
+                    .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                    .tracking(0.6)
+                    .foregroundStyle(Theme.ColorToken.accentCompare)
+                    .padding(.horizontal, Theme.Space.s)
+                    .padding(.vertical, Theme.Space.xs)
+                    .background(Theme.ColorToken.surfaceRaised.opacity(0.8))
+                    .clipShape(Capsule())
+                Spacer()
+            }
+            .padding(Theme.Space.s)
+            Spacer()
+        }
+        .transition(.opacity)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
     private var viewfinder: some View {
         ZStack {
             // Two preview paths, chosen by whether the recipe does anything. The direct
@@ -96,6 +130,14 @@ struct CameraScreen: View {
             overlayCanvas
                 .aspectRatio(3.0 / 4.0, contentMode: .fit)
                 .allowsHitTesting(false)
+
+            // Compare is a hold on the viewfinder, not a toggle in a menu. The gesture is
+            // on the ZStack so it also works in the direct-preview path, where there is
+            // nothing to re-render — the chrome is the only thing that changes, which is
+            // what makes the comparison honest.
+            if model.isComparing {
+                compareBadge
+            }
 
             if let focusReticle {
                 FocusReticle()

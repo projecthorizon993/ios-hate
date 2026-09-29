@@ -103,6 +103,20 @@ final class ProcessedPreview: NSObject {
         }
     }
 
+    /// Compare mode: render the frame with nothing applied.
+    ///
+    /// A **hold, not a toggle** (`DESIGN_SPEC.md`, Controls). The user is checking what
+    /// the look is doing to their photo, and the answer has to be available continuously
+    /// while they look, not after they commit to a mode change and find their way back.
+    ///
+    /// Implemented by skipping the pipeline rather than by setting the intensity to zero,
+    /// so the compare path is genuinely the unprocessed frame and cannot drift from it.
+    func setComparing(_ comparing: Bool) {
+        queue.sync { isComparing = comparing }
+    }
+
+    private var isComparing = false
+
     /// The last frame the pipeline produced, for a still comparison.
     func lastStill() -> CIImage? {
         queue.sync { lastRendered }
@@ -213,6 +227,14 @@ extension ProcessedPreview: AVCaptureVideoDataOutputSampleBufferDelegate {
         if longEdge > Self.maximumPixelSize {
             let scale = Self.maximumPixelSize / longEdge
             image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        }
+
+        // Compare mode bypasses the pipeline entirely rather than rendering the look at
+        // zero intensity, so what the user sees while holding is the actual unprocessed
+        // frame and not a second code path that happens to look like one.
+        if isComparing {
+            lastRendered = image
+            return
         }
 
         // Segmentation runs on a cadence, not per frame, and on its own queue: it is the

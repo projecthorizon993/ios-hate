@@ -1,238 +1,296 @@
 import SwiftUI
 
-/// Step 3's screen: pick a look, set its strength, adjust the tone curve.
+/// Step 3's screen: the style carousel, its strength slider, and the tone controls.
 ///
-/// Every control here writes to the one `ProcessingSettings` the view model owns, so
-/// nothing on this screen can affect the preview differently from the saved photo — there
-/// is only one recipe and the screen is an editor for it.
+/// `DESIGN_SPEC.md` asks for a horizontal carousel with live thumbnails, the selected item
+/// scaled 1.0 and the rest 0.85, and a strength slider below. A vertical list of names
+/// cannot show what a look *does*, and picking a look you cannot see is the whole problem
+/// this screen exists to solve — so the thumbnails are rendered from the actual preview
+/// frame rather than shipped as assets, and they are real.
 ///
-/// Controls the device cannot honour are **absent**, not disabled. `docs/ARCHITECTURE.md`
-/// section 5: hide what does not exist, disable what exists but is not available now, and
-/// never simulate. So a device with no ProRAW support has no RAW switch to look at, and a
-/// format with no locked exposure has no shutter slider.
+/// The layout is a sheet over the viewfinder rather than a screen replacement, so the
+/// frame being transformed stays visible while it is being changed.
 struct LooksScreen: View {
 
     @ObservedObject var model: CameraViewModel
     @Environment(\.dismiss) private var dismiss
 
+    /// Thumbnail per look. Absent until the first render, so the strip shows placeholders
+    /// rather than nothing.
+    @State private var thumbnails: [Look: Image] = [:]
+    /// A long press is a hold, not a toggle, and it has to be released when the finger
+    /// leaves the screen as well as when it lifts.
+    @State private var comparingLook: Look?
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                toneSection
-                lookSection
-                finishSection
-            }
-            .padding(Theme.Space.l)
+        VStack(spacing: 0) {
+            carousel
+            strength
+            tone
+            Spacer(minLength: 0)
         }
+        .padding(.vertical, Theme.Space.l)
         .background(Theme.ColorToken.surfaceBase)
         .navigationTitle("Looks")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { requestThumbnails() }
+        .onChange(of: model.previewRedrawToken) { _, _ in requestThumbnails() }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Looks")
+    }
+
+    // MARK: - Carousel
+
+    private var carousel: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Theme.Space.s) {
+                // Original is first and is the way back. It is a tile like any other rather
+                // than a separate control, because the user is choosing among looks and
+                // the choice "none" belongs in the same list.
+                carouselTile(look: nil, title: "Original")
+                ForEach(model.looks) { look in
+                    carouselTile(look: look, title: look.name)
+                }
+            }
+            .padding(.horizontal, Theme.Space.l)
+        }
+        .scrollClipDisabled()
+    }
+
+    private func carouselTile(look: Look?, title: String) -> some View {
+        let isSelected = look == nil ? model.settings.look == nil : model.settings.look?.id == look?.id
+        let isComparing = comparingLook?.id == look?.id
+        let thumbnail = look.flatMap { thumbnails[$0] } ?? Image(uiImage: LookThumbnailer.placeholder())
+
+        return VStack(spacing: Theme.Space.xs) {
+            thumbnail
+                .resizable()
+                .aspectRatio(1, contentMode: .fill)
+                .frame(width: LookThumbnailer.size, height: LookThumbnailer.size)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control)
+                    .stroke(isSelected ? Theme.ColorToken.accentActive : Theme.ColorToken.strokeSubtle,
+                            lineWidth: isSelected ? 2 : 1))
+                .overlay(alignment: .topTrailing) {
+                    if isComparing {
+                        Image(systemName: "eye")
+                            .font(.system(size: Theme.TypeSize.caption))
+                            .foregroundStyle(Theme.ColorToken.accentCompare)
+                            .padding(Theme.Space.xs)
+                            .background(Circle().fill(Theme.ColorToken.surfaceBase.opacity(0.7)))
+                            .padding(Theme.Space.xs)
+                    }
+                }
+
+            Text(title)
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(isSelected
+                                 ? Theme.ColorToken.textPrimary
+                                 : Theme.ColorToken.textSecondary)
+                .lineLimit(1)
+                .frame(width: LookThumbnailer.size)
+        }
+        // The scale is the selection affordance the spec calls for: 1.0 selected, 0.85
+        // otherwise, so the eye finds the current look without reading the border.
+        .scaleEffect(isSelected ? 1.0 : 0.85)
+        .opacity(isSelected ? 1.0 : 0.75)
+        .animation(.spring(response: Theme.Motion.mode, dampingFraction: 0.8), value: isSelected)
+        .contentShape(Rectangle())
+        .onTapGesture { select(look) }
+        // Hold to preview this look without committing to it. A tap-to-select followed by
+        // a separate preview control is two steps for one question.
+        .onLongPressGesture(minimumDuration: Theme.Motion.tap, maximumDistance: 40) {
+            // Completed long press: end the preview and leave the look selected.
+            endComparing()
+        } onPressingChanged: { pressing in
+            if pressing { beginComparing(look) } else { endComparing() }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(isSelected ? "Selected" : "")
+        .accessibilityHint("Double tap to apply. Touch and hold to preview without applying.")
+        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+    }
+
+    private func select(_ look: Look?) {
+        Haptics.selection()
+        model.select(look: look)
+        requestThumbnails()
+    }
+
+    private func beginComparing(_ look: Look?) {
+        // A look preview is a temporary recipe, so it must not disturb the real one — the
+        // user may be holding a look they have not chosen yet.
+        comparingLook = look
+        model.previewOnly(settingsFor(look))
+        Haptics.selection()
+    }
+
+    private func endComparing() {
+        guard comparingLook != nil else { return }
+        comparingLook = nil
+        model.previewOnly(model.settings)
+    }
+
+    private func settingsFor(_ look: Look?) -> ProcessingSettings {
+        var one = model.settings
+        one.look = look
+        if look == nil { one.lookIntensity = 0 }
+        return one
+    }
+
+    // MARK: - Strength
+
+    @ViewBuilder
+    private var strength: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack {
+                Text("Strength")
+                    .font(.system(size: Theme.TypeSize.label))
+                    .foregroundStyle(Theme.ColorToken.textSecondary)
+                Spacer()
+                Text("\(Int(model.settings.lookIntensity * 100))%")
+                    .font(.system(size: Theme.TypeSize.value, design: .monospaced))
+                    .foregroundStyle(Theme.ColorToken.textPrimary)
+            }
+            Slider(value: Binding(get: { model.settings.lookIntensity },
+                                  set: { model.setLookIntensity($0) }),
+                   in: 0...1)
+                .tint(Theme.ColorToken.accentActive)
+                .accessibilityLabel("Look strength")
+                .accessibilityValue("\(Int(model.settings.lookIntensity * 100)) percent")
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.top, Theme.Space.m)
+        // A strength slider with nothing to be the strength of is a control that does
+        // nothing, so it is absent rather than disabled.
+        .opacity(model.settings.look == nil ? 0.35 : 1)
+        .disabled(model.settings.look == nil)
+        .accessibilityHidden(model.settings.look == nil)
     }
 
     // MARK: - Tone
 
-    private var toneSection: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Tone")
-                .font(.system(size: Theme.TypeSize.label))
-                .foregroundStyle(Theme.ColorToken.textSecondary)
+    /// One of the tone controls, so reading and writing a field is a switch on a type
+    /// rather than a switch on a display string.
+    ///
+    /// The string version of this existed first and it was wrong: it meant the label a user
+    /// sees and the field the code writes were two separate switches that had to agree, and
+    /// renaming a label would have silently zeroed the control.
+    private enum ToneField: String, CaseIterable {
+        case exposure = "Exposure"
+        case contrast = "Contrast"
+        case saturation = "Saturation"
+        case lift = "Lifted shadows"
+        case temperature = "Warmth"
 
-            // A dialled-in correction is the case where the native pipeline's own white
-            // balance is no longer trusted, so the UI says so rather than leaving the user
-            // to wonder why the colours shifted after they stopped touching anything.
-            Text("Adjustments apply only to what you change. The camera's own white balance is left alone otherwise.")
-                .font(.system(size: Theme.TypeSize.caption))
-                .foregroundStyle(Theme.ColorToken.textDisabled)
-
-            LabelledSlider(title: "Exposure",
-                           value: Binding(get: { model.settings.tone?.exposure ?? 0 },
-                                          set: { model.setTone(currentTone(exposure: $0)) }),
-                           range: 0...1)
-            LabelledSlider(title: "Contrast",
-                           value: Binding(get: { model.settings.tone?.contrast ?? 0 },
-                                          set: { model.setTone(currentTone(contrast: $0)) }),
-                           range: -1...1)
-            LabelledSlider(title: "Saturation",
-                           value: Binding(get: { model.settings.tone?.saturation ?? 0 },
-                                          set: { model.setTone(currentTone(saturation: $0)) }),
-                           range: -1...1)
-            LabelledSlider(title: "Lift",
-                           value: Binding(get: { model.settings.tone?.lift ?? 0 },
-                                          set: { model.setTone(currentTone(lift: $0)) }),
-                           range: -1...1)
-            LabelledSlider(title: "Warmth",
-                           value: Binding(get: { model.settings.tone?.temperatureOffset ?? 0 },
-                                          set: { model.setTone(currentTone(temperature: $0)) }),
-                           range: -1500...1500)
-            LabelledSlider(title: "Tint",
-                           value: Binding(get: { model.settings.tone?.tintOffset ?? 0 },
-                                          set: { model.setTone(currentTone(tint: $0)) }),
-                           range: -60...60)
-
-            if model.settings.tone != nil {
-                Button("Reset tone") { model.setTone(.neutral) }
-                    .font(.system(size: Theme.TypeSize.label))
-                    .foregroundStyle(Theme.ColorToken.accentActive)
+        var range: ClosedRange<Float> {
+            switch self {
+            case .exposure, .lift: return 0...1
+            case .contrast, .saturation: return -1...1
+            case .temperature: return -1500...1500
             }
+        }
+
+        /// The signed fields get a neutral midpoint; the unsigned ones do not, so the
+        /// slider is drawn where the value actually lives rather than with a dead half.
+        var isBipolar: Bool {
+            switch self {
+            case .contrast, .saturation, .temperature: return true
+            case .exposure, .lift: return false
+            }
+        }
+
+        func value(in tone: ToneCurve) -> Float {
+            switch self {
+            case .exposure: return tone.exposure
+            case .contrast: return tone.contrast
+            case .saturation: return tone.saturation
+            case .lift: return tone.lift
+            case .temperature: return tone.temperatureOffset
+            }
+        }
+
+        func apply(_ value: Float, to tone: ToneCurve) -> ToneCurve {
+            var copy = tone
+            switch self {
+            case .exposure: copy.exposure = value
+            case .contrast: copy.contrast = value
+            case .saturation: copy.saturation = value
+            case .lift: copy.lift = value
+            case .temperature: copy.temperatureOffset = value
+            }
+            return copy
         }
     }
 
-    // MARK: - Looks
-
-    private var lookSection: some View {
+    private var tone: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Look")
-                .font(.system(size: Theme.TypeSize.label))
-                .foregroundStyle(Theme.ColorToken.textSecondary)
-
-            // Original is `nil`, not a Look value. It is the one tile that must return the
-            // photo to exactly what was captured, so it cannot be a table applied at some
-            // intensity.
-            Button {
-                model.select(look: nil)
-            } label: {
-                LookTile(title: "Original",
-                         blurb: "Exactly as captured",
-                         isSelected: model.settings.look == nil,
-                         onRemove: nil)
-            }
-            .buttonStyle(.plain)
-
-            ForEach(model.looks) { look in
-                Button {
-                    model.select(look: look)
-                } label: {
-                    LookTile(title: look.name,
-                             blurb: blurb(for: look),
-                             isSelected: model.settings.look?.id == look.id,
-                             onRemove: look.isImported
-                                ? { model.removeImportedLook(look) }
-                                : nil)
-                }
-                .buttonStyle(.plain)
-            }
-
-            if model.settings.look != nil {
-                LabelledSlider(title: "Strength",
-                               value: Binding(get: { model.settings.lookIntensity },
-                                              set: { model.setLookIntensity($0) }),
-                               range: 0...1)
-            }
-
-            Text("A look at zero strength is the same as no look, and skips processing entirely.")
-                .font(.system(size: Theme.TypeSize.caption))
-                .foregroundStyle(Theme.ColorToken.textDisabled)
-
-            LabelledSlider(title: "Grain",
-                           value: Binding(get: { model.settings.grain },
-                                          set: { model.setGrain($0) }),
-                           range: 0...1)
-            LabelledSlider(title: "Sharpen",
-                           value: Binding(get: { model.settings.sharpen },
-                                          set: { model.setSharpen($0) }),
-                           range: 0...1)
-        }
-    }
-
-    private var finishSection: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Live preview is \(model.isProcessingActive ? "on" : "off")")
-                .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
-                .foregroundStyle(Theme.ColorToken.textDisabled)
-            Text(model.isProcessingActive
-                 ? "Changes apply to the viewfinder and to the saved photo."
-                 : "The viewfinder is showing the unprocessed image, which is also what will be saved.")
-                .font(.system(size: Theme.TypeSize.caption))
-                .foregroundStyle(Theme.ColorToken.textDisabled)
-        }
-    }
-
-    // MARK: - Helpers
-
-    /// Reads the current curve, changes one field, and hands it back. Written as a chain
-    /// so adding a control is one line rather than a new binding per field.
-    private func currentTone(exposure: Float? = nil,
-                             contrast: Float? = nil,
-                             saturation: Float? = nil,
-                             lift: Float? = nil,
-                             temperature: Float? = nil,
-                             tint: Float? = nil) -> ToneCurve {
-        var tone = model.settings.tone ?? .neutral
-        if let exposure { tone.exposure = exposure }
-        if let contrast { tone.contrast = contrast }
-        if let saturation { tone.saturation = saturation }
-        if let lift { tone.lift = lift }
-        if let temperature { tone.temperatureOffset = temperature }
-        if let tint { tone.tintOffset = tint }
-        return tone
-    }
-
-    private func blurb(for look: Look) -> String {
-        if case .generated(let which) = look.source { return which.blurb }
-        return "Imported .cube"
-    }
-}
-
-// MARK: - Pieces
-
-private struct LabelledSlider: View {
-    let title: String
-    @Binding var value: Float
-    let range: ClosedRange<Float>
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
             HStack {
-                Text(title)
+                Text("Tone")
                     .font(.system(size: Theme.TypeSize.label))
-                    .foregroundStyle(Theme.ColorToken.textPrimary)
+                    .foregroundStyle(Theme.ColorToken.textSecondary)
                 Spacer()
-                Text(ReportFormat.number(Double(value), decimals: 2))
+                if model.settings.tone != nil {
+                    Button("Reset") { model.setTone(.neutral) }
+                        .font(.system(size: Theme.TypeSize.caption))
+                        .foregroundStyle(Theme.ColorToken.accentActive)
+                        .accessibilityLabel("Reset tone adjustments")
+                }
+            }
+
+            Text("Adjustments apply only to what you change, so the camera's own white balance keeps working when you leave these alone.")
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(Theme.ColorToken.textDisabled)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(ToneField.allCases, id: \.self) { field in
+                toneSlider(field)
+            }
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.top, Theme.Space.m)
+    }
+
+    private func toneSlider(_ field: ToneField) -> some View {
+        let value = field.value(in: model.settings.tone ?? .neutral)
+        let decimals = field.range.upperBound > 100 ? 0 : 2
+
+        return VStack(spacing: Theme.Space.xxs) {
+            HStack {
+                Text(field.rawValue)
+                    .font(.system(size: Theme.TypeSize.caption))
+                    .foregroundStyle(Theme.ColorToken.textDisabled)
+                Spacer()
+                Text(ReportFormat.number(Double(value), decimals: decimals))
                     .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
                     .foregroundStyle(Theme.ColorToken.textSecondary)
             }
-            Slider(value: $value, in: range)
+            Slider(value: Binding(
+                get: { field.value(in: model.settings.tone ?? .neutral) },
+                set: { model.setTone(field.apply($0, to: model.settings.tone ?? .neutral)) }),
+                in: field.range)
                 .tint(Theme.ColorToken.accentActive)
-                .accessibilityLabel(title)
+                .accessibilityLabel(field.rawValue)
+                .accessibilityValue(ReportFormat.number(Double(value), decimals: decimals))
         }
     }
-}
 
-private struct LookTile: View {
-    let title: String
-    let blurb: String
-    let isSelected: Bool
-    /// Present only for the user's own tables. A built-in cannot be removed, so it has
-    /// no button at all rather than a disabled one.
-    let onRemove: (() -> Void)?
+    // MARK: - Thumbnails
 
-    var body: some View {
-        HStack(alignment: .top, spacing: Theme.Space.s) {
-            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                Text(title)
-                    .font(.system(size: Theme.TypeSize.value))
-                    .foregroundStyle(isSelected
-                                     ? Theme.ColorToken.accentActive
-                                     : Theme.ColorToken.textPrimary)
-                Text(blurb)
-                    .font(.system(size: Theme.TypeSize.caption))
-                    .foregroundStyle(Theme.ColorToken.textDisabled)
-            }
-            Spacer()
-            if let onRemove {
-                Button(action: onRemove) {
-                    Text("Remove")
-                        .font(.system(size: Theme.TypeSize.caption))
-                        .foregroundStyle(Theme.ColorToken.stateError)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Remove \(title)")
-            }
+    /// Asks for thumbnails from the current preview frame.
+    ///
+    /// Rate-limited inside the thumbnailer, so calling this on every redraw token is cheap
+    /// and there is no timer to own here. Returns nothing when there is no frame yet,
+    /// which is why the strip shows placeholders rather than nothing.
+    private func requestThumbnails() {
+        guard !model.looks.isEmpty else { return }
+        guard let frame = model.processedPreview.lastStill() else { return }
+
+        LookThumbnailer.render(looks: model.looks,
+                               source: frame,
+                               recipe: model.settings) { result in
+            thumbnails = result
         }
-        .padding(Theme.Space.s)
-        .background(Theme.ColorToken.surfaceRaised)
-        .overlay(RoundedRectangle(cornerRadius: Theme.Space.s)
-            .stroke(isSelected ? Theme.ColorToken.accentActive : Theme.ColorToken.strokeSubtle,
-                    lineWidth: isSelected ? Theme.TypeSize.value : 1))
-        .cornerRadius(Theme.Space.s)
     }
 }

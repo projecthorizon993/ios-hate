@@ -274,6 +274,40 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
+    /// `true` while the user is holding to compare against the original.
+    ///
+    /// A hold, not a toggle. `DESIGN_SPEC.md` is explicit, and it is also just better: the
+    /// question "what is this look actually doing" needs the answer available continuously
+    /// while you are looking, not as a state you have to enter and remember to leave.
+    @Published private(set) var isComparing = false
+
+    /// Shows the unprocessed frame for as long as the press lasts. Both halves are needed
+    /// — a begin with no matching end would leave the preview stuck on the original.
+    func beginCompare() {
+        guard !isComparing else { return }
+        isComparing = true
+        processedPreview.setComparing(true)
+        Haptics.selection()
+    }
+
+    func endCompare() {
+        guard isComparing else { return }
+        isComparing = false
+        processedPreview.setComparing(false)
+    }
+
+    /// Pushes a recipe to the preview **without** changing what a capture will use.
+    ///
+    /// This is what a hold-to-preview needs. Tapping a look in the carousel selects it, but
+    /// touching and holding a look you have not chosen must not change the photo you are
+    /// about to take — so the temporary recipe goes to the preview only, and the real one
+    /// is restored on release. Conflating the two would mean every "let me just look at
+    /// this" quietly altered the user's settings.
+    func previewOnly(_ temporary: ProcessingSettings) {
+        processedPreview.update(settings: temporary, inputSpace: .sRGB, outputSpace: .sRGB)
+        previewRedrawToken += 1
+    }
+
     /// `true` when the recipe does nothing, which is when the app uses the direct preview
     /// layer instead of the processed one.
     var isProcessingActive: Bool { !settings.isIdentity && processedPreview.isAvailable }
