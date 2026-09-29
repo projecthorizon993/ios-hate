@@ -202,17 +202,18 @@ private struct DialTicks: View {
         return result
     }
 
-    private var minimumPositive: Float { 0.0001 }
+
+    /// Floor for `log10`, because `log10(0)` is negative infinity and would put the whole
+    /// dial in a NaN state. A `Double` because every `log10` and `pow` below is one, and
+    /// mixing the two here is what produced a run of Float/Double errors.
+    private let minimumPositive: Double = 0.0001
 
     private func angleForCurrentValue(_ current: Float) -> Double {
-        guard let value, let range = parameter.range(capabilities) else { return Self.start }
-        let low = log10(max(range.lowerBound, minimumPositive))
-        let high = log10(max(range.upperBound, minimumPositive))
+        guard let range = parameter.range(capabilities) else { return Self.start }
+        let low = log10(Double(max(range.lowerBound, minimumPositive.floatValue)))
+        let high = log10(Double(max(range.upperBound, minimumPositive.floatValue)))
         let span = max(0.0001, high - low)
-        // `min`/`max` over a Float promotes to Double through the log10 result, so the
-        // clamping bounds are spelled as Double literals. Left implicit this fails to
-        // compile with a Float-to-Double error that points nowhere near the real issue.
-        let fraction = (log10(Double(max(value, minimumPositive))) - low) / span
+        let fraction = (log10(Double(max(current, minimumPositive.floatValue))) - low) / span
         return Self.start + Self.sweep * min(max(fraction, 0.0), 1.0)
     }
 }
@@ -343,8 +344,13 @@ enum ProParameter: String, CaseIterable, Identifiable {
             if fraction > 0.5 { setAutomatic(false, on: model) }
             return
         }
-        let low = log10(Double(max(range.lowerBound, 0.0001)))
-        let high = log10(Double(max(range.upperBound, 0.0001)))
+        // Widened once here rather than at each use. The range is a Float pair, the
+        // log/pow are Doubles, and doing the conversions inline produced a run of
+        // Float-to-Double errors at every site instead of one.
+        let lower = Double(range.lowerBound)
+        let upper = Double(range.upperBound)
+        let low = log10(max(lower, 0.0001))
+        let high = log10(max(upper, 0.0001))
         let value = pow(10, low + fraction * (high - low))
 
         switch self {
@@ -353,8 +359,7 @@ enum ProParameter: String, CaseIterable, Identifiable {
         case .exposure:
             // Linear, not logarithmic: EV is already a linear quantity and applying a log
             // curve to it would make +2 stops as easy to reach as +0.2.
-            model.setManual(exposureTargetOffset: Float(range.lowerBound
-                + fraction * Double(range.upperBound - range.lowerBound)))
+            model.setManual(exposureTargetOffset: Float(lower + fraction * (upper - lower)))
         case .focus, .whiteBalance, .raw:
             break
         }
@@ -362,25 +367,27 @@ enum ProParameter: String, CaseIterable, Identifiable {
 
     /// One detent, for the accessibility increment action and for keyboard use.
     func step(_ model: CameraViewModel, by direction: AccessibilityAdjustmentDirection) {
-        let delta = direction == .increment ? 1.0 : -1.0
+        // A `Float`, because every range and every value it is applied to is one. The
+        // first version made this a Double and needed a cast at each of six sites.
+        let delta: Float = direction == .increment ? 1 : -1
         switch self {
         case .iso:
             if let range = model.proCapabilities.isoRange {
                 let base = model.manual.iso ?? range.lowerBound
                 // A third of a stop, which is the smallest change worth hearing.
-                model.setManual(iso: min(max(base * pow(2, delta / 3), range.lowerBound),
+                model.setManual(iso: min(max(base * powf(2, delta / 3), range.lowerBound),
                                           range.upperBound))
             }
         case .shutter:
             if let range = model.proCapabilities.shutterRange {
                 let base = model.manual.shutterSeconds ?? range.upperBound
-                model.setManual(shutterSeconds: min(max(base * pow(2, delta), range.lowerBound),
+                model.setManual(shutterSeconds: min(max(base * powf(2, delta), range.lowerBound),
                                                    range.upperBound))
             }
         case .exposure:
             if let range = model.proCapabilities.exposureCompensationRange {
                 let base = model.manual.exposureTargetOffset
-                model.setManual(exposureTargetOffset: min(max(base + Float(delta) / 3,
+                model.setManual(exposureTargetOffset: min(max(base + delta / 3,
                                                               range.lowerBound),
                                                           range.upperBound))
             }

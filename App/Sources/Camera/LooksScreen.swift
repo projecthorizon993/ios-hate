@@ -17,7 +17,11 @@ struct LooksScreen: View {
 
     /// Thumbnail per look. Absent until the first render, so the strip shows placeholders
     /// rather than nothing.
-    @State private var thumbnails: [Look: Image] = [:]
+    ///
+    /// Stored as `UIImage` rather than `Image` because that is what the thumbnailer hands
+    /// back. Converting at the boundary keeps the async hop from crossing a `Sendable`
+    /// boundary with a SwiftUI view value in it.
+    @State private var thumbnails: [Look: UIImage] = [:]
     /// A long press is a hold, not a toggle, and it has to be released when the finger
     /// leaves the screen as well as when it lifts.
     @State private var comparingLook: Look?
@@ -60,10 +64,10 @@ struct LooksScreen: View {
     private func carouselTile(look: Look?, title: String) -> some View {
         let isSelected = look == nil ? model.settings.look == nil : model.settings.look?.id == look?.id
         let isComparing = comparingLook?.id == look?.id
-        let thumbnail = look.flatMap { thumbnails[$0] } ?? Image(uiImage: LookThumbnailer.placeholder())
+        let rendered = look.flatMap { thumbnails[$0] } ?? LookThumbnailer.placeholder()
 
         return VStack(spacing: Theme.Space.xs) {
-            thumbnail
+            rendered
                 .resizable()
                 .aspectRatio(1, contentMode: .fill)
                 .frame(width: LookThumbnailer.size, height: LookThumbnailer.size)
