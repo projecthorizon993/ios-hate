@@ -1,3 +1,5 @@
+> **RETIRED.** Superseded by docs/HANDOFF.md, which is the entry point. Kept only as a record of what the parallel-agent approach was and why it was dropped. Do not work from this file.
+
 # LumaFrame — Multi-agent orchestration
 
 How work is split across simultaneous coding agents, and how it comes back.

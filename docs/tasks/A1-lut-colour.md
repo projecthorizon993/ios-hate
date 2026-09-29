@@ -1,3 +1,5 @@
+> **RETIRED.** Superseded by docs/HANDOFF.md, which is the entry point. Kept only as a record of what the parallel-agent approach was and why it was dropped. Do not work from this file.
+
 # A1 — LUT colour management (defect 1)
 
 **Priority: highest in this wave.** This corrupts the output of every photo with a look

@@ -1,3 +1,5 @@
+> **RETIRED.** Superseded by docs/HANDOFF.md, which is the entry point. Kept only as a record of what the parallel-agent approach was and why it was dropped. Do not work from this file.
+
 # A2 — Manual exposure, composite devices, photo quality (defects 2 + 3)
 
 **The largest task in the wave and the one with the most unknowns.** Start it first.
