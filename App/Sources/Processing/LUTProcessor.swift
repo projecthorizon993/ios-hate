@@ -173,7 +173,19 @@ struct LUTProcessor {
         return "\(min)…\(max)"
     }
 
+    /// Renders a domain value for a log line and an error message.
+    ///
+    /// `Int(_: Float)` **traps** on a value that overflows `Int` or is not finite, and
+    /// `CubeLUTParser` range-checks sample data but not `DOMAIN_MIN` / `DOMAIN_MAX` — a
+    /// `.cube` declaring `DOMAIN_MAX 1e40 1e40 1e40` parses cleanly and would then reach
+    /// here, on the refusal path, and kill the app. An import must never be able to take
+    /// the camera down, so nothing is converted unless the conversion is known to be safe
+    /// and the fallback is the original value.
     private static func shortest(_ value: Float) -> String {
-        value == value.rounded() ? String(Int(value)) : String(value)
+        guard value.isFinite else { return String(value) }
+        guard value.magnitude <= 9_007_199_254_740_992 else { return String(value) }
+        return value == value.rounded() ? String(Int(value)) : String(value)
     }
+}
+
 }
