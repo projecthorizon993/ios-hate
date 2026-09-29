@@ -144,12 +144,7 @@ function relativeToRoot(path) {
 
 // --- Compose --------------------------------------------------------------
 
-const banner = (part) =>
-  [
-    "",
-    `// MARK: - ${part.key} (was ${part.path})`,
-    ""
-  ].join("\n");
+const banner = (part) => `// MARK: - ${part.key} (was ${part.path})`;
 
 const header = [
   "// " + title,
@@ -162,11 +157,13 @@ const header = [
   .filter((line) => line !== null)
   .join("\n");
 
-const body = parts
-  .map((part) => `${banner(part)}${part.body}`)
-  .join("\n\n");
+const body = parts.map((part) => `${banner(part)}\n${part.body}`).join("\n\n");
 
-const output = [header, allImports.join("\n"), body].join("\n").replace(/\n{3,}/g, "\n\n") + "\n";
+// Sections are joined with exactly one blank line, and nothing is collapsed
+// afterwards. A blanket `replace(/\n{3,}/g, ...)` would also rewrite blank lines
+// inside a multi-line string literal, which is a silent content change in exactly the
+// files that are supposed to be untouched.
+const output = `${header}\n\n${allImports.join("\n")}\n\n${body}\n`;
 
 if (findings.length > 0) {
   console.error("error: private members are used from outside the merge set:");
