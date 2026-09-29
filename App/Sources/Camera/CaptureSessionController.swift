@@ -240,7 +240,9 @@ final class CaptureSessionController: NSObject {
         // A previous configuration is always removed before a new one is added, so
         // flipping the camera cannot accumulate inputs and outputs.
         for output in self.extraOutputs { session.removeOutput(output) }
-        if let photoOutput { session.removeOutput(photoOutput) }
+        // `self.photoOutput` spelled out: the parameter below shadows the property, and
+        // that shorthand was reading the non-optional parameter.
+        if let previous = self.photoOutput { session.removeOutput(previous) }
         if let videoInput { session.removeInput(videoInput) }
         self.extraOutputs = []
         self.photoOutput = nil
@@ -297,7 +299,7 @@ final class CaptureSessionController: NSObject {
                 // session carried on, and the app reported itself ready. An output the
                 // session will not take cannot be replaced by another one, so continuing
                 // only hides the failure until something downstream asks for it.
-                return .failure(CameraError.outputRejected(type(of: output)))
+                return .failure(CameraError.outputRejected(String(describing: type(of: output))))
             }
             session.addOutput(output)
             self.extraOutputs.append(output)
