@@ -187,5 +187,3 @@ struct LUTProcessor {
         return value == value.rounded() ? String(Int(value)) : String(value)
     }
 }
-
-}
