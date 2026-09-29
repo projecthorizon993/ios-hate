@@ -90,7 +90,10 @@ struct ProChipBar: View {
 /// A docked dial has no room for a parameter picker, and a picker it cannot fit is worse
 /// than no picker. So the chip decides, and the dial reads it from here.
 private struct ProParameterOverrideKey: EnvironmentKey {
-    static let defaultValue: ProParameter?
+    // `EnvironmentKey` requires a computed `defaultValue`, not a stored constant, and
+    // `nil` is the right one: nothing has said which parameter to show, so the dial uses
+    // its own picker.
+    static var defaultValue: ProParameter? { nil }
 }
 
 extension EnvironmentValues {
