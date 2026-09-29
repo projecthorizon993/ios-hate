@@ -38,9 +38,9 @@ These exist because the previous approach broke them. Follow them literally.
 | | |
 | --- | --- |
 | Repo | `D:\project\app`, branch `main` |
-| `main` HEAD | `0cd1eab` |
+| `main` | the tip. This file is committed on it, so read the state from the tables below rather than from a hash, which is always one commit stale. |
 | Target | iOS 18.0, Swift 5.9, iPhone only (`TARGETED_DEVICE_FAMILY = 1`), portrait only |
-| Sources | 32 Swift files under `App/Sources`, 4 test files under `App/Tests` |
+| Sources | 28 Swift files under `App/Sources`, 4 under `App/Tests` |
 | Third-party deps | **none** — Apple frameworks only |
 | CI | `.github/workflows/ios.yml`: unit tests + unsigned IPA, on `macos-15` |
 | Android | a separate branch, `android-step0`. Not your problem. |

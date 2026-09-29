@@ -1,4 +1,4 @@
-> **RETIRED.** Superseded by docs/HANDOFF.md, which is the entry point. Kept only as a record of what the parallel-agent approach was and why it was dropped. Do not work from this file.
+> **RETIRED.** Superseded by `docs/HANDOFF.md`, which is the entry point. Kept only as a record of what the parallel-agent approach was and why it was dropped. Do not work from this file.
 
 # A4 — Looks and Storage consolidation
 
