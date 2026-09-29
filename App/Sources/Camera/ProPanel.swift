@@ -1,4 +1,14 @@
+// The Pro and Looks control surface.
+//
+// ProDial owns the ruler dial and the ProParameter table; the chip bar, the tone panel and the looks carousel are the same surface reached from a different mode.
+//
+// Merged mechanically by scripts/consolidate.mjs. Declarations were moved whole and
+// nothing was edited; see the commit message for the reasoning.
+
 import SwiftUI
+
+// MARK: - dial (was App/Sources/Camera/ProDial.swift)
+
 
 /// Step 4's pro dial: one parameter at a time, ruler style, with an AUTO chip per
 /// parameter.
@@ -460,4 +470,454 @@ private func angleFraction(_ point: CGPoint, in size: CGSize, centre: CGPoint) -
     if degrees > 135 { shifted = degrees - 360 }
     let fraction = (shifted + 135) / 270
     return min(max(fraction, 0), 1)
+}
+
+// MARK: - chips (was App/Sources/Camera/ProChipBar.swift)
+
+
+/// The Pro mode's contextual controls: a row of chips showing the current value, which
+/// expand in place into their dial.
+///
+/// This is a bottom-stack control, not a screen. The user is adjusting a parameter *while
+/// looking at the viewfinder*, and the point of a pro control is watching the value change
+/// as you turn it — which a full-screen sheet prevents, because the sheet covers the
+/// preview. So the panel that opens covers only the lower part of the viewfinder and the
+/// camera keeps running behind it.
+///
+/// A chip shows the value, not the parameter name. A row of "ISO / Shutter / EV" tells the
+/// user what exists; a row of "100 / 1/120 / +0.3" tells them what the camera is doing. The
+/// name is the accessibility label and the hint, not the pixels.
+struct ProChipBar: View {
+
+    @ObservedObject var model: CameraViewModel
+    @Binding var expanded: Bool
+
+    /// Which parameter's dial is docked. Nil means collapsed.
+    ///
+    /// Published upward rather than kept private, because the panel itself is drawn by
+    /// `CameraScreen.dockedPanel` over the viewfinder. This type is only the chips; it
+    /// must not also draw the dial, or the same control appears twice.
+    @Binding var open: ProParameter?
+
+    private var supported: [ProParameter] {
+        ProParameter.supported(by: model.proCapabilities)
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Theme.Space.xs) {
+                ForEach(supported, id: \.self) { parameter in
+                    chip(for: parameter)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .frame(height: Theme.Space.xl + Theme.Space.s)
+    }
+
+    private func chip(for parameter: ProParameter) -> some View {
+        let value = parameter.readout(model.manual)
+        let isOpen = open == parameter
+        let isAutomatic = parameter.isAutomatic(model.manual)
+
+        return Button {
+            Haptics.selection()
+            // Tapping the open chip closes it. A chip that only opens is a trap when the
+            // panel covers the thing you were aiming at.
+            if isOpen {
+                open = nil
+                expanded = false
+            } else {
+                open = parameter
+                expanded = true
+            }
+        } label: {
+            VStack(spacing: 0) {
+                Text(parameter.title)
+                    .font(.system(size: Theme.TypeSize.caption))
+                    .foregroundStyle(isOpen
+                                     ? Theme.ColorToken.surfaceBase
+                                     : Theme.ColorToken.textDisabled)
+                Text(value)
+                    .font(.system(size: Theme.TypeSize.label, design: .monospaced))
+                    .foregroundStyle(isOpen
+                                     ? Theme.ColorToken.surfaceBase
+                                     : (isAutomatic
+                                        ? Theme.ColorToken.textSecondary
+                                        : Theme.ColorToken.textPrimary))
+            }
+            .padding(.horizontal, Theme.Space.s)
+            .frame(minHeight: Theme.Space.xl + Theme.Space.s)
+            .background(isOpen ? Theme.ColorToken.accentActive : Theme.ColorToken.surfaceRaised)
+            .clipShape(Capsule())
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(parameter.title)
+        .accessibilityValue(value)
+        .accessibilityHint(isOpen ? "Collapses the control" : "Expands the control in place")
+        .accessibilityAddTraits(isOpen ? [.isSelected, .isButton] : .isButton)
+    }
+}
+
+/// Lets the docked dial show the parameter whose chip opened it, instead of the one it
+/// last remembered.
+///
+/// A docked dial has no room for a parameter picker, and a picker it cannot fit is worse
+/// than no picker. So the chip decides, and the dial reads it from here.
+private struct ProParameterOverrideKey: EnvironmentKey {
+    // `EnvironmentKey` requires a computed `defaultValue`, not a stored constant, and
+    // `nil` is the right one: nothing has said which parameter to show, so the dial uses
+    // its own picker.
+    static var defaultValue: ProParameter? { nil }
+}
+
+extension EnvironmentValues {
+    var proParameterOverride: ProParameter? {
+        get { self[ProParameterOverrideKey.self] }
+        set { self[ProParameterOverrideKey.self] = newValue }
+    }
+}
+
+// MARK: - tone (was App/Sources/Camera/TonePanel.swift)
+
+
+/// The tone controls, docked in the bottom stack behind a small "Tune" chip.
+///
+/// Separate from the looks carousel on purpose. A look is chosen by looking and by tapping
+/// — a fast, glanceable decision. Tone is exposure, contrast, saturation, lift and warmth:
+/// a slower adjustment that is dialled in and then left alone. Putting five sliders in the
+/// same strip as the carousel would make the fast thing slow, which is the same mistake as
+/// making the whole panel full screen.
+struct TonePanel: View {
+
+    @ObservedObject var model: CameraViewModel
+    @Binding var expanded: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            header
+            Text("Adjustments apply only to what you change, so the camera's own white "
+                 + "balance keeps working when you leave these alone.")
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(Theme.ColorToken.textDisabled)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(ToneField.allCases, id: \.self) { field in
+                slider(field)
+            }
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.s)
+        .background(Theme.ColorToken.surfaceBase.opacity(0.96))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Tone")
+                .font(.system(size: Theme.TypeSize.label))
+                .foregroundStyle(Theme.ColorToken.textSecondary)
+            Spacer()
+            if model.settings.tone != nil {
+                Button("Reset") { model.setTone(.neutral) }
+                    .font(.system(size: Theme.TypeSize.caption))
+                    .foregroundStyle(Theme.ColorToken.accentActive)
+                    .accessibilityLabel("Reset tone adjustments")
+            }
+        }
+    }
+
+    private func slider(_ field: ToneField) -> some View {
+        let value = field.value(in: model.settings.tone ?? .neutral)
+        let decimals = field.range.upperBound > 100 ? 0 : 2
+        return HStack(spacing: Theme.Space.s) {
+            Text(field.rawValue)
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(Theme.ColorToken.textDisabled)
+                .frame(width: 74, alignment: .leading)
+
+            Slider(value: Binding(
+                get: { field.value(in: model.settings.tone ?? .neutral) },
+                set: { model.setTone(field.apply($0, to: model.settings.tone ?? .neutral)) }),
+                in: field.range)
+                .tint(Theme.ColorToken.accentActive)
+                .accessibilityLabel(field.rawValue)
+                .accessibilityValue(ReportFormat.number(Double(value), decimals: decimals))
+
+            Text(ReportFormat.number(Double(value), decimals: decimals))
+                .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                .foregroundStyle(Theme.ColorToken.textSecondary)
+                .frame(width: 36, alignment: .trailing)
+        }
+    }
+
+    /// One of the tone controls, so reading and writing a field is a switch on a type
+    /// rather than a switch on a display string.
+    ///
+    /// The string version of this existed first and it was wrong: the label a user sees and
+    /// the field the code writes were two separate switches that had to agree, and renaming
+    /// a label would have silently zeroed the control.
+    private enum ToneField: String, CaseIterable {
+        case exposure = "Exposure"
+        case contrast = "Contrast"
+        case saturation = "Saturation"
+        case lift = "Lifted shadows"
+        case temperature = "Warmth"
+
+        var range: ClosedRange<Float> {
+            switch self {
+            case .exposure, .lift: return 0...1
+            case .contrast, .saturation: return -1...1
+            case .temperature: return -1500...1500
+            }
+        }
+
+        func value(in tone: ToneCurve) -> Float {
+            switch self {
+            case .exposure: return tone.exposure
+            case .contrast: return tone.contrast
+            case .saturation: return tone.saturation
+            case .lift: return tone.lift
+            case .temperature: return tone.temperatureOffset
+            }
+        }
+
+        func apply(_ value: Float, to tone: ToneCurve) -> ToneCurve {
+            var copy = tone
+            switch self {
+            case .exposure: copy.exposure = value
+            case .contrast: copy.contrast = value
+            case .saturation: copy.saturation = value
+            case .lift: copy.lift = value
+            case .temperature: copy.temperatureOffset = value
+            }
+            return copy
+        }
+    }
+}
+
+// MARK: - looks (was App/Sources/Camera/LooksChipBar.swift)
+
+
+/// The Looks mode's contextual controls: one compact chip, which expands in place into
+/// the style carousel and the strength slider.
+///
+/// Same reasoning as `ProChipBar`: this belongs in the bottom stack, not in a sheet. A
+/// look is chosen by looking, and a sheet that covers the viewfinder means choosing
+/// without seeing. The panel covers the lower part of the viewfinder only, and the
+/// processed preview keeps running behind it.
+struct LooksChipBar: View {
+
+    @ObservedObject var model: CameraViewModel
+    @Binding var expanded: Bool
+
+    /// The chip's label. The look's name when there is one, "Original" when there is not -
+    /// which is a real choice the user makes, not an absence.
+    private var currentLabel: String {
+        model.settings.look?.name ?? "Original"
+    }
+
+    private var isActive: Bool { model.settings.look != nil }
+
+    var body: some View {
+        // The chip only. The carousel is drawn by `CameraScreen.dockedPanel` over the
+        // viewfinder, so this type must not also draw it — the same control appearing
+        // twice is worse than one appearing in the wrong place.
+        chip
+    }
+
+    private var chip: some View {
+        Button {
+            Haptics.selection()
+            expanded.toggle()
+        } label: {
+            HStack(spacing: Theme.Space.xs) {
+                if isActive {
+                    Circle()
+                        .fill(Theme.ColorToken.accentActive)
+                        .frame(width: 6, height: 6)
+                }
+                Text(currentLabel)
+                    .font(.system(size: Theme.TypeSize.label))
+                    .foregroundStyle(isActive
+                                     ? Theme.ColorToken.textPrimary
+                                     : Theme.ColorToken.textSecondary)
+                Image(systemName: expanded ? "chevron.down" : "chevron.up")
+                    .font(.system(size: Theme.TypeSize.caption))
+                    .foregroundStyle(Theme.ColorToken.textDisabled)
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .frame(minHeight: Theme.Space.xl + Theme.Space.s)
+            .background(Theme.ColorToken.surfaceRaised)
+            .clipShape(Capsule())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Look, \(currentLabel)")
+        .accessibilityValue(isActive
+                            ? "\(Int(model.settings.lookIntensity * 100)) percent"
+                            : "No look applied")
+        .accessibilityHint(expanded ? "Collapses the looks" : "Expands the looks in place")
+    }
+}
+
+/// The carousel, sized to dock under the chip.
+///
+/// The `ToneField` and slider controls are **not** here. They were in the sheet, and they
+/// are the part of the Looks screen that most needed to be somewhere else: they are for a
+/// longer, less frequent adjustment than a look, and they do not need the viewfinder to
+/// see. They are on a separate, deliberate gesture away.
+struct LooksCarousel: View {
+
+    @ObservedObject var model: CameraViewModel
+    @Binding var expanded: Bool
+
+    /// Thumbnail per look, as `UIImage` because that is what the thumbnailer returns.
+    @State private var thumbnails: [Look: UIImage] = [:]
+    /// A hold, not a toggle, so it has to end when the finger leaves as well as lifts.
+    @State private var previewing: Look?
+
+    var body: some View {
+        VStack(spacing: Theme.Space.s) {
+            strip
+            strength
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.s)
+        .background(Theme.ColorToken.surfaceBase)
+    }
+
+    // MARK: - Strip
+
+    private var strip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Theme.Space.s) {
+                tile(look: nil, title: "Original")
+                ForEach(model.looks) { look in
+                    tile(look: look, title: look.name)
+                }
+            }
+            .padding(.vertical, Theme.Space.xs)
+        }
+        .frame(height: 68)
+    }
+
+    private func tile(look: Look?, title: String) -> some View {
+        let isSelected: Bool = look == nil
+            ? model.settings.look == nil
+            : model.settings.look?.id == look?.id
+        let isPreviewing = previewing?.id == look?.id
+        let image = look.flatMap { thumbnails[$0] } ?? LookThumbnailer.placeholder()
+        return tileBody(image: image, title: title, isSelected: isSelected, isPreviewing: isPreviewing)
+            .scaleEffect(isSelected ? 1.0 : 0.85)
+            .animation(.spring(response: Theme.Motion.mode, dampingFraction: 0.8), value: isSelected)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                Haptics.selection()
+                model.select(look: look)
+                requestThumbnails()
+            }
+            // Hold to preview without applying. Tapping applies, and a hold that also
+            // applied would mean every "let me just look" changed the photo.
+            .onLongPressGesture(minimumDuration: Theme.Motion.tap, maximumDistance: 40) {
+                endPreviewing()
+            } onPressingChanged: { pressing in
+                if pressing { beginPreviewing(look) } else { endPreviewing() }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityValue(isSelected ? "Selected" : "")
+            .accessibilityHint("Double tap to apply. Touch and hold to preview.")
+    }
+
+    private func tileBody(image: UIImage,
+                          title: String,
+                          isSelected: Bool,
+                          isPreviewing: Bool) -> some View {
+        // A ZStack rather than stacked `overlay` calls: `overlay(alignment:)` resolves
+        // against the concrete view type, which is erased behind a `some View` return.
+        let side: CGFloat = 48
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control)
+        let border: Color = isSelected
+            ? Theme.ColorToken.accentActive
+            : Theme.ColorToken.strokeSubtle
+
+        return VStack(spacing: Theme.Space.xxs) {
+            ZStack(alignment: .topTrailing) {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(1, contentMode: .fill)
+                    .frame(width: side, height: side)
+                    .clipShape(shape)
+                    .overlay(shape.stroke(border, lineWidth: isSelected ? 2 : 1))
+                if isPreviewing {
+                    Circle()
+                        .fill(Theme.ColorToken.accentCompare)
+                        .frame(width: 8, height: 8)
+                        .padding(Theme.Space.xxs)
+                }
+            }
+            Text(title)
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(isSelected
+                                 ? Theme.ColorToken.textPrimary
+                                 : Theme.ColorToken.textSecondary)
+                .lineLimit(1)
+                .frame(width: side)
+        }
+    }
+
+    // MARK: - Strength
+
+    @ViewBuilder
+    private var strength: some View {
+        HStack(spacing: Theme.Space.s) {
+            Text("Strength")
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(Theme.ColorToken.textDisabled)
+                .frame(width: 52, alignment: .leading)
+
+            Slider(value: Binding(get: { model.settings.lookIntensity },
+                                  set: { model.setLookIntensity($0) }),
+                   in: 0...1)
+                .tint(Theme.ColorToken.accentActive)
+                .accessibilityLabel("Look strength")
+                .accessibilityValue("\(Int(model.settings.lookIntensity * 100)) percent")
+
+            Text("\(Int(model.settings.lookIntensity * 100))")
+                .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                .foregroundStyle(Theme.ColorToken.textSecondary)
+                .frame(width: 24, alignment: .trailing)
+        }
+        // A strength slider with nothing to be the strength of is a control that does
+        // nothing, so it is absent rather than disabled.
+        .opacity(model.settings.look == nil ? 0.35 : 1)
+        .disabled(model.settings.look == nil)
+        .accessibilityHidden(model.settings.look == nil)
+    }
+
+    // MARK: - Preview and thumbnails
+
+    private func beginPreviewing(_ look: Look?) {
+        previewing = look
+        var temporary = model.settings
+        temporary.look = look
+        if look == nil { temporary.lookIntensity = 0 }
+        model.previewOnly(temporary)
+        Haptics.selection()
+    }
+
+    private func endPreviewing() {
+        guard previewing != nil else { return }
+        previewing = nil
+        model.previewOnly(model.settings)
+    }
+
+    private func requestThumbnails() {
+        guard !model.looks.isEmpty else { return }
+        guard let frame = model.processedPreview.lastStill() else { return }
+        LookThumbnailer.render(looks: model.looks, source: frame, recipe: model.settings) {
+            thumbnails = $0
+        }
+    }
 }
