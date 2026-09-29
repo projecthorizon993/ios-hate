@@ -279,14 +279,33 @@ extension RuntimeCapabilities {
     /// it does not have in its current configuration, and a crash here would be the
     /// sixteenth thing this area has cost.
     mutating func attachingOutput(_ output: AVCapturePhotoOutput) {
+        // Read into locals inside the trap, assign to `self` outside it.
+        //
+        // `LumaFrameSafety.perform` takes an Objective-C block, which Swift treats as
+        // escaping, and an escaping closure cannot capture a `mutating self` in a `mutating`
+        // method — "escaping closure captures mutating 'self' parameter", and the file did
+        // not compile. Reading into local `var`s and writing them out afterwards is legal,
+        // because a local is captured by reference while `inout self` is not capturable at
+        // all.
+        //
+        // The split costs nothing: the property *reads* are the only part that can raise,
+        // and they are all still inside the trap. The assignments cannot raise.
+        var codecs: [String] = []
+        var rawTypes: [String] = []
+        var proRaw = false
+        var dimensions = ""
         let failure = LumaFrameSafety.perform {
-            self.photoCodecs = output.availablePhotoCodecTypes.map { "\($0.rawValue)" }
-            self.rawPixelTypes = output.availableRawPhotoPixelFormatTypes
+            codecs = output.availablePhotoCodecTypes.map { "\($0.rawValue)" }
+            rawTypes = output.availableRawPhotoPixelFormatTypes
                 .map { ReportFormat.fourCC($0) }
-            self.proRawSupported = output.isAppleProRAWSupported
-            self.maxPhotoDimensions = "\(output.maxPhotoDimensions.width)"
+            proRaw = output.isAppleProRAWSupported
+            dimensions = "\(output.maxPhotoDimensions.width)"
                 + "x\(output.maxPhotoDimensions.height)"
         }
+        photoCodecs = codecs
+        rawPixelTypes = rawTypes
+        proRawSupported = proRaw
+        maxPhotoDimensions = dimensions
         if let failure {
             // An empty codec list is what makes a capture report "this camera offers no
             // codec", so it is logged loudly rather than left to be discovered by a user.

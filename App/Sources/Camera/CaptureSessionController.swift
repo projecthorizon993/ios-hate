@@ -554,10 +554,19 @@ final class CaptureSessionController: NSObject {
             AppLog.warn(AppLog.camera, "manual white balance requested but refused; not applied")
             return false
         }
-        // The current gains are what is locked. A UI that let the user dial a Kelvin value
-        // would need the device's `temperatureAndTintValues`, which is a different feature
-        // and not one this task is allowed to add.
-        let gains = device.whiteBalanceGains
+        // `AVCaptureDevice.currentWhiteBalanceGains`, **not** a `device.whiteBalanceGains`
+        // property — there is no such property, and the branch that wrote it had never been
+        // compiled. Apple documents this constant as "a special constant representing the
+        // current white balance setting", and using it is the one value that is always legal:
+        // `isLockingWhiteBalanceWithCustomDeviceGainsSupported` documents that passing any
+        // *other* gains value **throws** when that flag is false, which is what a composite
+        // reports. So a lock with no user-chosen gains locks whatever the device is doing now,
+        // and cannot raise.
+        //
+        // A UI that let the user dial a Kelvin value would go through
+        // `temperatureAndTintValues` and gain the flag above; that is a different feature and
+        // is `docs/PHASES.md` 3.2.
+        let gains = AVCaptureDevice.currentWhiteBalanceGains
         if let failure = LumaFrameSafety.perform({
             device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
         }) {

@@ -693,35 +693,34 @@ final class CameraStep1Tests: XCTestCase {
     /// A composite-like capability set offers no white balance lock, even though
     /// `AVCaptureDevice` answers yes to `isWhiteBalanceModeSupported(.locked)`.
     ///
-    /// Apple documents that a composite device supports the locked white balance *mode* and
-    /// refuses new gains — the same split as focus and lens position, and the reason
-    /// `canLockFocus` asks two questions. There is no separate query for "can the gains
-    /// change", so the honest resolution is to gate the chip on the same `.custom` check the
-    /// rest of the panel uses and to record the residual uncertainty, rather than to leave a
-    /// lock control that cannot be honoured.
+    /// Apple documents composites as refusing new AWB gains, and — contrary to what
+    /// `docs/HANDOFF.md` 0.3 asserted — there *is* a query for that:
+    /// `isLockingWhiteBalanceWithCustomDeviceGainsSupported`. It returns false where
+    /// `setWhiteBalanceModeLocked(with:)` would throw, so the gate is a certain answer
+    /// rather than the `.custom` proxy it started as.
     ///
-    /// This is the assertion A2 was missing. It passes on the parent commit — where
-    /// `canLockWhiteBalance` read the device query alone — only because the fixture now
-    /// builds its capabilities through the same gate.
+    /// All three combinations are asserted, so the gate cannot be accidentally satisfied by
+    /// only one of the two questions.
     func testACompositeLikeCapabilitySetOffersNoWhiteBalanceLock() {
-        // What `probe` records for a composite: the locked *mode* is supported, `.custom`
-        // is not.
-        var compositeLike = ProCapabilities(supportsCustomExposure: false, isCompositeDevice: true)
-        compositeLike.canLockWhiteBalance = ProCapabilities.whiteBalanceLockIsOffered(
-            supportsCustomExposure: false,
-            lockedModeSupported: true)
-        XCTAssertFalse(compositeLike.canLockWhiteBalance,
-                       "a device reporting the locked mode but not .custom must not offer the lock")
-
-        // The converse, so the gate is not simply refusing everything.
-        XCTAssertTrue(ProCapabilities.whiteBalanceLockIsOffered(
-            supportsCustomExposure: true,
-            lockedModeSupported: true))
-
-        // And a device that does not support the locked mode does not get it either.
+        // What `probe` records for a composite: the locked *mode* is supported, locking to
+        // chosen gains is not.
         XCTAssertFalse(ProCapabilities.whiteBalanceLockIsOffered(
-            supportsCustomExposure: true,
-            lockedModeSupported: false))
+            lockedModeSupported: true,
+            customGainsLockSupported: false),
+            "a device that refuses new gains must not offer the lock")
+
+        // Neither half is sufficient on its own.
+        XCTAssertFalse(ProCapabilities.whiteBalanceLockIsOffered(
+            lockedModeSupported: false,
+            customGainsLockSupported: true))
+        XCTAssertFalse(ProCapabilities.whiteBalanceLockIsOffered(
+            lockedModeSupported: false,
+            customGainsLockSupported: false))
+
+        // And a device that supports both does get it.
+        XCTAssertTrue(ProCapabilities.whiteBalanceLockIsOffered(
+            lockedModeSupported: true,
+            customGainsLockSupported: true))
     }
 
     /// The same gate has to reach the panel. `ProParameter.supported(by:)` is what the Pro
