@@ -21,6 +21,9 @@ struct CameraScreen: View {
     @State private var isShowingReport = false
     @State private var isShowingLooks = false
     @State private var isShowingPro = false
+    @State private var isShowingTone = false
+    /// Which Pro parameter's dial is docked, or nil when collapsed.
+    @State private var openProParameter: ProParameter?
 
     /// Derived, never stored twice. Rotating the device or flipping the camera both
     /// change it, and there is only one place the angle is computed.
@@ -31,6 +34,12 @@ struct CameraScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             viewfinder
+            // The docked panel sits **over the lower part of the viewfinder**, not over
+            // the whole screen and not in a sheet. It is the only thing that covers the
+            // camera, and it covers as little as possible, so the user can still see the
+            // top of the frame and the effect of what they are changing while they change
+            // it.
+            dockedPanel
             bottomStack
         }
         .background(Theme.ColorToken.surfaceBase)
@@ -68,14 +77,14 @@ struct CameraScreen: View {
         .sheet(isPresented: $isShowingReport, onDismiss: { model.resumeAfterDiagnostics() }) {
             ReportScreen()
         }
-        // Steps 3 and 4. Presented over the viewfinder, and deliberately not routed
-        // through the diagnostics handover — that handover exists because the report opens
-        // a second capture session, and neither of these does.
-        .sheet(isPresented: $isShowingLooks) {
-            NavigationStack { LooksScreen(model: model) }
-        }
-        .sheet(isPresented: $isShowingPro) {
-            NavigationStack { ProScreen(model: model) }
+        // Steps 3 and 4 are **not** sheets. They dock under their chip in the bottom stack
+        // and cover only the lower part of the viewfinder, because a look is chosen by
+        // looking and a pro value is dialled while watching the viewfinder change. A sheet
+        // covers the camera, which is the thing being adjusted. Both also stay out of the
+        // diagnostics camera handover — that exists because the report opens a second
+        // capture session, and neither of these does.
+        .sheet(isPresented: $isShowingReport, onDismiss: { model.resumeAfterDiagnostics() }) {
+            ReportScreen()
         }
     }
 
@@ -277,10 +286,57 @@ struct CameraScreen: View {
         .background(Theme.ColorToken.surfaceBase)
     }
 
-    /// Mode-aware controls. Step 1's only one is flash, and it disappears entirely on a
-    /// device without a flash rather than showing a dead button.
+    /// Mode-aware controls, in the bottom stack where the spec puts them.
+    ///
+    /// In Pro this is a row of **chips showing the current value**, each of which expands
+    /// in place into its dial. It is not a screen and not a sheet: the user is adjusting a
+    /// parameter while looking at the viewfinder, and a full-screen sheet takes away the
+    /// thing being adjusted and the thing the adjustment is for. The panel that appears
+    /// covers only the lower part of the viewfinder and the preview keeps running behind
+    /// it, because the point of a pro control is watching the value change.
     @ViewBuilder
     private var contextualRow: some View {
+        switch model.mode {
+        case .auto:
+            autoControls
+        case .pro:
+            ProChipBar(model: model,
+                       expanded: $isShowingPro,
+                       open: $openProParameter)
+        case .looks:
+            HStack(spacing: Theme.Space.s) {
+                LooksChipBar(model: model, expanded: $isShowingLooks)
+                toneChip
+            }
+        }
+    }
+
+    /// Opens the tone panel in the same docked slot the carousel uses, so only one of the
+    /// two is ever open. Tone is a separate gesture from choosing a look because it is a
+    /// different kind of adjustment, not because it needs a different screen.
+    private var toneChip: some View {
+        Button {
+            Haptics.selection()
+            isShowingLooks = false
+            isShowingTone.toggle()
+        } label: {
+            Text("Tune")
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(isShowingTone
+                                 ? Theme.ColorToken.surfaceBase
+                                 : Theme.ColorToken.textSecondary)
+                .padding(.horizontal, Theme.Space.s)
+                .frame(minHeight: Theme.Space.xl + Theme.Space.s)
+                .background(isShowingTone
+                            ? Theme.ColorToken.accentActive
+                            : Theme.ColorToken.surfaceRaised)
+                .clipShape(Capsule())
+        }
+        .accessibilityLabel("Tone adjustments")
+        .accessibilityHint(isShowingTone ? "Collapses the tone controls" : "Expands the tone controls")
+    }
+
+    private var autoControls: some View {
         HStack(spacing: Theme.Space.s) {
             if model.capabilities.flash.isAvailable {
                 Button {
@@ -308,25 +364,53 @@ struct CameraScreen: View {
         .frame(minHeight: Theme.Space.xs)
     }
 
+    /// The open Pro or Looks panel, overlaid on the lower part of the viewfinder.
+    ///
+    /// A plain overlay rather than a `sheet` for the reason above. It has no background of
+    /// its own, so the viewfinder reads through above it, and the panel's own
+    /// `surfaceBase` background gives the controls an opaque backing only where they are.
+    @ViewBuilder
+    private var dockedPanel: some View {
+        if model.mode == .pro, let open = openProParameter {
+            ProDial(model: model, expanded: $isShowingPro)
+                // The chip chose the parameter, so the docked dial has no picker and is
+                // told what to show.
+                .environment(\.proParameterOverride, open)
+                .background(Theme.ColorToken.surfaceBase.opacity(0.96))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if model.mode == .looks, isShowingLooks {
+            LooksCarousel(model: model, expanded: $isShowingLooks)
+                .background(Theme.ColorToken.surfaceBase.opacity(0.96))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if model.mode == .looks, isShowingTone {
+            TonePanel(model: model, expanded: $isShowingTone)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
     private var modeSwitcher: some View {
         HStack(spacing: Theme.Space.s) {
             ForEach(CameraMode.allCases, id: \.self) { mode in
                 ModeButton(mode: mode, isSelected: model.mode == mode) {
                     Haptics.selection()
-                    switch mode {
-                    case .auto:
-                        // Auto is the base state: the recipe stays exactly as the user left
-                        // it, because a look the user dialled in in Looks mode is a
-                        // preference, not something leaving Looks mode should undo.
-                        model.setMode(.auto)
-                    case .looks:
-                        isShowingLooks = true
-                    case .pro:
-                        isShowingPro = true
-                    }
+                    // Switching mode collapses any open panel. Leaving a dial open behind
+                    // a different mode's chips would be showing a control for something
+                    // that is no longer being adjusted.
+                    collapsePanels()
+                    // Auto is the base state: the recipe stays exactly as the user left
+                    // it, because a look dialled in in Looks mode is a preference, not
+                    // something leaving the mode should undo.
+                    model.setMode(mode)
                 }
             }
         }
+    }
+
+    private func collapsePanels() {
+        isShowingPro = false
+        isShowingLooks = false
+        isShowingTone = false
+        openProParameter = nil
     }
 
     private var shutterRow: some View {

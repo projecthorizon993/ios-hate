@@ -129,7 +129,17 @@ final class CameraViewModel: ObservableObject {
         capabilities.attachBackCameras(CaptureSessionController.discoverBackCameras())
         self.capabilities = capabilities
 
-        sessionController.configure(facing: facing, extraOutputs: [photo.output, meter.output]) { [weak self] result in
+        // The processed preview's video output is attached **unconditionally**, not when
+        // processing starts.
+        //
+        // It used to be added only when a look was active, which meant the processed
+        // viewfinder received no frames and rendered black — the output was never in the
+        // session. Adding an output is a session reconfiguration, and reconfiguring on
+        // every look toggle would restart the preview and be visible as a jump, which the
+        // design spec forbids. So the output is always attached and the frames are simply
+        // not used when the recipe is identity.
+        sessionController.configure(facing: facing,
+                                    extraOutputs: [photo.output, meter.output, processedPreview.output]) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let configuration):

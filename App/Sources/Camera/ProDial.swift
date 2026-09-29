@@ -16,16 +16,32 @@ struct ProDial: View {
 
     @ObservedObject var model: CameraViewModel
 
-    /// Which parameter the dial is showing. Exactly one, per the spec.
+    /// Set when the dial is docked under a chip in the bottom stack. The chip has already
+    /// chosen the parameter, so the dial shows that one and omits its picker — a picker
+    /// there would take vertical space the docked panel does not have, and a control that
+    /// cannot fit is worse than no control.
+    var expanded: Binding<Bool>?
+
+    /// The parameter this dial is showing, when something has told it.
+    @Environment(\.proParameterOverride) private var override
+
+    /// Which parameter the dial is showing when nothing has told it. Exactly one, per the
+    /// spec.
     @State private var selected: ProParameter = .iso
 
+    private var parameter: ProParameter { override ?? selected }
+
     var body: some View {
-        VStack(spacing: Theme.Space.m) {
-            parameterPicker
-            dial
+        VStack(spacing: Theme.Space.s) {
+            if override == nil {
+                parameterPicker
+            }
+            readout
+            dialFace
             autoChip
         }
-        .padding(Theme.Space.l)
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.m)
     }
 
     // MARK: - Picker
@@ -62,51 +78,29 @@ struct ProDial: View {
         }
     }
 
-    // MARK: - Dial
+    // MARK: - Readout
 
-    private var dial: some View {
-        VStack(spacing: Theme.Space.s) {
-            Text(selected.readout(model.manual))
+    /// The live value, above the dial. `type.value` per the spec: the parameter being
+    /// changed is the one thing allowed to be larger than everything else on screen.
+    private var readout: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            Text(parameter.title)
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(Theme.ColorToken.textDisabled)
+            Text(parameter.readout(model.manual))
                 .font(.system(size: Theme.TypeSize.title, design: .monospaced))
                 .foregroundStyle(Theme.ColorToken.textPrimary)
                 .contentTransition(.numericText())
                 .animation(.easeOut(duration: Theme.Motion.tap), value: model.manual)
-
-            GeometryReader { geometry in
-                let side = min(geometry.size.width, Theme.Space.huge * 4)
-                DialTicks(parameter: selected,
-                          capabilities: model.proCapabilities,
-                          value: selected.value(model.manual),
-                          size: side)
-                    .frame(width: side, height: side)
-                    .contentShape(Circle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                let fraction = angleFraction(value.location,
-                                                             in: geometry.size,
-                                                             centre: CGPoint(x: geometry.size.width / 2,
-                                                                             y: geometry.size.height / 2))
-                                selected.apply(fraction: fraction, to: model)
-                            }
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(height: 200)
-            .accessibilityElement()
-            .accessibilityLabel(selected.title)
-            .accessibilityValue(selected.readout(model.manual))
-            .accessibilityAdjustableAction { direction in
-                selected.step(model, by: direction)
-            }
         }
+        .frame(maxWidth: .infinity)
     }
 
     /// The AUTO chip, per the spec: it returns **this** parameter to automatic without
     /// touching the others, which is the reason it is a chip and not a mode.
     @ViewBuilder
     private var autoChip: some View {
-        if selected.isAutomatic(model.manual) {
+        if parameter.isAutomatic(model.manual) {
             Text("AUTO")
                 .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
                 .tracking(0.6)
@@ -115,11 +109,11 @@ struct ProDial: View {
                 .frame(height: Theme.Space.xl)
                 .background(Theme.ColorToken.surfaceRaised)
                 .clipShape(Capsule())
-                .accessibilityLabel("\(selected.title) is automatic")
+                .accessibilityLabel("\(parameter.title) is automatic")
         } else {
             Button {
                 Haptics.selection()
-                selected.setAutomatic(true, on: model)
+                parameter.setAutomatic(true, on: model)
             } label: {
                 Text("AUTO")
                     .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
@@ -130,7 +124,46 @@ struct ProDial: View {
                     .background(Theme.ColorToken.surfaceRaised)
                     .clipShape(Capsule())
             }
-            .accessibilityLabel("Return \(selected.title) to automatic")
+            .accessibilityLabel("Return \(parameter.title) to automatic")
+        }
+    }
+
+    // MARK: - Face
+
+    /// The draggable face.
+    ///
+    /// Sized to a fixed height rather than filling the width, because a dial that grows
+    /// with the screen is a dial that changes size between devices, and a pro control
+    /// whose target moves is a pro control that is hard to learn. 132 pt is about the
+    /// width of a fingertip's comfortable arc.
+    private var dialFace: some View {
+        let side: CGFloat = 132
+        return ZStack {
+            DialTicks(parameter: parameter,
+                      capabilities: model.proCapabilities,
+                      value: parameter.value(model.manual),
+                      size: side)
+                .frame(width: side, height: side)
+                .contentShape(Circle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { drag in
+                            let centre = CGPoint(x: side / 2, y: side / 2)
+                            let fraction = angleFraction(drag.location,
+                                                         in: CGSize(width: side, height: side),
+                                                         centre: centre)
+                            parameter.apply(fraction: fraction, to: model)
+                        }
+                )
+        }
+        .frame(height: side)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement()
+        .accessibilityLabel(parameter.title)
+        .accessibilityValue(parameter.readout(model.manual))
+        .accessibilityHint("Swipe up or down to change in steps")
+        .accessibilityAdjustableAction { direction in
+            parameter.step(model, by: direction)
         }
     }
 }
