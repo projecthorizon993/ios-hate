@@ -169,7 +169,8 @@ private struct DialTicks: View {
                 .fill(Theme.ColorToken.accentActive)
                 .frame(width: 8, height: 8)
                 .offset(y: -(size / 2 - 6))
-                .rotationEffect(.degrees(angle(forCurrentValue))
+                .rotationEffect(.degrees(value.map(angleForCurrentValue) ?? Self.start))
+                .opacity(value == nil ? 0.25 : 1)
             Text(parameter.symbol)
                 .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
                 .foregroundStyle(Theme.ColorToken.textDisabled)
@@ -177,7 +178,7 @@ private struct DialTicks: View {
         .frame(width: size, height: size)
     }
 
-    private struct Tick {
+    private struct Tick: Hashable {
         let angle: Double
         let major: Bool
     }
@@ -203,13 +204,16 @@ private struct DialTicks: View {
 
     private var minimumPositive: Float { 0.0001 }
 
-    private func angle(forCurrentValue value: Float?) -> Double {
+    private func angleForCurrentValue(_ current: Float) -> Double {
         guard let value, let range = parameter.range(capabilities) else { return Self.start }
         let low = log10(max(range.lowerBound, minimumPositive))
         let high = log10(max(range.upperBound, minimumPositive))
         let span = max(0.0001, high - low)
-        let fraction = (log10(max(value, minimumPositive)) - low) / span
-        return Self.start + Self.sweep * min(max(fraction, 0), 1)
+        // `min`/`max` over a Float promotes to Double through the log10 result, so the
+        // clamping bounds are spelled as Double literals. Left implicit this fails to
+        // compile with a Float-to-Double error that points nowhere near the real issue.
+        let fraction = (log10(Double(max(value, minimumPositive))) - low) / span
+        return Self.start + Self.sweep * min(max(fraction, 0.0), 1.0)
     }
 }
 
@@ -220,6 +224,12 @@ private struct DialTicks: View {
 /// One type per parameter rather than a dictionary of closures, so the range, the readout,
 /// the automatic state and the drag behaviour for a parameter are all in one place and
 /// cannot drift apart.
+///
+/// `@MainActor` because every mutating method here calls a `CameraViewModel` mutator, and
+/// the view model is main-actor isolated. The pure queries — `range`, `value`, `readout` —
+/// are isolated too rather than being individually annotated, because a type that is
+/// sometimes isolated is a type where the next method added will be missed.
+@MainActor
 enum ProParameter: String, CaseIterable, Identifiable {
     case iso
     case shutter
@@ -333,8 +343,8 @@ enum ProParameter: String, CaseIterable, Identifiable {
             if fraction > 0.5 { setAutomatic(false, on: model) }
             return
         }
-        let low = log10(max(range.lowerBound, 0.0001))
-        let high = log10(max(range.upperBound, 0.0001))
+        let low = log10(Double(max(range.lowerBound, 0.0001)))
+        let high = log10(Double(max(range.upperBound, 0.0001)))
         let value = pow(10, low + fraction * (high - low))
 
         switch self {
