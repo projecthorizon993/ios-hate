@@ -107,7 +107,10 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
             minimumFocusDistance: Double(device.minimumFocusDistance),
             flashAvailable: device.isFlashAvailable,
             videoDimensions: Self.videoDimensions(of: device.activeFormat),
+            // `virtualDeviceSwitchOverVideoZoomFactors` is `[NSNumber]`; converted here so
+            // every consumer of this type deals in `Double` and nothing has to remember.
             switchOverZoomFactors: device.virtualDeviceSwitchOverVideoZoomFactors
+                .map { Double($0.doubleValue) }
         )
     }
 
