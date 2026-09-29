@@ -210,19 +210,31 @@ final class CameraStep1Tests: XCTestCase {
     /// The Pro panel being empty on a Pro iPhone is a consequence of binding a composite,
     /// and that is recorded rather than left as an unexplained gap. Binding a constituent
     /// instead is `docs/PHASES.md` 3.1 and has never been run on a device.
+    ///
+    /// The distinction this pins is between the two flags. `hasConstituentForPro` is true
+    /// even for a single-lens device, because that device is its own constituent and there
+    /// is nothing to fix. `proRequiresRebinding` is the one that names the empty-panel
+    /// case, and it is false for a single-lens device because the bound device already
+    /// supports `.custom`.
     func testTheEmptyProPanelOnACompositeHasARecordedCause() {
         let withComposite = CameraPlan.resolve(discovered: [
             makeCamera("composite", kind: .composite, relativeScale: 24),
             makeCamera("w", kind: .wide, relativeScale: 24)
         ])
-        let withoutComposite = CameraPlan.resolve(discovered: [
+        let singleLens = CameraPlan.resolve(discovered: [
             makeCamera("w", kind: .wide, relativeScale: 24)
         ])
 
         XCTAssertTrue(withComposite.hasConstituentForPro,
                       "a constituent exists, so the empty panel is the binding, not the hardware")
-        XCTAssertFalse(withoutComposite.hasConstituentForPro)
+        XCTAssertTrue(withComposite.proRequiresRebinding,
+                      "a composite is bound while a constituent exists: this is the empty-panel case")
         XCTAssertEqual(withComposite.bound?.kind, .composite)
+
+        // A single-lens device has a constituent — itself — and needs no rebinding.
+        XCTAssertTrue(singleLens.hasConstituentForPro)
+        XCTAssertFalse(singleLens.proRequiresRebinding,
+                       "a single lens is already the device Pro mode would want")
     }
 
     /// The `unknown` kind is a device type this app does not model. It must not become the

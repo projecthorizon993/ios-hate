@@ -151,6 +151,15 @@ struct CameraPlan: Equatable, Sendable {
     /// instead of being an unexplained gap.
     var hasConstituentForPro: Bool
 
+    /// Whether Pro mode would have to bind a **different** device than Auto mode does.
+    ///
+    /// The one that explains an empty Pro panel, and deliberately narrower than
+    /// `hasConstituentForPro`. A single-lens device has a constituent — itself — so
+    /// `hasConstituentForPro` is true there, and that is not a problem: the bound device
+    /// already supports `.custom`. The empty-panel case is exactly "a composite is bound
+    /// *and* a constituent exists to bind instead", which is what this is.
+    var proRequiresRebinding: Bool
+
     /// Derives the plan from a discovery result.
     ///
     /// Takes `BackCameraCapabilities` rather than `AVCaptureDevice` so the rule is a pure
@@ -179,7 +188,8 @@ struct CameraPlan: Equatable, Sendable {
 
         return CameraPlan(bound: bound,
                           offeredLenses: offered,
-                          hasConstituentForPro: !constituents.isEmpty)
+                          hasConstituentForPro: !constituents.isEmpty,
+                          proRequiresRebinding: isBoundComposite && !constituents.isEmpty)
     }
 }
 
@@ -198,7 +208,10 @@ struct CameraCapabilities: Equatable, Sendable {
     /// `CameraPlan.resolve` and read by both `attachBackCameras` and
     /// `CaptureSessionController.pickDevice`. `.unknown` until a discovery result is
     /// attached, so nothing can act on a guess.
-    var plan: CameraPlan = CameraPlan(bound: nil, offeredLenses: [], hasConstituentForPro: false)
+    var plan = CameraPlan(bound: nil,
+                          offeredLenses: [],
+                          hasConstituentForPro: false,
+                          proRequiresRebinding: false)
     /// `AVCapturePhotoOutput.availableRawPhotoPixelFormatTypes`. Empty means no RAW.
     /// The property is spelled `...PixelFormatTypes`, not `...PixelTypes`.
     var rawPixelTypes: [OSType] = []
