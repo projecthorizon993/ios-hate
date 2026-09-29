@@ -1,7 +1,23 @@
+// The viewfinder: frame source, meter, processing and the two UIKit wrappers.
+//
+// ProcessedPreview is the real surface; PreviewView and ProcessedPreviewView are the representables that host it and PreviewMeter is the exposure and highlight read-out it draws.
+//
+// Merged mechanically by scripts/consolidate.mjs. Declarations were moved whole and
+// nothing was edited; see the commit message for the reasoning.
+
 import AVFoundation
 import CoreImage
 import Foundation
 import MetalKit
+import CoreVideo
+import SwiftUI
+import UIKit
+
+// MARK: - engine (was App/Sources/Camera/ProcessedPreview.swift)
+
+
+
+
 
 /// A live preview that shows the actual look, not the unprocessed sensor image.
 ///
@@ -385,5 +401,329 @@ final class ProcessedPreviewRenderer: NSObject, MTKViewDelegate {
     /// is what makes the preview go black on rotation if this is left out.
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         redraw()
+    }
+}
+
+// MARK: - meter (was App/Sources/Camera/PreviewMeter.swift)
+
+
+
+
+/// Measures the preview so the derived HDR badge and the debug overlay have real
+/// numbers behind them.
+///
+/// `docs/ARCHITECTURE.md` section 2.4 is explicit that there is no public API for the
+/// system's HDR decision, so the scene half of the badge is our own meter. That makes
+/// this type a correctness risk rather than a nicety, and the reason it is bounded by
+/// construction:
+///
+/// - `alwaysDiscardsLateVideoFrames` is on, so a slow consumer drops frames instead of
+///   growing a queue;
+/// - only a sparse grid of luma samples is read, never a full-frame pass;
+/// - results are published at a fixed low rate, so the main actor is never the
+///   bottleneck the capture queue has to wait on.
+final class PreviewMeter: NSObject {
+
+    struct Sample: Equatable, Sendable {
+        /// Fraction of sampled luma at or above `clipLevel`.
+        var highlightClipFraction: Double
+        /// Mean sampled luma, 0...1.
+        var averageLuma: Double
+        var framesPerSecond: Double
+
+        /// Coarse scene reading used for the debug overlay and for deciding whether a
+        /// scene is dark enough to need a slower shutter. Deliberately not a
+        /// replacement for proper metering: it is a grid average, not an integral.
+        var isDarkScene: Bool { averageLuma < 0.18 }
+    }
+
+    /// Luma at or above this is treated as blown. 250/255 leaves a one-code margin so
+    /// 8-bit full-range noise does not read as clipping.
+    static let clipLevel: UInt8 = 250
+
+    /// Upper bound on samples read per frame, so the cost is the same on a 12 MP
+    /// format and on a 720p one.
+    static let sampleBudget = 4_000
+
+    /// How often a sample is handed to the main actor. 4 Hz is faster than anyone can
+    /// read a changing number and far slower than the preview frame rate.
+    static let publishInterval: TimeInterval = 0.25
+
+    let output: AVCaptureVideoDataOutput
+
+    /// Called on the main queue.
+    var onSample: ((Sample) -> Void)?
+
+    /// Called on the meter queue, once per frame, with the **unlocked** buffer.
+    ///
+    /// This is how the processed preview gets its frames. The session carries one video
+    /// data output, shared: bi-planar 420 costs a third of the bandwidth of BGRA, and two
+    /// outputs of different formats on one session is more than the pipeline needs. The
+    /// buffer is handed over after the meter's own read is done, so the two are readers of
+    /// the same memory rather than competitors for a lock.
+    var onFrame: ((CVPixelBuffer) -> Void)?
+
+    private let queue = DispatchQueue(label: "com.example.LumaFrame.meter", qos: .utility)
+    private var windowFrames: Int = 0
+    private var windowStart: CFTimeInterval = 0
+
+    override init() {
+        output = AVCaptureVideoDataOutput()
+        super.init()
+        output.alwaysDiscardsLateVideoFrames = true
+        // Planar full-range 4:2:0 so the luma plane can be read directly. A BGRA output
+        // would mean three interleaved channels and an interleave-aware stride for one
+        // number the user actually sees.
+        output.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        ]
+        output.setSampleBufferDelegate(self, queue: queue)
+    }
+
+    // MARK: - Statistics
+
+    /// Pure sampling step, separated from AVFoundation so it can be unit tested against
+    /// synthetic luma planes.
+    static func measure(luma: UnsafePointer<UInt8>?,
+                        width: Int,
+                        height: Int,
+                        bytesPerRow: Int,
+                        budget: Int = sampleBudget,
+                        clipLevel: UInt8 = clipLevel) -> (clipFraction: Double, averageLuma: Double) {
+        guard let luma, width > 0, height > 0, bytesPerRow >= width else { return (0, 0) }
+        let step = max(1, Int((Double(width * height) / Double(max(1, budget))).squareRoot().rounded()))
+        var total = 0
+        var clipped = 0
+        var samples = 0
+        var y = 0
+        while y < height {
+            let row = luma.advanced(by: y * bytesPerRow)
+            var x = 0
+            while x < width {
+                let value = row[x]
+                total += Int(value)
+                if value >= clipLevel { clipped += 1 }
+                samples += 1
+                x += step
+            }
+            y += step
+        }
+        guard samples > 0 else { return (0, 0) }
+        return (Double(clipped) / Double(samples), Double(total) / Double(samples) / 255.0)
+    }
+}
+
+// MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
+
+extension PreviewMeter: AVCaptureVideoDataOutputSampleBufferDelegate {
+
+    func captureOutput(_ output: AVCaptureOutput,
+                       didOutput sampleBuffer: CMSampleBuffer,
+                       from connection: AVCaptureConnection) {
+        let now = CACurrentMediaTime()
+        windowFrames += 1
+        if windowStart == 0 { windowStart = now }
+
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        _ = CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        guard CVPixelBufferGetPlaneCount(pixelBuffer) > 0,
+              let base = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0)
+        else { return }
+
+        let width = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0)
+        let height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
+        let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
+
+        let measured = Self.measure(luma: base.assumingMemoryBound(to: UInt8.self),
+                                    width: width,
+                                    height: height,
+                                    bytesPerRow: bytesPerRow)
+
+        // Hand the frame on before the publish-rate guard below, so the processed preview
+        // gets **every** frame while the debug overlay is only published a few times a
+        // second. They are different consumers with different rates, and gating the
+        // preview by the overlay's publish rate would cap the preview at 4 Hz.
+        onFrame?(pixelBuffer)
+
+        let elapsed = now - windowStart
+        let fps = elapsed > 0 ? Double(windowFrames) / elapsed : 0
+        guard elapsed >= Self.publishInterval else { return }
+        windowFrames = 0
+        windowStart = now
+
+        let sample = Sample(highlightClipFraction: measured.clipFraction,
+                            averageLuma: measured.averageLuma,
+                            framesPerSecond: fps)
+        DispatchQueue.main.async { [weak self] in
+            self?.onSample?(sample)
+        }
+    }
+}
+
+// MARK: - view (was App/Sources/Camera/PreviewView.swift)
+
+
+
+
+/// `AVCaptureVideoPreviewLayer` in SwiftUI.
+///
+/// A plain `UIView` with a preview layer attached, per `docs/ARCHITECTURE.md` section 8:
+/// no vendored viewfinder, no third-party camera view. The layer is the only thing that
+/// touches the session, and it only ever reads it.
+struct PreviewView: UIViewRepresentable {
+
+    let session: AVCaptureSession
+    /// Rotation in degrees clockwise. The screen derives it, so it is never `nil` in
+    /// practice; an unsupported angle is skipped by the coordinator rather than applied.
+    var rotationAngle: CGFloat
+    var isFrontFacing: Bool
+    /// Handed the coordinator once the layer exists, so the screen can convert a touch
+    /// into a device point without the view model knowing about UIKit.
+    var onBridgeReady: ((PreviewBridge) -> Void)?
+
+    func makeUIView(context: Context) -> PreviewContainerView {
+        let view = PreviewContainerView()
+        view.backgroundColor = .black
+        view.previewLayer.session = session
+        view.previewLayer.videoGravity = .resizeAspectFill
+        context.coordinator.attach(view.previewLayer)
+        context.coordinator.apply(rotationAngle: rotationAngle, isFrontFacing: isFrontFacing)
+        DispatchQueue.main.async { onBridgeReady?(context.coordinator) }
+        return view
+    }
+
+    func updateUIView(_ uiView: PreviewContainerView, context: Context) {
+        if uiView.previewLayer.session !== session {
+            uiView.previewLayer.session = session
+        }
+        context.coordinator.apply(rotationAngle: rotationAngle, isFrontFacing: isFrontFacing)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator: PreviewBridge {
+
+        private weak var layer: AVCaptureVideoPreviewLayer?
+        private var lastAppliedAngle: CGFloat?
+        private var lastMirrored: Bool?
+
+        func attach(_ layer: AVCaptureVideoPreviewLayer) {
+            self.layer = layer
+        }
+
+        /// Rotation and mirroring are applied together and never drift apart: the front
+        /// camera needs both, and setting one without the other on iOS produces a
+        /// rotated-but-mirrored or unmirrored-but-rotated preview.
+        func apply(rotationAngle: CGFloat, isFrontFacing: Bool) {
+            guard let layer, let connection = layer.connection else { return }
+            if rotationAngle != lastAppliedAngle {
+                guard connection.isVideoRotationAngleSupported(rotationAngle) else {
+                    AppLog.warn(AppLog.camera, "preview rotation \(Int(rotationAngle))deg unsupported")
+                    return
+                }
+                if let failure = LumaFrameSafety.perform({ connection.videoRotationAngle = rotationAngle }) {
+                    AppLog.warn(AppLog.camera, "preview rotation rejected: \(failure)")
+                    return
+                }
+                lastAppliedAngle = rotationAngle
+            }
+            guard isFrontFacing != lastMirrored else { return }
+            LumaFrameSafety.perform {
+                connection.automaticallyAdjustsVideoMirroring = false
+                connection.isVideoMirrored = isFrontFacing
+            }
+            lastMirrored = isFrontFacing
+        }
+
+        /// `AVCaptureVideoPreviewLayer` owns the conversion between a touch in its own
+        /// space and the capture device's field of view. Re-implementing it is how apps
+        /// end up focusing in the wrong place in landscape.
+        func devicePoint(fromViewPoint point: CGPoint) -> CGPoint? {
+            layer?.captureDevicePointConverted(fromLayerPoint: point)
+        }
+    }
+}
+
+/// What `CameraScreen` needs from the preview, and nothing more.
+protocol PreviewBridge: AnyObject {
+    func devicePoint(fromViewPoint point: CGPoint) -> CGPoint?
+}
+
+/// Hosts the preview layer so SwiftUI controls the size and the layer controls the pixels.
+final class PreviewContainerView: UIView {
+
+    override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+
+    var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+}
+
+// MARK: - processedview (was App/Sources/Camera/ProcessedPreviewView.swift)
+
+
+
+/// Hosts the `MTKView` the processed preview draws into.
+///
+/// Exists because `UIViewRepresentable` will not accept a failable `makeUIView`. The first
+/// version returned `MTKView?` to signal "no Metal device, use the direct preview layer
+/// instead", and the protocol rejected it — and the rejection is correct: the associated
+/// type has to be one concrete view type whether or not the backing thing exists.
+///
+/// So the host is a plain `UIView` that either contains a live `MTKView` or contains
+/// nothing, and `hasDrawable` reports which. The caller checks that and keeps
+/// `AVCaptureVideoPreviewLayer` when it is false.
+struct ProcessedPreviewView: UIViewRepresentable {
+
+    let preview: ProcessedPreview
+
+    /// Bumped by the caller whenever a new frame should be shown. SwiftUI does not
+    /// redraw a `MTKView` on its own, and polling it from a timer would wake the main
+    /// actor for frames that may not exist yet.
+    let redrawToken: Int
+
+    func makeUIView(context: Context) -> HostView {
+        let host = HostView()
+        context.coordinator.host = host
+        if let device = MTLCreateSystemDefaultDevice(),
+           let renderer = ProcessedPreviewRenderer(metalDevice: device) {
+            renderer.attach(to: preview)
+            context.coordinator.renderer = renderer
+            host.install(renderer.metalView)
+        } else {
+            AppLog.warn(AppLog.processing, "processed preview unavailable; using the direct preview layer")
+        }
+        return host
+    }
+
+    func updateUIView(_ uiView: HostView, context: Context) {
+        context.coordinator.renderer?.redraw()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var renderer: ProcessedPreviewRenderer?
+        var host: HostView?
+    }
+
+    /// The representable's view type. `MTKView` is optional inside it rather than being
+    /// the type itself.
+    final class HostView: UIView {
+        private(set) var hasDrawable = false
+
+        func install(_ metalView: MTKView) {
+            metalView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(metalView)
+            NSLayoutConstraint.activate([
+                metalView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                metalView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                metalView.topAnchor.constraint(equalTo: topAnchor),
+                metalView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            ])
+            hasDrawable = true
+        }
     }
 }
