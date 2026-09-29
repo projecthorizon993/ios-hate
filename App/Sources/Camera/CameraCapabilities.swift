@@ -118,6 +118,71 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
     }
 }
 
+/// The one place that decides which back camera the session binds and which lenses the
+/// UI is allowed to offer.
+///
+/// Two halves of the same fact used to disagree. `CaptureSessionController.pickDevice`
+/// preferred a **composite** device, with a comment saying this keeps one session alive,
+/// while `CameraCapabilities.attachBackCameras` filtered composites **out** of the
+/// capability model. So the UI offered physical lens chips for a session that was running
+/// a different device, and no test covered the session half — which is why CI stayed green
+/// on a contradiction.
+///
+/// The fix is not two matching copies of the rule; it is one rule with two readers.
+/// `pickDevice` and `attachBackCameras` both consume this value, so they cannot drift
+/// without a test failing.
+///
+/// Binding a **constituent** device in Pro mode is deliberately *not* done here. It is a
+/// session reconfiguration per lens change, it has never been run on a device, and
+/// `docs/PHASES.md` 3.1 records it as Phase 3. Until then the composite is bound and the
+/// Pro panel is empty by design rather than by accident — and `ProCapabilities` gates
+/// itself on the bound device, so the empty panel and the session agree.
+struct CameraPlan: Equatable, Sendable {
+
+    /// The device the session binds, or `nil` when discovery found nothing.
+    var bound: BackCameraCapabilities?
+    /// The lenses reachable from `bound`, in reach order. Never more than the bound device
+    /// can actually switch to.
+    var offeredLenses: [BackCameraCapabilities]
+    /// Whether a constituent device exists that Pro mode could bind instead.
+    ///
+    /// Recorded rather than acted on, because binding it is Phase 3 work that needs a
+    /// device to verify. It is here so the "Pro is empty" state has a recorded cause
+    /// instead of being an unexplained gap.
+    var hasConstituentForPro: Bool
+
+    /// Derives the plan from a discovery result.
+    ///
+    /// Takes `BackCameraCapabilities` rather than `AVCaptureDevice` so the rule is a pure
+    /// function of runtime-reported data and can be tested without a camera — which is the
+    /// only way the two readers can be proven to agree in CI.
+    static func resolve(discovered: [BackCameraCapabilities]) -> CameraPlan {
+        let back = discovered.filter { $0.kind != .unknown }
+        let constituents = back.filter { $0.kind != .composite }
+            .sorted { $0.relativeScale < $1.relativeScale }
+        let composites = back.filter { $0.kind == .composite }
+
+        // A composite is preferred for the session, and the reason is recorded rather than
+        // assumed: switching its virtual devices keeps one session alive. A device that
+        // reports constituents but no composite binds its own wide lens, which is still a
+        // real lens and still supports `.custom`.
+        let bound = composites.first ?? constituents.first
+        let isBoundComposite = bound?.kind == .composite
+
+        // The offered lenses are the constituents whenever there are any, because a
+        // composite *is* the constituents — that is what a composite is. A composite only
+        // stands in as its own single lens when discovery reported nothing else, which is
+        // the one case where there is no second lens to lie about.
+        let offered = isBoundComposite
+            ? (constituents.isEmpty ? [bound].compactMap { $0 } : constituents)
+            : [bound].compactMap { $0 }
+
+        return CameraPlan(bound: bound,
+                          offeredLenses: offered,
+                          hasConstituentForPro: !constituents.isEmpty)
+    }
+}
+
 /// Everything the camera UI is allowed to know about the device.
 ///
 /// Produced once at launch and refreshed whenever the configuration changes. There is
@@ -129,6 +194,11 @@ struct CameraCapabilities: Equatable, Sendable {
     /// Physical lenses, in the order they should be offered. Empty when the device
     /// has no back camera at all (front-only tablets, and the simulator).
     var backCameras: [BackCameraCapabilities] = []
+    /// Which camera the session binds and which lenses may be offered, derived once by
+    /// `CameraPlan.resolve` and read by both `attachBackCameras` and
+    /// `CaptureSessionController.pickDevice`. `.unknown` until a discovery result is
+    /// attached, so nothing can act on a guess.
+    var plan: CameraPlan = CameraPlan(bound: nil, offeredLenses: [], hasConstituentForPro: false)
     /// `AVCapturePhotoOutput.availableRawPhotoPixelFormatTypes`. Empty means no RAW.
     /// The property is spelled `...PixelFormatTypes`, not `...PixelTypes`.
     var rawPixelTypes: [OSType] = []
@@ -244,18 +314,20 @@ struct CameraCapabilities: Equatable, Sendable {
         return capabilities
     }
 
-    /// Fills in `backCameras` from a discovery result.
+    /// Fills in `backCameras` and `plan` from a discovery result.
     ///
-    /// Physical lenses win over composites: an iPhone 11 Pro Max reports its three
-    /// lenses *and* a `builtInTripleCamera`, and offering four buttons for three lenses
-    /// would be a lie.
+    /// Delegates entirely to `CameraPlan.resolve`, which is also what the session reads to
+    /// choose its device. Physical lenses still win over composites here — an iPhone 11 Pro
+    /// Max reports its three lenses *and* a `builtInTripleCamera`, and offering four buttons
+    /// for three lenses would be a lie — but that is now a consequence of the shared rule
+    /// rather than a second copy of it.
     mutating func attachBackCameras(_ devices: [AVCaptureDevice]) {
         let described = devices
             .filter { $0.position == .back }
             .map(BackCameraCapabilities.describe)
-        let physical = described.filter { $0.kind != .composite && $0.kind != .unknown }
-        backCameras = physical.isEmpty ? described : physical
-        backCameras.sort { $0.relativeScale < $1.relativeScale }
+        let resolved = CameraPlan.resolve(discovered: described)
+        plan = resolved
+        backCameras = resolved.offeredLenses
     }
 
     /// Display P3 capture, read from the format description rather than from

@@ -29,7 +29,14 @@ final class LUTProcessorTests: XCTestCase {
     ///
     /// Spelled once so the lookup under test and the test that checks the lookup cannot
     /// drift apart.
-    private static let filterName = "CIColorCubeWithColorSpace"
+    /// Read from the processor rather than spelled here.
+    ///
+    /// It used to be a local constant holding its own copy of the string, which is what
+    /// made this test unable to fail: reverting `LUTProcessor` to the invariant
+    /// `CIColorCube` would leave this file's copy of the name untouched and the assertion
+    /// would still pass. Now the test and the processor read one value, so the two cannot
+    /// disagree about which filter the app applies.
+    private static var filterName: String { LUTProcessor.colorManagedCubeFilterName }
 
     private func makeTable(size: Int = 2,
                            domainWasDeclared: Bool = true,
@@ -157,6 +164,11 @@ final class LUTProcessorTests: XCTestCase {
     /// which does not — that is what the skips below are for. The distinction is the
     /// whole lesson: *availability* is checkable in CI, *pixels* are not.
     func testColorManagedCubeFilterIsAvailable() {
+        // The processor must not be using the invariant filter. Asserting the name equals
+        // the colour-managed one is the assertion that fails on a revert, which the
+        // previous copy of this test could not do.
+        XCTAssertEqual(LUTProcessor.colorManagedCubeFilterName, "CIColorCubeWithColorSpace",
+                       "the cube path must use the colour-managed filter, not CIColorCube")
         XCTAssertNotNil(CIFilter(name: Self.filterName),
                         "\(Self.filterName) must resolve; if it does not, the LUT path is "
                         + "applying tables without colour management")
@@ -188,7 +200,8 @@ final class LUTProcessorTests: XCTestCase {
         let lut = CubeLUT(size: 3, kind: .oneDimensional, title: nil,
                           domainMin: [0, 0, 0], domainMax: [1, 1, 1],
                           domainWasDeclared: true,
-                          samples: Array(repeating: 0, count: 9))
+                          samples: Array(repeating: 0, count: 9),
+                          authoredSpace: .sRGB)
 
         XCTAssertNil(LUTProcessor.cubeData(for: lut))
     }
@@ -199,7 +212,8 @@ final class LUTProcessorTests: XCTestCase {
         let lut = CubeLUT(size: 3, kind: .oneDimensional, title: nil,
                           domainMin: [0, 0, 0], domainMax: [1, 1, 1],
                           domainWasDeclared: true,
-                          samples: Array(repeating: 0, count: 9))
+                          samples: Array(repeating: 0, count: 9),
+                          authoredSpace: .sRGB)
 
         XCTAssertThrowsError(try processor.apply(lut,
                                                  to: makeTestImage(),

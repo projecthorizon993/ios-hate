@@ -21,6 +21,14 @@ struct LUTProcessor {
     /// The intensity range a caller may request.
     static let intensityRange: ClosedRange<Float> = 0...1
 
+    /// The filter the cube path uses. Named once, in the file that uses it.
+    ///
+    /// It was a bare literal at the `CIFilter(name:)` call site, and the test asserting the
+    /// filter is available declared its own copy of the same string. A test that asserts a
+    /// string it also owns cannot fail when the string changes, so reverting to the
+    /// invariant `CIColorCube` would have left CI green. Both now read this.
+    static let colorManagedCubeFilterName = "CIColorCubeWithColorSpace"
+
     /// Applies `lut` to `image` in `imageSpace`.
     ///
     /// - Throws: rather than guessing. Every failure here is a case where the obvious
@@ -110,7 +118,7 @@ struct LUTProcessor {
         var graded: CIImage?
         var currentKey = "creating the filter"
         let raised = LumaFrameSafety.perform {
-            guard let cube = CIFilter(name: "CIColorCubeWithColorSpace") else { return }
+            guard let cube = CIFilter(name: Self.colorManagedCubeFilterName) else { return }
 
             // Set before the image, so that a filter validating its arguments sees the
             // space first. It is the one key `CIColorCube` does not have, which is exactly

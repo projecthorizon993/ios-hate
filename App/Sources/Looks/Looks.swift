@@ -318,13 +318,18 @@ enum GeneratedLooks {
             }
         }
 
+        // Stated, not defaulted: `authoredSpace` has no default, because a table built
+        // without it would claim sRGB it was never asked about. The per-pixel transform
+        // above is written in gamma-encoded sRGB over a unit domain, so that is what this
+        // one honestly is.
         let table = CubeLUT(size: size,
                             kind: .threeDimensional,
                             title: which.displayName,
                             domainMin: [0, 0, 0],
                             domainMax: [1, 1, 1],
                             domainWasDeclared: true,
-                            samples: samples)
+                            samples: samples,
+                            authoredSpace: .sRGB)
         return table.isUsable ? table : nil
     }
 
@@ -469,7 +474,15 @@ enum LookThumbnailer {
 
         queue.async {
             let pipeline = ProcessingPipeline(library: library)
-            let context = CIContext(options: [.cacheIntermediates: false])
+            // Working colour space stated, not inherited, for the same reason as
+            // `ProcessingPipeline.encodeJPEG`: `LUTProcessor` applies tables with
+            // `CIColorCubeWithColorSpace` and relies on the context converting out of the
+            // table's authored space into a linear working space. A thumbnail that skipped
+            // the conversion would not match the photo the same look produces.
+            let context = CIContext(options: [
+                .cacheIntermediates: false,
+                .workingColorSpace: ColorSpace.linearSRGB.cgColorSpace
+            ])
             var images: [Look: UIImage] = [:]
             for (look, one) in settings {
                 let rendered = pipeline.renderOrOriginal(cropped,

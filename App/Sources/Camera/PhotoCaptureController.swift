@@ -202,9 +202,9 @@ final class PhotoCaptureController: NSObject {
         // - quality: `.quality` — native HDR for stills, where the format supports it
         // - neither: `.balanced`, the default
         //
-        // The old code was `preferQuality ? .quality : .balanced`, which meant every
-        // capture on a format with photo-quality support asked for `.balanced` and
-        // therefore let the system override a manual exposure.
+        // The old code had two cases, quality or balanced, which meant every capture on a
+        // format with photo-quality support asked for `.balanced` and therefore let the
+        // system override a manual exposure.
         settings.photoQualityPrioritization = prioritization
         if request.manualExposureActive && request.preferQuality {
             AppLog.note(AppLog.camera,
@@ -222,7 +222,10 @@ final class PhotoCaptureController: NSObject {
         // without the original having been altered.
         settings.metadata = recorded.dictionary()
 
-        let quality = request.preferQuality ? "quality" : "balanced"
+        // Read the same value the settings were given and the recipe records. Deriving it
+        // again here meant a manual capture logged `quality=balanced` while being captured
+        // at `.speed` — and this is the line someone reads to find out what a photo was.
+        let quality = recorded.photoQualityPrioritization
         let flash = wantsFlash ? "on" : "off"
         AppLog.note(AppLog.camera,
                     "capture requested: codec=\(codec.rawValue) quality=\(quality) flash=\(flash) "

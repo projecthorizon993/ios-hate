@@ -35,6 +35,24 @@ struct ProCapabilities: Equatable {
     /// rather than a lying one.
     var supportsCustomExposure: Bool = false
 
+    /// Whether a white balance lock may be offered, from the two facts that decide it.
+    ///
+    /// A separate function rather than an inline `&&` because the rule is a claim about the
+    /// platform that has to be assertable without an `AVCaptureDevice`, which is the only
+    /// thing CI can provide. `probe` can only be exercised on a device, so an inline
+    /// condition there is a condition nothing tests.
+    ///
+    /// **The residual uncertainty, stated rather than hidden:** there is no query for
+    /// "can the white balance gains be changed". A device that reports both
+    /// `ExposureMode.custom` and the locked white balance mode is *assumed* lockable. That
+    /// is a deliberate choice — `.custom` is the strongest available proxy, and offering a
+    /// lock that silently does nothing is the worse error. It has never been checked on
+    /// hardware, and `docs/HANDOFF.md` records it as unverified.
+    static func whiteBalanceLockIsOffered(supportsCustomExposure: Bool,
+                                          lockedModeSupported: Bool) -> Bool {
+        supportsCustomExposure && lockedModeSupported
+    }
+
     /// Whether the bound device is one of the **composite** multi-lens types, read from
     /// `device.deviceType` rather than inferred from the answer to the question above.
     ///
@@ -112,10 +130,16 @@ struct ProCapabilities: Equatable {
         capabilities.canLockFocus = device.isFocusModeSupported(.locked)
             && device.isLockingFocusWithCustomLensPositionSupported
 
-        // The same caveat applies to white balance on a composite, but there is no
-        // separate query for "can the gains be changed", so this is the best available
-        // answer rather than a certain one.
-        capabilities.canLockWhiteBalance = device.isWhiteBalanceModeSupported(.locked)
+        // The same caveat applies to white balance on a composite: Apple documents that a
+        // composite supports the locked white balance *mode* and refuses new gains, which
+        // is the same split as focus and lens position and the reason `canLockFocus` asks
+        // two questions. There is no separate query for "can the gains change", so this
+        // cannot be a certain answer — and the uncertain answer is the one that must not
+        // reach the UI. Gated on `.custom` instead, which is the one question the device has
+        // been asked and can answer.
+        capabilities.canLockWhiteBalance = whiteBalanceLockIsOffered(
+            supportsCustomExposure: capabilities.supportsCustomExposure,
+            lockedModeSupported: device.isWhiteBalanceModeSupported(.locked))
 
         return capabilities
     }

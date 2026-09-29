@@ -56,10 +56,15 @@ struct CubeLUT: Equatable {
     /// That also means a P3-authored table is indistinguishable from an sRGB one, because
     /// the format cannot say. See `LUTProcessor` for what follows from that.
     ///
-    /// Declared last so the memberwise initialiser keeps its existing shape, and owned by
-    /// `CubeLUTParser`, which is the only production construction site that reads a
-    /// domain off a file.
-    var authoredSpace: ColorSpace? = .sRGB
+    /// Declared last so the memberwise initialiser keeps its existing shape.
+    ///
+    /// **No default value, deliberately.** It used to default to `.sRGB`, which is the
+    /// false claim the doc comment above is written to prevent: a construction site that
+    /// forgot the field got "authored in sRGB" for free, and that value is handed to
+    /// `CIColorCubeWithColorSpace` as `inputColorSpace` — a wrong space here is a wrong
+    /// render, not a cosmetic default. Every site now states it, including the tests, so a
+    /// new one cannot inherit a claim it never made.
+    var authoredSpace: ColorSpace?
 
     /// The colour space the table was authored for, inferred from its domain. A table
     /// whose domain is not 0…1 in every channel is almost always a log-encoded one.

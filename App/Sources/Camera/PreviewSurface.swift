@@ -90,13 +90,22 @@ final class ProcessedPreview: NSObject {
         // initialised `self`, and Swift will not let `super.init()` run twice.
         pipeline = ProcessingPipeline()
         metalDevice = MTLCreateSystemDefaultDevice()
+        // The working colour space is stated, not inherited. Core Image's default already is
+        // linear sRGB, so this is a no-op today — which is the point. `LUTProcessor` hands
+        // `CIColorCubeWithColorSpace` the table's authored space and relies on the working
+        // space being linear to convert into, and a context whose working space is implicit
+        // is a context whose working space is Core Image's business. Same reason and same
+        // option as `ProcessingPipeline.encodeJPEG`.
+        let workingSpace: [CIContextOption: Any] = [
+            .workingColorSpace: ColorSpace.linearSRGB.cgColorSpace
+        ]
         if let device = metalDevice {
-            context = CIContext(mtlDevice: device)
+            context = CIContext(mtlDevice: device, options: workingSpace)
         } else {
             // No Metal device: the live preview is unavailable and `isAvailable` says so,
             // but the still path still works on the CPU. Force-unwrapping the device here
             // would crash the app on exactly the hardware least able to report it.
-            context = CIContext()
+            context = CIContext(options: workingSpace)
             AppLog.warn(AppLog.processing, "no Metal device; stills will be processed on the CPU")
         }
         super.init()
@@ -343,7 +352,10 @@ final class ProcessedPreviewRenderer: NSObject, MTKViewDelegate {
         guard metalDevice.makeCommandQueue() != nil else { return nil }
         // `context` is assigned before `super.init()` because Swift requires every stored
         // property to be initialised by the time the superclass initialiser runs.
-        context = CIContext(mtlDevice: metalDevice)
+        // The working colour space is stated for the same reason as in `ProcessedPreview`
+        // above: the colour-managed LUT path depends on it, so it is not left implicit.
+        context = CIContext(mtlDevice: metalDevice,
+                           options: [.workingColorSpace: ColorSpace.linearSRGB.cgColorSpace])
         view = MTKView(frame: .zero, device: metalDevice)
         super.init()
 

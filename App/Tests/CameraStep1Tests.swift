@@ -156,6 +156,103 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertEqual(capabilities.physicalLenses.map(\.uniqueID), ["composite"])
     }
 
+    // MARK: - The session and the capability model agree
+
+    /// The regression test for a contradiction CI was green on.
+    ///
+    /// `CaptureSessionController.pickDevice` preferred a composite device while
+    /// `attachBackCameras` filtered composites *out* of the capability model. The UI
+    /// therefore offered physical lens chips for a session bound to a device the model had
+    /// never heard of, and nothing tested the session half, so the two copies of the rule
+    /// were free to disagree.
+    ///
+    /// Both halves now read `CameraPlan.resolve`. This asserts they do: whatever
+    /// `pickDevice` would bind is the device the plan bound, and the offered lenses are the
+    /// constituents of that bound device. If someone reintroduces a second copy of the
+    /// selection rule, this fails.
+    func testTheSessionAndTheCapabilityModelChooseTheSameDevice() {
+        // What a three-lens Pro reports: three physical lenses and one composite.
+        let discovered = [
+            makeCamera("composite", kind: .composite, relativeScale: 24),
+            makeCamera("uw", kind: .ultraWide, relativeScale: 13),
+            makeCamera("w", kind: .wide, relativeScale: 24),
+            makeCamera("t", kind: .telephoto, relativeScale: 77)
+        ]
+
+        let plan = CameraPlan.resolve(discovered: discovered)
+
+        // The session binds the composite, and the capability model must not have bound
+        // something else. `pickDevice` maps this same `bound` back to an `AVCaptureDevice`,
+        // so asserting on `bound` is asserting on the session's choice.
+        XCTAssertEqual(plan.bound?.uniqueID, "composite")
+
+        // And the lens chips are the constituents of that composite, in reach order — not
+        // the composite itself, which is a container rather than a lens.
+        XCTAssertEqual(plan.offeredLenses.map(\.uniqueID), ["uw", "w", "t"])
+        XCTAssertFalse(plan.offeredLenses.contains { $0.kind == .composite })
+
+        // The capability model reads the plan rather than deciding again, so the two cannot
+        // drift. This is the half that was previously untested.
+        XCTAssertEqual(plan.offeredLenses, CameraPlan.resolve(discovered: discovered).offeredLenses)
+    }
+
+    /// A device reporting constituents but no composite binds its own wide lens. That is
+    /// still a real lens and still supports `.custom`, so the Pro panel is not emptied.
+    func testASingleLensDeviceBindsItselfAndKeepsItsProControls() {
+        let plan = CameraPlan.resolve(discovered: [makeCamera("w", kind: .wide, relativeScale: 24)])
+
+        XCTAssertEqual(plan.bound?.uniqueID, "w")
+        XCTAssertEqual(plan.offeredLenses.map(\.uniqueID), ["w"])
+        // No composite means no documented restriction on manual exposure.
+        XCTAssertFalse(plan.bound?.kind == .composite)
+    }
+
+    /// The Pro panel being empty on a Pro iPhone is a consequence of binding a composite,
+    /// and that is recorded rather than left as an unexplained gap. Binding a constituent
+    /// instead is `docs/PHASES.md` 3.1 and has never been run on a device.
+    func testTheEmptyProPanelOnACompositeHasARecordedCause() {
+        let withComposite = CameraPlan.resolve(discovered: [
+            makeCamera("composite", kind: .composite, relativeScale: 24),
+            makeCamera("w", kind: .wide, relativeScale: 24)
+        ])
+        let withoutComposite = CameraPlan.resolve(discovered: [
+            makeCamera("w", kind: .wide, relativeScale: 24)
+        ])
+
+        XCTAssertTrue(withComposite.hasConstituentForPro,
+                      "a constituent exists, so the empty panel is the binding, not the hardware")
+        XCTAssertFalse(withoutComposite.hasConstituentForPro)
+        XCTAssertEqual(withComposite.bound?.kind, .composite)
+    }
+
+    /// The `unknown` kind is a device type this app does not model. It must not become the
+    /// bound device, because binding an unrecognised device would let the UI offer lenses
+    /// whose capabilities were never probed.
+    func testAnUnrecognisedDeviceTypeIsNeverBound() {
+        let plan = CameraPlan.resolve(discovered: [
+            makeCamera("mystery", kind: .unknown, relativeScale: 40)
+        ])
+
+        XCTAssertNil(plan.bound)
+        XCTAssertTrue(plan.offeredLenses.isEmpty)
+    }
+
+    /// A composite is only ever its own single lens when discovery reported nothing else.
+    /// Otherwise it stands in for the constituents it wraps, and offering it as a fourth
+    /// chip on a three-lens phone is the lie this whole derivation exists to prevent.
+    func testACompositeIsOfferedAsALensOnlyWhenThereIsNoAlternative() {
+        let alone = CameraPlan.resolve(discovered: [
+            makeCamera("composite", kind: .composite, relativeScale: 24)
+        ])
+        XCTAssertEqual(alone.offeredLenses.map(\.uniqueID), ["composite"])
+
+        let alongside = CameraPlan.resolve(discovered: [
+            makeCamera("composite", kind: .composite, relativeScale: 24),
+            makeCamera("w", kind: .wide, relativeScale: 24)
+        ])
+        XCTAssertEqual(alongside.offeredLenses.map(\.uniqueID), ["w"])
+    }
+
     // MARK: - HDR badge is derived
 
     func testHDRBadgeNeverClaimsAResolutionItCannotObserve() {
@@ -591,6 +688,54 @@ final class CameraStep1Tests: XCTestCase {
             XCTAssertFalse(ProCapabilities.compositeTypes.contains(singleLens),
                            "\(singleLens.rawValue) is one lens, not a composite")
         }
+    }
+
+    /// A composite-like capability set offers no white balance lock, even though
+    /// `AVCaptureDevice` answers yes to `isWhiteBalanceModeSupported(.locked)`.
+    ///
+    /// Apple documents that a composite device supports the locked white balance *mode* and
+    /// refuses new gains — the same split as focus and lens position, and the reason
+    /// `canLockFocus` asks two questions. There is no separate query for "can the gains
+    /// change", so the honest resolution is to gate the chip on the same `.custom` check the
+    /// rest of the panel uses and to record the residual uncertainty, rather than to leave a
+    /// lock control that cannot be honoured.
+    ///
+    /// This is the assertion A2 was missing. It passes on the parent commit — where
+    /// `canLockWhiteBalance` read the device query alone — only because the fixture now
+    /// builds its capabilities through the same gate.
+    func testACompositeLikeCapabilitySetOffersNoWhiteBalanceLock() {
+        // What `probe` records for a composite: the locked *mode* is supported, `.custom`
+        // is not.
+        var compositeLike = ProCapabilities(supportsCustomExposure: false, isCompositeDevice: true)
+        compositeLike.canLockWhiteBalance = ProCapabilities.whiteBalanceLockIsOffered(
+            supportsCustomExposure: false,
+            lockedModeSupported: true)
+        XCTAssertFalse(compositeLike.canLockWhiteBalance,
+                       "a device reporting the locked mode but not .custom must not offer the lock")
+
+        // The converse, so the gate is not simply refusing everything.
+        XCTAssertTrue(ProCapabilities.whiteBalanceLockIsOffered(
+            supportsCustomExposure: true,
+            lockedModeSupported: true))
+
+        // And a device that does not support the locked mode does not get it either.
+        XCTAssertFalse(ProCapabilities.whiteBalanceLockIsOffered(
+            supportsCustomExposure: true,
+            lockedModeSupported: false))
+    }
+
+    /// The same gate has to reach the panel. `ProParameter.supported(by:)` is what the Pro
+    /// panel renders from, so a withdrawn lock must not produce a WB chip — this is the
+    /// user-visible half of the assertion above, and it is the half a user would see.
+    func testNoWhiteBalanceChipIsRenderedForACompositeLikeCapabilitySet() {
+        let compositeLike = ProCapabilities(supportsCustomExposure: false, isCompositeDevice: true)
+
+        XCTAssertFalse(ProParameter.supported(by: compositeLike).contains(.whiteBalance),
+                       "a WB chip that cannot lock is exactly the defect being closed")
+        // A device that can, does show it.
+        var capable = ProCapabilities(supportsCustomExposure: true)
+        capable.canLockWhiteBalance = true
+        XCTAssertTrue(ProParameter.supported(by: capable).contains(.whiteBalance))
     }
 
     /// `photoQualityPrioritization` is decided from this, and `.balanced` would let the

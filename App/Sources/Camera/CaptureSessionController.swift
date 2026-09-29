@@ -587,6 +587,18 @@ final class CaptureSessionController: NSObject {
 
     /// Device selection prefers the built-in camera for the requested side, and falls
     /// back to whatever that side reports. No device name is ever compared.
+    ///
+    /// Which of the reported devices is bound is decided by `CameraPlan.resolve`, the same
+    /// function `CameraCapabilities.attachBackCameras` uses to decide which lenses the UI
+    /// offers. It used to have its own copy of the rule — a composite preferred here,
+    /// composites filtered out there — so the UI could offer lens chips for a session
+    /// running a device the capability model had never heard of. One rule, two readers.
+    ///
+    /// A composite is still preferred, for the recorded reason that switching its virtual
+    /// devices keeps one session alive. The cost is that the Pro panel is empty on a Pro
+    /// iPhone, because Apple documents composites as refusing `ExposureMode.custom`.
+    /// Binding a constituent instead is a session reconfiguration per lens change and is
+    /// `docs/PHASES.md` 3.1; it has never been run on a device, so it is not done here.
     static func pickDevice(facing: CameraFacing) -> AVCaptureDevice? {
         let position: AVCaptureDevice.Position = facing == .front ? .front : .back
         let types: [AVCaptureDevice.DeviceType] = [
@@ -596,13 +608,10 @@ final class CaptureSessionController: NSObject {
         let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: types,
                                                           mediaType: .video,
                                                           position: position)
-        // A composite (triple/dual) device is preferred because switching its virtual
-        // devices keeps one session alive; a single-lens device is a valid fallback.
-        if let composite = discovery.devices.first,
-           BackCameraCapabilities.kind(of: composite.deviceType) == .composite {
-            return composite
-        }
-        return discovery.devices.first
+        let back = discovery.devices.filter { $0.position == .back }
+        let plan = CameraPlan.resolve(discovered: back.map(BackCameraCapabilities.describe))
+        guard let bound = plan.bound else { return discovery.devices.first }
+        return back.first { $0.uniqueID == bound.uniqueID } ?? discovery.devices.first
     }
 
     /// Every back camera the device reports, for the capability model.
