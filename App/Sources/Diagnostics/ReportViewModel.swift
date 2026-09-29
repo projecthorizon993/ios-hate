@@ -19,6 +19,20 @@ final class ReportViewModel: ObservableObject {
     @Published private(set) var savedLocation: String?
     @Published var includeLog = true
 
+    /// Which measurements this run is allowed to take. Off by default.
+    ///
+    /// The report's purpose is answering "what can this device do", and the two
+    /// measurements are not capabilities: the render benchmark is a throughput figure for
+    /// tiering, and the live session probe opens a second `AVCaptureSession`. Both are the
+    /// heaviest things the report does and the report has crashed the app on device more
+    /// than once. They are one tap away and marked as measurements in the UI, rather than
+    /// being on by default and taking the capability run down with them.
+    @Published var takeMeasurements = false
+
+    private var measurements: CapabilityCollector.Measurements {
+        takeMeasurements ? .all : .none
+    }
+
     private let modelURL: URL?
     private let logLimit: Int?
 
@@ -62,7 +76,8 @@ final class ReportViewModel: ObservableObject {
         let outcome = await CapabilityCollector.collect(modelURL: modelURL,
                                                         logLimit: logLimit,
                                                         display: display,
-                                                        cameraIsOwned: ownsCamera)
+                                                        cameraIsOwned: ownsCamera,
+                                                        measurements: measurements)
         report = outcome.report
         logLines = outcome.logLines
         state = .ready

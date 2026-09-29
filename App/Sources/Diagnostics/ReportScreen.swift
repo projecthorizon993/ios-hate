@@ -19,6 +19,7 @@ struct ReportScreen: View {
                         ReportSectionView(section: section)
                     }
                     logToggle
+                    measurementToggle
                     savedNote
                     logFileNote
                 }
@@ -58,6 +59,29 @@ struct ReportScreen: View {
         .padding(Theme.Space.l)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.ColorToken.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.Radius.panel))
+    }
+
+    /// The measurement switch.
+    ///
+    /// Says plainly that it is not a capability and that it is the part that has crashed
+    /// the app. A toggle with no explanation invites someone to leave it on.
+    private var measurementToggle: some View {
+        Toggle(isOn: $model.takeMeasurements) {
+            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                Text("Take measurements")
+                    .font(.system(size: Theme.TypeSize.label))
+                    .foregroundStyle(Theme.ColorToken.textSecondary)
+                Text("GPU throughput and a second live camera session. Not capabilities — "
+                     + "and the part of this report that has crashed the app.")
+                    .font(.system(size: Theme.TypeSize.caption))
+                    .foregroundStyle(Theme.ColorToken.textDisabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .tint(Theme.ColorToken.accentActive)
+        .frame(minHeight: Theme.Space.minTouch)
+        .accessibilityHint("Runs the throughput benchmark and opens a second camera session. "
+                           + "Off means the report only reads capabilities.")
     }
 
     private var logToggle: some View {

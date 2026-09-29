@@ -12,6 +12,31 @@ enum CapabilityCollector {
         var logLines: [String]
     }
 
+    /// What the report is allowed to *measure*, as opposed to report as a capability.
+    ///
+    /// This exists because the report has crashed the app on device more than once and
+    /// the two things it measures are the two heaviest things it does:
+    ///
+    /// - `renderBenchmark` allocates a 2560×1440 source and renders it 20 times through a
+    ///   Metal-backed `CIContext`, which is tens of megabytes of live texture per pass
+    ///   and a GPU workload running while a second capture session is live. It measures
+    ///   throughput for **tiering**, which is not a capability at all.
+    /// - `liveSession` starts and stops a second `AVCaptureSession`, which is the original
+    ///   contention the camera handover was written to avoid.
+    ///
+    /// Separating them from the capability content means the report answers "what can this
+    /// device do" — which is its purpose — without also gambling on a measurement. Both
+    /// are opt-in, and the report says so rather than silently omitting them.
+    struct Measurements: Equatable {
+        /// Throughput, for the device tier. Not a capability.
+        var renderBenchmark = false
+        /// Output-level RAW and ProRAW, which need a live session with a source attached.
+        var liveSession = false
+
+        static let none = Measurements()
+        static let all = Measurements(renderBenchmark: true, liveSession: true)
+    }
+
     /// - Parameters:
     ///   - modelURL: compiled benchmark model if one has been added to the target.
     ///     `nil` is a valid, non-error state: the Core ML section then reports the
@@ -19,30 +44,39 @@ enum CapabilityCollector {
     ///   - display: UIKit-derived facts, sampled on the main actor by the caller. The
     ///     probe body runs on a detached task and must not touch UIKit.
     ///   - cameraIsOwned: `true` when this report may start and stop its own
-    ///     `AVCaptureSession`. `AVFoundationProbe` builds a second session to read the
-    ///     output-level RAW and ProRAW capabilities, and two sessions competing for one
-    ///     physical device in one process is exactly the kind of contention that stalls
-    ///     the main runloop. The camera screen releases the device before opening the
-    ///     report and sets this to `true`.
+    ///     `AVCaptureSession`, which it may only do if `measurements.liveSession` is on.
+    ///   - measurements: what the run is allowed to measure. See the type for why this is
+    ///     not simply "everything".
     static func collect(modelURL: URL?,
                         logLimit: Int?,
                         display: DeviceProbe.DisplayFacts,
-                        cameraIsOwned: Bool) async -> Outcome {
+                        cameraIsOwned: Bool,
+                        measurements: Measurements = .none) async -> Outcome {
         // Breadcrumbs on disk before anything runs. The report has crashed the app on
         // device without leaving anything to read, and the in-memory log dies with the
         // process, so this is the only record of how far the run got.
         ProbeTrace.begin()
         let started = DispatchTime.now().uptimeNanoseconds
+        // Belt and braces: even with the live session opted in, the report does not open
+        // a second session unless it genuinely owns the camera.
+        let mayUseCamera = cameraIsOwned && measurements.liveSession
 
         let result = await Task.detached(priority: .userInitiated) { () -> Outcome in
             AppLog.note(AppLog.diagnostics, "capability probe: start")
 
             var sections: [ReportSection] = []
             sections.append(contentsOf: contained("device") { DeviceProbe.sections(display: display) })
-            sections.append(contentsOf: contained("avfoundation") { AVFoundationProbe.sections(cameraIsOwned: cameraIsOwned) })
+            sections.append(contentsOf: contained("avfoundation") { AVFoundationProbe.sections(cameraIsOwned: mayUseCamera) })
             sections.append(contentsOf: contained("coreml") { [CoreMLProbe.coreMLSection(modelURL: modelURL)] })
             sections.append(contentsOf: contained("vision") { [CoreMLProbe.visionSection()] })
-            sections.append(contentsOf: contained("render benchmark") { [DeviceProbe.renderBenchmark()] })
+            if measurements.renderBenchmark {
+                sections.append(contentsOf: contained("render benchmark") { [DeviceProbe.renderBenchmark()] })
+            } else {
+                sections.append(ReportSkipped.section("Render benchmark (Core Image / Metal)",
+                                                     "Not measured: this run reports capabilities "
+                                                     + "only. The benchmark is a throughput measurement, "
+                                                     + "not a capability."))
+            }
 
             // Checked after the render benchmark specifically. A jetsam kill is
             // indistinguishable from a crash unless the footprint at that point is known.
