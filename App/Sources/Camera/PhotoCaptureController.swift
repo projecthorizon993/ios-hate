@@ -60,14 +60,21 @@ final class PhotoCaptureController: NSObject {
     ///
     /// Manual wins over quality when both are set: losing a look the user chose is worse
     /// than losing an HDR badge, and the user can turn the manual value off.
-    static func prioritization(for request: Request) -> AVCapturePhotoSettings.QualityPrioritization {
+    ///
+    /// The enum is `AVCapturePhotoOutput.QualityPrioritization` even though the property
+    /// being set is on `AVCapturePhotoSettings`. It was spelled the intuitive way —
+    /// `AVCapturePhotoSettings.QualityPrioritization` — and that does not exist, so the
+    /// file did not compile. The property and its type living on different types is the
+    /// second instance of the same mistake as `isAppleProRAWSupported`; see
+    /// `docs/HANDOFF.md` section 8.
+    static func prioritization(for request: Request) -> AVCapturePhotoOutput.QualityPrioritization {
         if request.manualExposureActive { return .speed }
         if request.preferQuality { return .quality }
         return .balanced
     }
 
     /// The same string the recipe records, so the file and the request cannot disagree.
-    static func name(for prioritization: AVCapturePhotoSettings.QualityPrioritization) -> String {
+    static func name(for prioritization: AVCapturePhotoOutput.QualityPrioritization) -> String {
         switch prioritization {
         case .speed: return "speed"
         case .quality: return "quality"
