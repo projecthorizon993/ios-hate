@@ -1,5 +1,20 @@
 # LumaFrame — Architecture
 
+> **Reading order, 29 September 2026.** This document is the **platform contract** —
+> the verified constraints, the Step-1 decision record, repository topology and the
+> Android rules. Keep working from it.
+>
+> `docs/IOS_PLAN.md` is the **iOS delivery plan**, and it records three live correctness
+> defects in the current code that this file does not yet cover: the LUT is applied
+> without colour management (3.1 there), composite camera devices cannot do manual
+> exposure and the code binds one anyway (3.2), and `photoQualityPrioritization` will
+> discard manual exposure (3.3). It also states that **no step has been run on a device**
+> and that the Step 0 report was abandoned rather than fixed.
+>
+> Sections 2.1, 2.2, 8 (Android) and 9 remain current for Android. Section 2.3 has been
+> corrected: `isAppleProRAWSupported` is an `AVCapturePhotoOutput` property, not an
+> `AVCaptureDevice` one.
+
 Native camera app for **iOS 18+ (Swift/SwiftUI)** and **Android 14+ (Kotlin/Compose)**.
 
 This document is the contract for Steps 1–7. Step 0 (Capability Report) is already
@@ -83,6 +98,13 @@ them:
 - **`isVideoHDREnabled` is never written.** It is the only writable HDR knob and it
   affects video streaming only, so setting it would make the badge claim something it
   cannot deliver (see 2.4).
+- **`photoQualityPrioritization` carries a second, opposite requirement that is not yet
+  implemented.** `.quality` is requested for native stills HDR, as above. But the other
+  branch — `.balanced`, which is also the default — lets the system *override* a manual
+  ISO and shutter when the scene is dark enough to require multi-image fusion. When Pro
+  mode starts writing manual values, that branch must become `.speed` and the UI must say
+  multi-frame fusion is unavailable. Today it is harmless only because nothing writes
+  manual values yet. See `docs/IOS_PLAN.md` 3.3.
 - **The badge has exactly three states** — `HDR n/a`, `HDR ready`, `HDR requested`.
   The third appears only after a quality-priority capture on a format that reports
   high photo quality. It says **requested**, not resolved, because
@@ -177,11 +199,18 @@ are actually on the classpath.
 
 - Standard **RAW (DNG)** comes from
   `AVCapturePhotoOutput.availableRawPhotoPixelTypes` — this is the correct probe.
-- **Apple ProRAW is a separate capability**, `AVCaptureDevice.isAppleProRAWSupported`
-  (iOS 14.3+). It is `true` on iPhone 11 Pro / 11 Pro Max and later Pro models, and
-  `false` on the iPhone SE 2022. Do not hard-code either answer.
+- **Apple ProRAW is an output-level capability**, `AVCapturePhotoOutput.isAppleProRAWSupported`
+  (iOS 14.3+), *not* a device property. Apple documents querying it with the output
+  attached to a session that has a connected video source. There is no
+  `AVCaptureDevice.isAppleProRAWSupported`, and the Capability Report probe already
+  starts a real session to read it.
+- ProRAW is not available in Portrait mode, with Live Photos, or for video. Higher
+  resolution RAW/HEIF Max is gated on `Format.supportedMaxPhotoDimensions`, not model
+  name.
 - Ultra HDR JPEG requires `photoQualityPrioritization = .quality` and the format's
   `isHighestPhotoQualitySupported`.
+- `IOS_PLAN.md` section 5.2 records the flip side: `.balanced`, the default, lets the
+  system **override a manual ISO and shutter**. Manual values require `.speed`.
 
 ### 2.4 iOS: there is no "Smart HDR fired" API
 
@@ -200,7 +229,33 @@ the preview (scene need). The badge says "HDR ready" vs "HDR active (N frames)" 
 where we genuinely merged frames ourselves. Never fake it — `IOS_CAMERA_APP_PLAN.md`
 rule 8 and the app's own honesty requirement.
 
-### 2.5 iOS CI: use `macos-15`, not `macos-14`
+### 2.5 iOS: composite camera devices cannot do manual exposure
+
+Apple documents, on **both** `.builtInTripleCamera` and `.builtInDualWideCamera`:
+
+- no `AVCaptureDevice.ExposureMode.custom`, and no manual exposure bracketing
+- no locking focus to a lens position other than the current one
+- no locking AWB to gains other than the current ones
+- on `.builtInDualWideCamera`, exposure duration, ISO, white balance gains and lens
+  position may change when the device switches between its constituent cameras
+
+**Consequence:** binding a composite device means the Pro dial is a control over nothing.
+`CaptureSessionController.pickDevice` currently prefers the composite for session liveness,
+while `CameraCapabilities.attachBackCameras` filters composites out of the capability
+model — the UI and the session disagree, and no test covers the session half.
+
+The resolution is that **lens selection is active `AVCaptureDevice` selection, not zoom on
+a composite**: discovery for `[.builtInUltraWideCamera, .builtInWideAngleCamera,
+.builtInTelephotoCamera]` yields constituents as separate devices. Pro mode binds a
+constituent; Auto mode keeps the composite, where automatic lens switching is an advantage
+and no manual control is claimed. Manual controls are hidden when the bound device reports
+`isExposureModeSupported(.custom) == false`. The cost is a session reconfiguration per lens
+change in Pro mode, which is a deliberate trade against Auto-mode smoothness.
+
+Whether constituents genuinely support `.custom` is inferred from Apple's wording about the
+composite, so it must be confirmed on a Pro device. See `docs/IOS_PLAN.md` 3.2.
+
+### 2.6 iOS CI: use `macos-15`, not `macos-14`
 
 - `macos-14` defaults to **Xcode 15.4** and is **deprecated 6 Jul 2026, unsupported
   2 Nov 2026**.

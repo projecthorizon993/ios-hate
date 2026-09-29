@@ -1,5 +1,14 @@
 # iOS Low-Light Cinematic Camera App
 
+> **SUPERSEDED — 29 September 2026.** Replaced by `docs/IOS_PLAN.md`.
+>
+> Do not work from this document. Several premises in it are wrong: it treats manual
+> exposure as available on any device with a telephoto (Apple documents that composite
+> camera devices do not support `ExposureMode.custom`), it assumes `photoQualityPrioritization`
+> does not interfere with manual exposure (it does, by default), and it scopes the device
+> range to three test phones. It is retained only as a record of the original intent and
+> the aspirational feature list.
+
 ## 1. Product Definition
 
 Build a professional iOS camera application focused on:
