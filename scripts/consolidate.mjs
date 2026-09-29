@@ -91,12 +91,19 @@ for (const part of parts) {
   }
 }
 
-// --- Safety: private members reached from outside the merge set ------------
+// --- Safety: file-private reach --------------------------------------------
+//
+// Only **column-0** `private` is a hazard. A `private` member inside a type is scoped to
+// that type, so two types merged into one file may both have a `private chip` and both
+// still compile — flagging that would refuse every legitimate merge. A `private`
+// declaration at file scope is invisible outside its own file, so it is the one whose
+// reach a merge can change. Any such declaration used from a file outside the merge set
+// is a build break waiting to happen, and the merge is refused.
 
-const setPaths = new Set(parts.map((part) => part.path));
 const PRIVATE_DECL = /^(?:@\w+\s+)*(private|fileprivate)\s+(?:static\s+)?(?:final\s+)?(?:func|var|let|struct|class|enum|typealias)\s+([a-z][A-Za-z0-9_]*)/gm;
 
 const findings = [];
+const setPaths = new Set(parts.map((part) => part.path));
 for (const part of parts) {
   const names = [];
   PRIVATE_DECL.lastIndex = 0;

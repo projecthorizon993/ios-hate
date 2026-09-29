@@ -135,14 +135,15 @@ function count(text, character) {
 // ---------------------------------------------------------------------------
 // 4. File-private reach.
 //
-// `private` in Swift is file-scoped, so merging two files brings each other's private
-// declarations into scope — which only *adds* visibility, and never breaks a build.
-// The dangerous direction is the reverse: a private declaration whose users live in a
-// file that is NOT part of a given consolidation set. That is informational, and is
-// reported so a consolidation agent can check it before merging.
+// Only **column-0** `private` counts. A `private` member inside a type is scoped to that
+// type, so two types in the same merged file may each have their own `private chip`
+// without a conflict — which is the common case, and flagging it would make this check
+// cry wolf on every consolidation. A `private` declaration at file scope is a different
+// matter: it is invisible outside its own file, so merging can change what it can see,
+// and merging a file *out* can break a user that lives elsewhere.
 // ---------------------------------------------------------------------------
 
-const PRIVATE_DECL = /^\s*(?:@\w+\s+)*(private|fileprivate)\s+(?:static\s+)?(?:final\s+)?(?:func|var|let|struct|class|enum|typealias)\s+([a-z][A-Za-z0-9_]*)/gm;
+const PRIVATE_DECL = /^(?:@\w+\s+)*(private|fileprivate)\s+(?:static\s+)?(?:final\s+)?(?:func|var|let|struct|class|enum|typealias)\s+([a-z][A-Za-z0-9_]*)/gm;
 
 const privateNames = new Map(); // name -> [files]
 for (const file of files) {
