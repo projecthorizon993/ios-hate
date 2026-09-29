@@ -43,7 +43,6 @@
 				A7A90ACB24107C131EF7144E,
 				AE560125322348780D5B9325,
 				A3F9FE803B170A02B6475E09,
-				A1FF307089C3B5C0C76F4ADC,
 				AB94144D587B10334707370D,
 				A9D674D8CE54183D05A72EBF,
 				A4B1482221086C475487BED0,
@@ -66,13 +65,10 @@
 				AAE0F97D8CE57352E249633B,
 				AEB620EE64789952E59B006A,
 				AB174A3B018201C704EA6219,
-				AF8B792DE0339D5A6861CE02,
+				A1C7C834D702AFD9E95A3880,
 				AF5DA351FBF73C7FBFF2B805,
 				A4BA07DD1E0851A352093BC1,
 				AFA822C55F0EB6711410EAA3,
-				A5E20936E5F8525DAA7DFD3A,
-				AB4E3B931C24460A832FD0B2,
-				AD4C02E59330F5E268002A57,
 				A549153AEC2703901FADC6CE,
 				ADA0DEBE0747651E8E6C6109,
 				AC938FD7C68ED288AC7E4FED,
@@ -260,7 +256,6 @@
 				C15352A586C2134E09B448B6,
 				CA989FE2240D664E2733F871,
 				C09CBF3F68320016356FC1DB,
-				C9D29708200C20F35A80BF53,
 				CB60C54261C26C739BE10EDC,
 				CC4BE04410BDB19C788C79E7,
 				C14AD38C0F9C5DD49F829C7D,
@@ -283,13 +278,10 @@
 				CDB8F82FA873B01CFE9AB0D3,
 				C8F0875D32195865344EC1F9,
 				C4AA261019E06676EC934AA8,
-				C2D8C1C6070AB6B6D35F331B,
+				CA722B681EC7C4C3E2FAA635,
 				C1F850435B6C78A454F5B4BC,
 				C4DA73A05B3B8030C75BC53C,
 				C6FEE4DA81F4AE9A32EEE859,
-				CE7682ADF4BECB5A828EAE47,
-				C66307299FD3BD55253EDEB3,
-				CF9ACD8DD6FA00319CDB0B47,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -361,12 +353,6 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Sources/Camera/CameraCapabilities.swift;
-			sourceTree = "<group>";
-		};
-		A1FF307089C3B5C0C76F4ADC = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Camera/CameraRelease.swift;
 			sourceTree = "<group>";
 		};
 		AB94144D587B10334707370D = {
@@ -501,10 +487,10 @@
 			path = App/Sources/Support/AppLog.swift;
 			sourceTree = "<group>";
 		};
-		AF8B792DE0339D5A6861CE02 = {
+		A1C7C834D702AFD9E95A3880 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Support/DeveloperPanel.swift;
+			path = App/Sources/Support/CapabilityReport.swift;
 			sourceTree = "<group>";
 		};
 		AF5DA351FBF73C7FBFF2B805 = {
@@ -523,24 +509,6 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.c.objc;
 			path = App/Sources/Support/LumaFrameSafety.m;
-			sourceTree = "<group>";
-		};
-		A5E20936E5F8525DAA7DFD3A = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Support/MemoryProbe.swift;
-			sourceTree = "<group>";
-		};
-		AB4E3B931C24460A832FD0B2 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Support/ReportFormat.swift;
-			sourceTree = "<group>";
-		};
-		AD4C02E59330F5E268002A57 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Support/RuntimeCapabilities.swift;
 			sourceTree = "<group>";
 		};
 		A549153AEC2703901FADC6CE = {
@@ -590,10 +558,6 @@
 		C09CBF3F68320016356FC1DB = {
 			isa = PBXBuildFile;
 			fileRef = A3F9FE803B170A02B6475E09;
-		};
-		C9D29708200C20F35A80BF53 = {
-			isa = PBXBuildFile;
-			fileRef = A1FF307089C3B5C0C76F4ADC;
 		};
 		CB60C54261C26C739BE10EDC = {
 			isa = PBXBuildFile;
@@ -683,9 +647,9 @@
 			isa = PBXBuildFile;
 			fileRef = AB174A3B018201C704EA6219;
 		};
-		C2D8C1C6070AB6B6D35F331B = {
+		CA722B681EC7C4C3E2FAA635 = {
 			isa = PBXBuildFile;
-			fileRef = AF8B792DE0339D5A6861CE02;
+			fileRef = A1C7C834D702AFD9E95A3880;
 		};
 		C1F850435B6C78A454F5B4BC = {
 			isa = PBXBuildFile;
@@ -698,18 +662,6 @@
 		C6FEE4DA81F4AE9A32EEE859 = {
 			isa = PBXBuildFile;
 			fileRef = AFA822C55F0EB6711410EAA3;
-		};
-		CE7682ADF4BECB5A828EAE47 = {
-			isa = PBXBuildFile;
-			fileRef = A5E20936E5F8525DAA7DFD3A;
-		};
-		C66307299FD3BD55253EDEB3 = {
-			isa = PBXBuildFile;
-			fileRef = AB4E3B931C24460A832FD0B2;
-		};
-		CF9ACD8DD6FA00319CDB0B47 = {
-			isa = PBXBuildFile;
-			fileRef = AD4C02E59330F5E268002A57;
 		};
 		D7EA069DAB30A429FBAE2818 = {
 			isa = PBXBuildFile;

@@ -1,8 +1,63 @@
+// What this device can actually do, read from the running session.
+//
+// RuntimeCapabilities is the snapshot, ReportFormat renders it, MemoryProbe is the one measurement it reads, DeveloperPanel presents it, and CameraRelease is a capability datum that belongs with the rest.
+//
+// Merged mechanically by scripts/consolidate.mjs. Declarations were moved whole and
+// nothing was edited; see the commit message for the reasoning.
+import Foundation
 import AVFoundation
 import CoreMedia
-import Foundation
 import Metal
 import Vision
+import Darwin
+import SwiftUI
+
+// MARK: - release (was App/Sources/Camera/CameraRelease.swift)
+
+
+/// One-bit handover between the camera screen and the capability report.
+///
+/// The report needs the physical camera to itself: it opens a second
+/// `AVCaptureSession` to read the output-level RAW and ProRAW capabilities, and two
+/// sessions contending for one device inside one process is what stalled the main
+/// runloop on the first on-device attempt. The camera screen therefore tears its
+/// session down before presenting the report and rebuilds it afterwards, and it says
+/// so here so the probe can trust the answer.
+///
+/// Deliberately not a stored property on the view model: the report screen has no
+/// reference to the camera screen, and a global that only carries a boolean is far
+/// smaller than coupling the two to each other.
+@MainActor
+final class CameraRelease {
+
+    static let shared = CameraRelease()
+
+    /// `true` once the camera screen has released the device, `false` while it holds a
+    /// running session. The probe skips its live session when this is `false`, and says
+    /// so in the report rather than opening a second session anyway.
+    private(set) var isCameraReleased = false
+
+    private init() {}
+
+    /// The session was fully torn down: inputs and outputs removed, not just stopped.
+    func markReleased() {
+        isCameraReleased = true
+        AppLog.note(AppLog.camera, "camera released for the capability report")
+    }
+
+    /// The session is back. The camera is no longer available to the report.
+    func markRetaken() {
+        isCameraReleased = false
+        AppLog.note(AppLog.camera, "camera re-acquired after the capability report")
+    }
+}
+
+// MARK: - capabilities (was App/Sources/Support/RuntimeCapabilities.swift)
+
+
+
+
+
 
 /// What this device can actually do, discovered at run time and cached.
 ///
@@ -112,7 +167,6 @@ struct RuntimeCapabilities: Equatable, Sendable {
 
     var metalDeviceName: String = "none"
     var lowPowerGPU: Bool = false
-    var neuralEngineFamily9: Bool = false
 
     // MARK: Vision
 
@@ -258,12 +312,16 @@ extension RuntimeCapabilities {
             canProcessPreview = false
             return
         }
-        metalDeviceName = device.name
-        lowPowerGPU = device.isLowPower
-        // `supportsFamily(.apple9)` rather than a model lookup: a family query is what the
-        // hardware answers, and a chip-name table is a guess about hardware.
-        neuralEngineFamily9 = device.supportsFamily(.apple9)
-        canProcessPreview = true
+            metalDeviceName = device.name
+            lowPowerGPU = device.isLowPower
+            // No Neural Engine row, deliberately. A GPU family query is not an answer
+            // about the ANE, and there is no public API that reports which compute unit
+            // actually ran — so a field named for the ANE and answered from the GPU would
+            // be a capability claim the platform cannot support. The one that was here
+            // was written, never read, and misleadingly named; see docs/IOS_PLAN.md 10.2
+            // for how backend selection is done instead.
+            canProcessPreview = true
+
     }
 
     private mutating func discoverVision() {
@@ -349,5 +407,201 @@ enum AVCaptureProbeFormat {
         let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
         let fourCC = ReportFormat.fourCC(CMFormatDescriptionGetMediaSubType(format.formatDescription))
         return "\(size.width)x\(size.height) \(fourCC)"
+    }
+}
+
+// MARK: - format (was App/Sources/Support/ReportFormat.swift)
+
+
+
+/// Formatting shared by the camera UI, the capture metadata and the developer panel.
+///
+/// Extracted from the deleted capability report, which is the only thing that needed most
+/// of it. ISO and shutter read the same in a control label, a metadata value and a log
+/// line, and three spellings of "1/120" would be three things to keep in step.
+enum ReportFormat {
+
+    /// `1/120` rather than `0.00833s`, because a camera UI shows shutter speed as a
+    /// fraction and the fraction is what gets compared against a stock camera.
+    static func shutter(_ seconds: Double) -> String {
+        guard seconds > 0 else { return "n/a" }
+        if seconds >= 1.0 {
+            return String(format: "%.1fs", seconds)
+        }
+        let denominator = (1.0 / seconds).rounded()
+        guard denominator >= 1, denominator < 10000 else {
+            return String(format: "%.5fs", seconds)
+        }
+        return "1/\(Int(denominator))"
+    }
+
+    /// ISO and EV are floats; drop trailing zeroes so the report stays compact.
+    static func number(_ value: Double, decimals: Int = 2) -> String {
+        if value == value.rounded(), abs(value) < 1e9 {
+            return String(Int(value))
+        }
+        return String(format: "%.\(decimals)f", value)
+    }
+
+    static func range(_ lower: Double, _ upper: Double) -> String {
+        "\(number(lower)) ... \(number(upper))"
+    }
+
+    static func list(_ values: [String], empty: String = "none") -> String {
+        values.isEmpty ? empty : values.joined(separator: ", ")
+    }
+
+    /// FourCC code from a `CMFormatDescription`, or `?` when it cannot be read.
+    static func fourCC(_ code: FourCharCode) -> String {
+        let bytes = [
+            UInt8((code >> 24) & 0xFF),
+            UInt8((code >> 16) & 0xFF),
+            UInt8((code >> 8) & 0xFF),
+            UInt8(code & 0xFF)
+        ]
+        let scalars = bytes.map { byte -> String in
+            let scalar = UnicodeScalar(byte)
+            if scalar.value >= 0x20 && scalar.value < 0x7F {
+                return String(Character(scalar))
+            }
+            return String(format: "\\x%02X", byte)
+        }
+        return scalars.joined()
+    }
+}
+
+// MARK: - probe (was App/Sources/Support/MemoryProbe.swift)
+
+
+
+/// Resident footprint of this process, for the debug overlay.
+///
+/// `physicalMemory` is the device total, which is useless for spotting a leak, and
+/// `ProcessInfo` exposes no used-memory value. `task_info` with `TASK_VM_INFO` is the
+/// supported way to read it; `phys_footprint` is the number the jetsam limit is
+/// measured against, so it is the number worth watching.
+///
+/// Returns `nil` rather than a guess when the query fails, so the overlay shows `—`
+/// instead of a fabricated figure.
+enum MemoryProbe {
+
+    /// Megabytes, one decimal place, or `nil` when unavailable.
+    static func usedMegabytes() -> Double? {
+        guard let bytes = usedBytes() else { return nil }
+        return Double(bytes) / (1024 * 1024)
+    }
+
+    static func usedBytes() -> UInt64? {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size
+            / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), rebound, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return info.phys_footprint
+    }
+}
+
+// MARK: - panel (was App/Sources/Support/DeveloperPanel.swift)
+
+
+/// The developer panel: what this device can do, read from values already discovered.
+///
+/// This is the replacement for the capability report, and the difference is that **it
+/// probes nothing.** Every row is rendered from a `RuntimeCapabilities` that was filled in
+/// when the session was configured. There is no second capture session, no GPU benchmark,
+/// no large allocation and no asynchronous gap — which is the list of things the report
+/// did, and the list of things it crashed on.
+///
+/// So this panel cannot fail in the way the report did, and it is safe to leave reachable.
+///
+/// The log is the portable artefact. "Log capabilities" writes the same table to
+/// `Documents/LumaFrame-log.txt`, which is the thing to send with a bug report now that
+/// there is no shareable report file.
+struct DeveloperPanel: View {
+
+    @ObservedObject var model: CameraViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var logged = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                headline
+                rows
+                actions
+                howToRead
+            }
+            .padding(Theme.Space.l)
+        }
+        .background(Theme.ColorToken.surfaceBase)
+        .navigationTitle("Developer")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var headline: some View {
+        Text(model.runtimeCapabilities.headline)
+            .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+            .foregroundStyle(Theme.ColorToken.accentActive)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            ForEach(model.runtimeCapabilities.lines, id: \.0) { label, value in
+                HStack(alignment: .top, spacing: Theme.Space.s) {
+                    Text(label)
+                        .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                        .foregroundStyle(Theme.ColorToken.textDisabled)
+                        .frame(width: 92, alignment: .leading)
+                    Text(value)
+                        .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                        .foregroundStyle(Theme.ColorToken.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: Theme.Space.s) {
+            Button {
+                model.runtimeCapabilities.logEverything()
+                logged = true
+            } label: {
+                Text("Log capabilities")
+                    .font(.system(size: Theme.TypeSize.caption))
+                    .foregroundStyle(Theme.ColorToken.surfaceBase)
+                    .padding(.horizontal, Theme.Space.m)
+                    .frame(minHeight: Theme.Space.minTouch)
+                    .background(Theme.ColorToken.accentActive)
+                    .clipShape(Capsule())
+            }
+            .accessibilityHint("Writes every capability to the log file, which is what to send with a bug report")
+        }
+    }
+
+    /// Says where the log is, because a developer looking for the file will not guess that
+    /// Documents is exposed through Files.app by two Info.plist keys.
+    private var howToRead: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            Text(logged ? "Written. On My iPhone › LumaFrame › \(LumaFrameLogFile.fileName)"
+                        : "Log file: On My iPhone › LumaFrame › \(LumaFrameLogFile.fileName)")
+                .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                .foregroundStyle(logged ? Theme.ColorToken.accentActive : Theme.ColorToken.textDisabled)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("These are read at run time on this device. There is no cross-device record "
+                 + "any more: capabilities are not a measurement you gather once, they are "
+                 + "what the hardware reports while it is running.")
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(Theme.ColorToken.textDisabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
