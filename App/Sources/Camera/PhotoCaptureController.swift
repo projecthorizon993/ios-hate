@@ -93,6 +93,9 @@ final class PhotoCaptureController: NSObject {
         var isRawPhoto: Bool
     }
 
+    /// The one and only photo output. The session is given **this** instance rather than
+    /// making its own — see `CaptureSessionController.configure(facing:photoOutput:...)`
+    /// for what happened when there were two.
     let output = AVCapturePhotoOutput()
 
     /// `true` from `willBeginCapture` until the result is delivered. Drives the

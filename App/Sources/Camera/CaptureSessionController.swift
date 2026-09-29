@@ -99,6 +99,15 @@ final class CaptureSessionController: NSObject {
 
     /// Configures and starts the session for one facing direction.
     ///
+    /// `photoOutput` is the caller's own `AVCapturePhotoOutput` — the one it will call
+    /// `capturePhoto` on — and this type adds *that instance* rather than making its own.
+    /// It used to create a second one here, while the caller's went in through
+    /// `extraOutputs`; the session accepted the first and refused the second, so the
+    /// output the shutter actually used was never attached. An unattached output reports
+    /// no `availablePhotoCodecTypes`, which is the "this camera offers no photo codec"
+    /// refusal that made the app unable to take a picture at all. A session holds one
+    /// photo output; the owner has to own it.
+    ///
     /// `extraOutputs` are added after the video input and before the session starts, so
     /// a consumer such as the preview meter is already attached on the very first
     /// frame. Adding one later would drop frames and, on some devices, force a
@@ -106,6 +115,7 @@ final class CaptureSessionController: NSObject {
     /// Handed back on the main queue, so the owner can assign straight into its own
     /// main-actor state without a hop of its own.
     func configure(facing: CameraFacing,
+                   photoOutput: AVCapturePhotoOutput,
                    extraOutputs: [AVCaptureOutput],
                    completion: @escaping @MainActor (Result<Configuration, Error>) -> Void) {
         publish(.configuring)
@@ -117,7 +127,9 @@ final class CaptureSessionController: NSObject {
         let box = OutputBox(extraOutputs)
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            let result = self.configureLocked(facing: facing, extraOutputs: box.outputs)
+            let result = self.configureLocked(facing: facing,
+                                             photoOutput: photoOutput,
+                                             extraOutputs: box.outputs)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 switch result {
@@ -199,12 +211,15 @@ final class CaptureSessionController: NSObject {
     }
 
     private func configureLocked(facing: CameraFacing,
+                                 photoOutput: AVCapturePhotoOutput,
                                  extraOutputs: [AVCaptureOutput]) -> Result<Configuration, Error> {
         // `startRunning` deliberately happens after `commitConfiguration`: AVFoundation
         // serialises a running session against its own configuration block, and
         // starting inside the block leaves the session stopped on several devices.
         session.beginConfiguration()
-        let configured = reconfigureLocked(facing: facing, extraOutputs: extraOutputs)
+        let configured = reconfigureLocked(facing: facing,
+                                           photoOutput: photoOutput,
+                                           extraOutputs: extraOutputs)
         session.commitConfiguration()
         guard case .success(let configuration) = configured else { return configured }
 
@@ -220,6 +235,7 @@ final class CaptureSessionController: NSObject {
     /// Rebuilds inputs and outputs. Must be called between `beginConfiguration` and
     /// `commitConfiguration`.
     private func reconfigureLocked(facing: CameraFacing,
+                                   photoOutput: AVCapturePhotoOutput,
                                    extraOutputs: [AVCaptureOutput]) -> Result<Configuration, Error> {
         // A previous configuration is always removed before a new one is added, so
         // flipping the camera cannot accumulate inputs and outputs.
@@ -257,25 +273,31 @@ final class CaptureSessionController: NSObject {
         AppLog.note(AppLog.camera, "requested format: \(CaptureFormatChooser.describe(requested))")
         AppLog.note(AppLog.camera, "active format: \(CaptureFormatChooser.describe(applied))")
 
-        let photo = AVCapturePhotoOutput()
-        guard session.canAddOutput(photo) else {
+        // The caller's instance, added here and nowhere else. See `configure(facing:photoOutput:...)`
+        // for what the previous second-instance arrangement cost.
+        guard session.canAddOutput(photoOutput) else {
             return .failure(CameraError.photoOutputRejected)
         }
-        session.addOutput(photo)
-        photoOutput = photo
+        session.addOutput(photoOutput)
+        self.photoOutput = photoOutput
 
         // Only meaningful once the output is attached, which is why it is not part of
         // the format choice above.
-        let maxStill = photo.maxPhotoDimensions
+        let maxStill = photoOutput.maxPhotoDimensions
         if maxStill.width > 0, maxStill.height > 0 {
-            let failure = LumaFrameSafety.perform { photo.maxPhotoDimensions = maxStill }
+            let failure = LumaFrameSafety.perform { photoOutput.maxPhotoDimensions = maxStill }
             if let failure { AppLog.warn(AppLog.camera, "maxPhotoDimensions rejected: \(failure)") }
         }
 
         for output in extraOutputs {
             guard session.canAddOutput(output) else {
-                AppLog.warn(AppLog.camera, "output rejected by the session: \(type(of: output))")
-                continue
+                // A refused extra output is fatal, not something to skip past. The previous
+                // version logged and continued, which is how the capture path came to be
+                // silently unusable: the only output the shutter used was refused here, the
+                // session carried on, and the app reported itself ready. An output the
+                // session will not take cannot be replaced by another one, so continuing
+                // only hides the failure until something downstream asks for it.
+                return .failure(CameraError.outputRejected(type(of: output)))
             }
             session.addOutput(output)
             self.extraOutputs.append(output)
@@ -763,6 +785,9 @@ enum CameraError: LocalizedError, Equatable {
     case noDevice(CameraFacing)
     case inputRejected(String)
     case photoOutputRejected
+    /// An output beyond the photo one that the session refused. Carries the type name so
+    /// the message says *which* consumer lost its frames.
+    case outputRejected(String)
     case startFailed(String)
 
     var errorDescription: String? {
@@ -773,6 +798,8 @@ enum CameraError: LocalizedError, Equatable {
             return "The capture session rejected the input for \(name)"
         case .photoOutputRejected:
             return "The capture session rejected the photo output"
+        case .outputRejected(let type):
+            return "The capture session rejected \(type)"
         case .startFailed(let reason):
             return "The capture session would not start: \(reason)"
         }

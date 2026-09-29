@@ -165,6 +165,12 @@ struct RuntimeCapabilities: Equatable, Sendable {
     var highPhotoQualitySupported: Bool = false
     var zoomMin: CGFloat = 1
     var zoomMax: CGFloat = 1
+    /// Whether the active format permits a zoom factor below 1x, which is what the ultra
+    /// wide needs. `false` here means the lens chips below 1x are decoration.
+    var hasZoomBelowOneX: Bool = false
+    /// How many `virtualDeviceSwitchOverVideoZoomFactors` the bound device reports, i.e.
+    /// how many points at which a composite hands over to a different physical lens.
+    var virtualSwitchOverPoints: Int = 0
 
     // MARK: Output
 
@@ -212,7 +218,8 @@ struct RuntimeCapabilities: Equatable, Sendable {
             ("format", activeFormat),
             ("iso", isoRange.map { "\(ReportFormat.range(Double($0.lowerBound), Double($0.upperBound)))" } ?? "n/a"),
             ("shutter", shutterRange.map { "\(ReportFormat.shutter($0.lowerBound))…\(ReportFormat.shutter($0.upperBound))" } ?? "n/a"),
-            ("zoom", "\(ReportFormat.number(Double(zoomMin)))…\(ReportFormat.number(Double(zoomMax)))"),
+             ("zoom", "\(ReportFormat.number(Double(zoomMin)))…\(ReportFormat.number(Double(zoomMax)))"
+                 + ", below 1x \(hasZoomBelowOneX), switch-over points \(virtualSwitchOverPoints)"),
             ("locks", "exposure \(canLockExposure), focus \(canLockFocus), WB \(canLockWhiteBalance)"),
             ("quality", "videoHDR \(videoHDRSupported), highPhotoQuality \(highPhotoQualitySupported)"),
             ("codecs", ReportFormat.list(photoCodecs)),
@@ -400,8 +407,20 @@ extension RuntimeCapabilities {
         videoHDRSupported = format.isVideoHDRSupported
         highPhotoQualitySupported = format.isHighPhotoQualitySupported
 
-        zoomMin = max(1, device.minAvailableVideoZoomFactor)
+        // The **raw** minimum, not `max(1, ...)`. Clamping it to 1 was hiding the exact
+        // fact that matters: on a device where this came back as 1.0, every lens below 1x
+        // is unreachable, and the report — the one artefact anyone reads when asking why
+        // a control does nothing — said "1.0...2.0" as though it were a working range.
+        // A report that flattens a missing capability into a plausible-looking one is
+        // worse than no report.
+        zoomMin = device.minAvailableVideoZoomFactor
         zoomMax = max(zoomMin, device.maxAvailableVideoZoomFactor)
+        // Whether the bound device can reach a different physical lens at all under the
+        // active format. `virtualDeviceSwitchOverVideoZoomFactors` are the points where a
+        // composite hands over to another physical lens, so a non-empty list plus a minimum
+        // below 1x is what "the lens chips will actually work" looks like.
+        hasZoomBelowOneX = device.minAvailableVideoZoomFactor < 1
+        virtualSwitchOverPoints = device.virtualDeviceSwitchOverVideoZoomFactors.count
     }
 
     // MARK: Identity

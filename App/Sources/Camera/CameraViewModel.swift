@@ -163,7 +163,8 @@ final class CameraViewModel: ObservableObject {
         // data outputs of different pixel formats on one session for no benefit. Sharing
         // is fewer bytes and one fewer thing to fail.
         sessionController.configure(facing: facing,
-                                    extraOutputs: [photo.output, meter.output]) { [weak self] result in
+                                    photoOutput: photo.output,
+                                    extraOutputs: [meter.output]) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let configuration):
@@ -514,6 +515,24 @@ final class CameraViewModel: ObservableObject {
         let upper = max(lower, device.maxAvailableVideoZoomFactor)
         let clamped = min(max(destination, lower), upper)
 
+        // A clamp that changes the destination means the requested lens is not reachable
+        // from the active format, and that used to be logged as a success: the line said
+        // `lens -> 1.0x (ultraWide)` with no indication that 1.0x is not the ultra wide.
+        // The user sees a chip that does nothing and the log says it worked.
+        //
+        // `docs/device-record-01.md` finding 2. What this needs to become is a different
+        // *format*, not a different zoom factor — `CaptureFormatChooser` ranks on still
+        // quality and never on zoom range, and the 4032x3024 it picks has a minimum
+        // available zoom factor of 1.0, so every lens below 1x is unreachable. Which
+        // formats do carry a usable range is not knowable without a device, so rather
+        // than guess at the ranking this says what happened and what was asked for.
+        if abs(clamped - destination) > 0.001 {
+            AppLog.warn(AppLog.camera,
+                        "lens \(camera.kind.rawValue) needs \(destination)x but the active "
+                        + "format only allows \(lower)x...\(upper)x; requested lens is "
+                        + "unreachable from this format")
+        }
+
         // `ramp` rather than an assignment: the assignment jumps, and a lens change that
         // snaps is a lens change the user cannot follow. The rate is roughly how fast a
         // real lens ring moves.
@@ -526,7 +545,8 @@ final class CameraViewModel: ObservableObject {
             return
         }
         Haptics.selection()
-        AppLog.note(AppLog.camera, "lens -> \(clamped)x (\(camera.kind.rawValue))")
+        AppLog.note(AppLog.camera,
+                    "lens -> \(clamped)x (\(camera.kind.rawValue)) asked \(destination)x")
         // Read the readout straight back rather than waiting for the next poll, so the
         // label updates as soon as the ramp starts.
         refreshReadout()
@@ -735,7 +755,7 @@ final class CameraViewModel: ObservableObject {
         facing = next
         flashMode = .off
         hasConfigured = true
-        sessionController.configure(facing: next, extraOutputs: [photo.output, meter.output]) { [weak self] result in
+        sessionController.configure(facing: next, photoOutput: photo.output, extraOutputs: [meter.output]) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let configuration): self.finishConfiguration(configuration)
