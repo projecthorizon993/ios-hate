@@ -36,8 +36,30 @@ struct CubeLUT: Equatable {
     var domainWasDeclared: Bool
 
     /// Flat RGB samples in file order. For a 3D table the red channel varies fastest,
-    /// which is the order `CIColorCube` expects.
+    /// which is the order Core Image's colour cube filters expect.
     var samples: [Float]
+
+    /// The colour space the table was **authored** for, or `nil` when the table is not
+    /// in a colour space this pipeline can apply.
+    ///
+    /// This is the value handed to `CIColorCubeWithColorSpace` as `inputColorSpace`, and
+    /// it must be the space the colourist worked in — not the space the image happens to
+    /// be in, and not a space inferred from the numbers.
+    ///
+    /// Adobe `.cube` has no colour-space directive; the only thing a file can state is
+    /// its domain. A 0…1 domain means gamma-encoded sRGB by convention, and that is the
+    /// only claim this type will make. **A non-unit domain is not "linear sRGB"** — it is
+    /// a log encoding (Rec.709, LogC, S-Log) or a wider range, neither of which is a
+    /// colour space, so it is recorded as `nil` and refused at apply time rather than
+    /// relabelled as something it is not.
+    ///
+    /// That also means a P3-authored table is indistinguishable from an sRGB one, because
+    /// the format cannot say. See `LUTProcessor` for what follows from that.
+    ///
+    /// Declared last so the memberwise initialiser keeps its existing shape, and owned by
+    /// `CubeLUTParser`, which is the only production construction site that reads a
+    /// domain off a file.
+    var authoredSpace: ColorSpace? = .sRGB
 
     /// The colour space the table was authored for, inferred from its domain. A table
     /// whose domain is not 0…1 in every channel is almost always a log-encoded one.

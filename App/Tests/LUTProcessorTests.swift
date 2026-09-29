@@ -6,10 +6,15 @@ import XCTest
 ///
 /// What is asserted here is the decisions: what is refused, what is a no-op, and the
 /// cube byte order. Rendering is not — Core Image returns no output in the headless CI
-/// simulator even for a filter it accepts, so the two tests that need a rendered result
-/// skip there and are carried by the on-device checklist in `docs/ARCHITECTURE.md`
+/// simulator even for a filter it accepts, so the tests that need a rendered result skip
+/// there and are carried by the on-device checklist in `docs/ARCHITECTURE.md`
 /// section 4. That is the same line this file has always drawn: pixels are a device
 /// claim, decisions are a CI claim.
+///
+/// **Filter availability is a CI claim, and is asserted here.** Whether
+/// `CIColorCubeWithColorSpace` resolves is a fact about the platform, it holds in a
+/// headless simulator, and the app shipped a whole release applying tables with the
+/// invariant filter because nobody checked it.
 ///
 /// The exception trap is also load-bearing under CI. `CIColorCube` has no
 /// `inputColorSpace` key, and setting one raises an Objective-C exception Swift cannot
@@ -19,6 +24,12 @@ import XCTest
 final class LUTProcessorTests: XCTestCase {
 
     private let processor = LUTProcessor()
+
+    /// The colour-managed filter this file exists to protect.
+    ///
+    /// Spelled once so the lookup under test and the test that checks the lookup cannot
+    /// drift apart.
+    private static let filterName = "CIColorCubeWithColorSpace"
 
     private func makeTable(size: Int = 2,
                            domainWasDeclared: Bool = true,
@@ -37,13 +48,18 @@ final class LUTProcessorTests: XCTestCase {
                 }
             }
         }
+        // `authoredSpace` is set the way the parser sets it, from the domain, rather than
+        // left to its default. These fixtures build `CubeLUT` directly and so skip the
+        // parser, and a log-domain fixture that quietly claimed sRGB would never reach the
+        // refusal it exists to test.
         return CubeLUT(size: size,
                        kind: .threeDimensional,
                        title: "identity",
                        domainMin: [0, 0, 0],
                        domainMax: [domainMax, domainMax, domainMax],
                        domainWasDeclared: domainWasDeclared,
-                       samples: samples)
+                       samples: samples,
+                       authoredSpace: domainMax == 1 ? .sRGB : nil)
     }
 
     /// A plain CIImage to hand to the processor.
@@ -56,6 +72,94 @@ final class LUTProcessorTests: XCTestCase {
     private func makeTestImage() -> CIImage {
         let flat = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
         return flat.cropped(to: CGRect(x: 0, y: 0, width: 4, height: 4))
+    }
+
+    // MARK: - Authored space
+
+    /// The parser is what turns a declared domain into a colour space, so this is where
+    /// the two halves of that claim are pinned: a 0…1 domain is the sRGB convention, and
+    /// a non-unit domain is not a colour space at all.
+    ///
+    /// Written here rather than in `CubeLUTParserTests` because the property does not
+    /// exist in isolation — it only means something once a table reaches the apply stage.
+    ///
+    /// Both fixtures keep their samples inside their declared domain, because the parser
+    /// rejects a table that does not before the authored space is ever consulted. A log
+    /// table with 0…1 samples is not a log table, it is a malformed one.
+    func testParserRecordsTheAuthoredSpaceFromTheDeclaredDomain() throws {
+        let sRGBTable = """
+        TITLE "unit domain"
+        LUT_3D_SIZE 2
+        DOMAIN_MIN 0 0 0
+        DOMAIN_MAX 1 1 1
+        0 0 0
+        1 0 0
+        0 1 0
+        1 1 0
+        0 0 1
+        1 0 1
+        0 1 1
+        1 1 1
+        """
+        let parsedSRGB = try CubeLUTParser.parse(text: sRGBTable)
+        XCTAssertEqual(parsedSRGB.authoredSpace, .sRGB)
+
+        let logTable = """
+        TITLE "log domain"
+        LUT_3D_SIZE 2
+        DOMAIN_MIN 0 0 0
+        DOMAIN_MAX 0.3 0.3 0.3
+        0 0 0
+        0.3 0 0
+        0 0.3 0
+        0.3 0.3 0
+        0 0 0.3
+        0.3 0 0.3
+        0 0.3 0.3
+        0.3 0.3 0.3
+        """
+        let parsedLog = try CubeLUTParser.parse(text: logTable)
+        XCTAssertNil(parsedLog.authoredSpace,
+                     "a log domain is not a colour space, so it must not claim to be sRGB")
+        XCTAssertEqual(parsedLog.domain, .nonUnit)
+    }
+
+    /// A table with no `DOMAIN` lines at all is assumed 0…1, per the Adobe convention,
+    /// and the assumption is what it claims — not a refusal.
+    func testParserAssumesSRGBWhenNoDomainIsDeclared() throws {
+        let text = """
+        LUT_3D_SIZE 2
+        0 0 0
+        1 0 0
+        0 1 0
+        1 1 0
+        0 0 1
+        1 0 1
+        0 1 1
+        1 1 1
+        """
+        let parsed = try CubeLUTParser.parse(text: text)
+        XCTAssertFalse(parsed.domainWasDeclared)
+        XCTAssertEqual(parsed.authoredSpace, .sRGB)
+    }
+
+    // MARK: - Filter availability
+
+    /// The test that should have existed before this defect was shipped.
+    ///
+    /// `LUTProcessor` used `CIColorCube`, on the stated grounds that the colour-managed
+    /// alternative "is absent from the SDK CI builds against". That claim was never
+    /// checked, and it was false: the filter resolves, and the app was applying every
+    /// lookup table with no colour management in the meantime.
+    ///
+    /// This asserts only that the filter **resolves**, which is a fact about the platform
+    /// and holds in a headless simulator. It deliberately asserts nothing about rendering,
+    /// which does not — that is what the skips below are for. The distinction is the
+    /// whole lesson: *availability* is checkable in CI, *pixels* are not.
+    func testColorManagedCubeFilterIsAvailable() {
+        XCTAssertNotNil(CIFilter(name: Self.filterName),
+                        "\(Self.filterName) must resolve; if it does not, the LUT path is "
+                        + "applying tables without colour management")
     }
 
     // MARK: - Cube data
@@ -120,17 +224,22 @@ final class LUTProcessorTests: XCTestCase {
         }
     }
 
-    /// The section 3.1 rule: a log-encoded table must not be applied to gamma-encoded
-    /// pixels, and the user is told rather than handed a wrong photo.
-    func testRefusesALogEncodedTableOnAnSRGBImage() {
+    /// A non-unit domain is not "linear sRGB" — it is a log encoding, and saying otherwise
+    /// implies a conversion is possible when it is not. So it is refused as its own case,
+    /// by name, rather than as a colour-space mismatch against a space it does not have.
+    func testRefusesALogEncodedTableAndNamesItAsSuch() {
         let logTable = makeTable(size: 2, domainMax: 0.301)
 
         XCTAssertThrowsError(try processor.apply(logTable,
                                                  to: makeTestImage(),
                                                  intensity: 1,
                                                  imageSpace: .sRGB)) { error in
-            XCTAssertEqual(error as? LUTApplicationError,
-                           .domainMismatch(lut: "linear sRGB", image: "sRGB"))
+            guard case .logEncodedTable(let domain)? = error as? LUTApplicationError else {
+                return XCTFail("expected logEncodedTable, got \(error)")
+            }
+            XCTAssertFalse(domain.isEmpty, "the reason must say what the domain was")
+            XCTAssertFalse(domain.contains("linear sRGB"),
+                           "a log domain is not linear sRGB and must not be reported as it")
         }
     }
 
@@ -149,7 +258,8 @@ final class LUTProcessorTests: XCTestCase {
     func testEveryRefusalExplainsItself() {
         let refusals: [LUTApplicationError] = [
             .oneDimensionalTableNotSupported(size: 3),
-            .domainMismatch(lut: "linear sRGB", image: "sRGB"),
+            .domainMismatch(lut: "sRGB", image: "Display P3"),
+            .logEncodedTable(domain: "0…0.3"),
             .notUsable(reason: "the table is missing samples"),
             .intensityOutOfRange(2)
         ]
@@ -185,15 +295,17 @@ final class LUTProcessorTests: XCTestCase {
 
     /// Whether Core Image can build a colour cube in this environment at all.
     ///
-    /// On the CI simulator `CIFilter(name: "CIColorCube")` succeeds and accepts all three
-    /// parameters without raising, then returns nil for `outputImage`. That was five CI
-    /// runs' worth of misdiagnosis before the per-key reporting made it visible: the
-    /// filter is fine, the headless simulator is not. The tests that need a rendered
-    /// result skip on that evidence rather than assert something untrue, and
-    /// `docs/ARCHITECTURE.md` section 4 carries them as on-device items instead.
+    /// On the CI simulator `CIFilter(name: "CIColorCubeWithColorSpace")` succeeds and
+    /// accepts all its parameters without raising, then returns nil for `outputImage`.
+    /// That was five CI runs' worth of misdiagnosis before the per-key reporting made it
+    /// visible: the filter is fine, the headless simulator is not. The distinction is
+    /// worth holding onto, because it is what made the availability claim in
+    /// `LUTProcessor` look credible in the first place — **the filter resolving and the
+    /// filter rendering are separate questions, and only the first is answerable here.**
     private func coreImageCanRenderACube() -> Bool {
-        guard let cube = CIFilter(name: "CIColorCube") else { return false }
+        guard let cube = CIFilter(name: Self.filterName) else { return false }
         let flat = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+        cube.setValue(ColorSpace.sRGB.cgColorSpace, forKey: "inputColorSpace")
         cube.setValue(flat.cropped(to: CGRect(x: 0, y: 0, width: 4, height: 4)),
                       forKey: kCIInputImageKey)
         cube.setValue(Float(2), forKey: "inputCubeDimension")
@@ -208,7 +320,7 @@ final class LUTProcessorTests: XCTestCase {
     /// then, because GPU float rounding is not something to assert to the last bit.
     func testAppliesAUnitDomainTableToAnSRGBImage() throws {
         try XCTSkipUnless(coreImageCanRenderACube(),
-                          "headless Core Image returns no output for CIColorCube; "
+                          "headless Core Image returns no output for CIColorCubeWithColorSpace; "
                           + "verified on device per docs/ARCHITECTURE.md section 4")
         let table = makeTable(size: 2)
 
@@ -242,7 +354,7 @@ final class LUTProcessorTests: XCTestCase {
     /// above; this is the other half of the contract, that nothing *valid* is turned away.
     func testEveryIntensityInRangeIsAccepted() throws {
         try XCTSkipUnless(coreImageCanRenderACube(),
-                          "headless Core Image returns no output for CIColorCube; "
+                          "headless Core Image returns no output for CIColorCubeWithColorSpace; "
                           + "verified on device per docs/ARCHITECTURE.md section 4")
         let table = makeTable(size: 2)
         let image = makeTestImage()

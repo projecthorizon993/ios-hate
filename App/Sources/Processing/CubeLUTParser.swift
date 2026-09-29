@@ -109,13 +109,24 @@ enum CubeLUTParser {
             throw CubeLUTError.domainBoundsInverted(line: 1)
         }
 
+        // The domain is the only thing a `.cube` file can state about its encoding, so it
+        // is what the authored space is read from. Unit is the sRGB convention; anything
+        // else is a log encoding or a wider range, which is not a colour space, and is
+        // recorded as no space at all so the apply stage refuses it by name rather than
+        // relabelling it as something it is not.
+        let resolvedMin = domainMin ?? [0, 0, 0]
+        let resolvedMax = domainMax ?? [1, 1, 1]
+        let isUnitDomain = resolvedMin.allSatisfy { $0 == 0 } && resolvedMax.allSatisfy { $0 == 1 }
+        let authoredSpace: ColorSpace? = isUnitDomain ? .sRGB : nil
+
         let lut = CubeLUT(size: size,
                           kind: kind,
                           title: title,
-                          domainMin: domainMin ?? [0, 0, 0],
-                          domainMax: domainMax ?? [1, 1, 1],
+                          domainMin: resolvedMin,
+                          domainMax: resolvedMax,
                           domainWasDeclared: declared,
-                          samples: samples)
+                          samples: samples,
+                          authoredSpace: authoredSpace)
 
         // Only checked when the file actually declared a domain. A table with no
         // DOMAIN lines is assumed to be 0…1, and refusing samples outside that would
