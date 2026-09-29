@@ -61,11 +61,14 @@ struct LooksScreen: View {
         .scrollClipDisabled()
     }
 
+    /// One tile. Built from subviews rather than one expression tree.
+    ///
+    /// SwiftUI's inference on a single `some View` return with this many modifiers over an
+    /// optional `Look` blows the type checker's budget, and it reports only
+    /// "unable to type-check this expression in reasonable time" with no indication of
+    /// which part is at fault. Each piece is its own `some View`, so the complexity is
+    /// bounded per function and the failure — if there is one — names a smaller thing.
     private func carouselTile(look: Look?, title: String) -> some View {
-        // The selection and the thumbnail are worked out first, as plain values, rather
-        // than inline in the view. The tile is a large expression tree over an optional
-        // `Look`, and inlining it defeated the type checker's budget — the whole tile
-        // failed to compile rather than one part of it being reported.
         let isSelected: Bool
         if let look {
             isSelected = model.settings.look?.id == look.id
@@ -74,55 +77,71 @@ struct LooksScreen: View {
         }
         let isComparing: Bool = comparingLook?.id == look?.id
         let rendered: UIImage = look.flatMap { thumbnails[$0] } ?? LookThumbnailer.placeholder()
-        let borderColour = isSelected ? Theme.ColorToken.accentActive : Theme.ColorToken.strokeSubtle
-        let labelColour = isSelected ? Theme.ColorToken.textPrimary : Theme.ColorToken.textSecondary
-        let side = LookThumbnailer.size
 
-        return VStack(spacing: Theme.Space.xs) {
-            rendered
-                .resizable()
-                .aspectRatio(1, contentMode: .fill)
-                .frame(width: side, height: side)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control)
-                    .stroke(borderColour, lineWidth: isSelected ? 2 : 1))
-                .overlay(alignment: .topTrailing) {
-                    if isComparing {
-                        Image(systemName: "eye")
-                            .font(.system(size: Theme.TypeSize.caption))
-                            .foregroundStyle(Theme.ColorToken.accentCompare)
-                            .padding(Theme.Space.xs)
-                            .background(Circle().fill(Theme.ColorToken.surfaceBase.opacity(0.7)))
-                            .padding(Theme.Space.xs)
-                    }
-                }
+        return tileBody(image: rendered,
+                        title: title,
+                        isSelected: isSelected,
+                        isComparing: isComparing)
+            // The scale is the selection affordance the spec calls for: 1.0 selected,
+            // 0.85 otherwise, so the eye finds the current look without reading a border.
+            .scaleEffect(isSelected ? 1.0 : 0.85)
+            .opacity(isSelected ? 1.0 : 0.75)
+            .animation(.spring(response: Theme.Motion.mode, dampingFraction: 0.8), value: isSelected)
+            .contentShape(Rectangle())
+            .onTapGesture { select(look) }
+            // Hold to preview this look without committing to it. Tapping to select and
+            // then finding a separate preview control is two steps for one question.
+            .onLongPressGesture(minimumDuration: Theme.Motion.tap, maximumDistance: 40) {
+                // A completed long press ends the preview and leaves the look selected.
+                endComparing()
+            } onPressingChanged: { pressing in
+                if pressing { beginComparing(look) } else { endComparing() }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityValue(isSelected ? "Selected" : "")
+            .accessibilityHint("Double tap to apply. Touch and hold to preview without applying.")
+            .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+    }
 
+    private func tileBody(image: UIImage,
+                          title: String,
+                          isSelected: Bool,
+                          isComparing: Bool) -> some View {
+        VStack(spacing: Theme.Space.xs) {
+            tileImage(image, isSelected: isSelected, isComparing: isComparing)
             Text(title)
                 .font(.system(size: Theme.TypeSize.caption))
-                .foregroundStyle(labelColour)
+                .foregroundStyle(isSelected
+                                 ? Theme.ColorToken.textPrimary
+                                 : Theme.ColorToken.textSecondary)
                 .lineLimit(1)
-                .frame(width: side)
+                .frame(width: LookThumbnailer.size)
         }
-        // The scale is the selection affordance the spec calls for: 1.0 selected, 0.85
-        // otherwise, so the eye finds the current look without reading the border.
-        .scaleEffect(isSelected ? 1.0 : 0.85)
-        .opacity(isSelected ? 1.0 : 0.75)
-        .animation(.spring(response: Theme.Motion.mode, dampingFraction: 0.8), value: isSelected)
-        .contentShape(Rectangle())
-        .onTapGesture { select(look) }
-        // Hold to preview this look without committing to it. A tap-to-select followed by
-        // a separate preview control is two steps for one question.
-        .onLongPressGesture(minimumDuration: Theme.Motion.tap, maximumDistance: 40) {
-            // Completed long press: end the preview and leave the look selected.
-            endComparing()
-        } onPressingChanged: { pressing in
-            if pressing { beginComparing(look) } else { endComparing() }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(isSelected ? "Selected" : "")
-        .accessibilityHint("Double tap to apply. Touch and hold to preview without applying.")
-        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+    }
+
+    private func tileImage(_ image: UIImage,
+                           isSelected: Bool,
+                           isComparing: Bool) -> some View {
+        let side = LookThumbnailer.size
+        let border: Color = isSelected ? Theme.ColorToken.accentActive : Theme.ColorToken.strokeSubtle
+        return image
+            .resizable()
+            .aspectRatio(1, contentMode: .fill)
+            .frame(width: side, height: side)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control)
+                .stroke(border, lineWidth: isSelected ? 2 : 1))
+            .overlay(alignment: .topTrailing) {
+                if isComparing {
+                    Image(systemName: "eye")
+                        .font(.system(size: Theme.TypeSize.caption))
+                        .foregroundStyle(Theme.ColorToken.accentCompare)
+                        .padding(Theme.Space.xs)
+                        .background(Circle().fill(Theme.ColorToken.surfaceBase.opacity(0.7)))
+                        .padding(Theme.Space.xs)
+                }
+            }
     }
 
     private func select(_ look: Look?) {
