@@ -112,14 +112,15 @@ struct RuntimeCapabilities: Equatable, Sendable {
         facts.model = device.model
         facts.systemName = device.systemName
         facts.systemVersion = device.systemVersion
-        // `UIDisplayGamut` spelled out on both sides. `traitCollection.displayGamut` is a
-        // `UIDisplayGamut`, but a bare `.displayP3` resolves against `SwiftUI.Color`'
-        // `RGBColorSpace`, which is a different enum with a case of the same name — so the
-        // comparison silently fails to compile rather than failing to compile usefully.
+        // The case is `.p3`, not `.displayP3`. `UIDisplayGamut` has two cases, `p3` and
+        // `sRGB` — the naming that reads like "Display P3" is `CGColorSpace.displayP3` and
+        // `SwiftUI.Color.RGBColorSpace.displayP3`, neither of which is this type. The
+        // comparison is also written with the type spelled out, because a bare `.p3` next
+        // to `SwiftUI.Color` in the same file is an ambiguity waiting to happen.
         let gamut: UIDisplayGamut = UIScreen.main.traitCollection.displayGamut
         facts.displayGamut = String(describing: gamut)
         facts.maximumFramesPerSecond = UIScreen.main.maximumFramesPerSecond
-        facts.wideGamut = gamut == UIDisplayGamut.displayP3
+        facts.wideGamut = gamut == UIDisplayGamut.p3
         return facts
     }
 
