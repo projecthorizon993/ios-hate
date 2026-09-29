@@ -112,9 +112,14 @@ struct RuntimeCapabilities: Equatable, Sendable {
         facts.model = device.model
         facts.systemName = device.systemName
         facts.systemVersion = device.systemVersion
-        facts.displayGamut = String(describing: UIScreen.main.traitCollection.displayGamut)
+        // `UIDisplayGamut` spelled out on both sides. `traitCollection.displayGamut` is a
+        // `UIDisplayGamut`, but a bare `.displayP3` resolves against `SwiftUI.Color`'
+        // `RGBColorSpace`, which is a different enum with a case of the same name — so the
+        // comparison silently fails to compile rather than failing to compile usefully.
+        let gamut: UIDisplayGamut = UIScreen.main.traitCollection.displayGamut
+        facts.displayGamut = String(describing: gamut)
         facts.maximumFramesPerSecond = UIScreen.main.maximumFramesPerSecond
-        facts.wideGamut = UIScreen.main.traitCollection.displayGamut == .displayP3
+        facts.wideGamut = gamut == UIDisplayGamut.displayP3
         return facts
     }
 
@@ -166,7 +171,6 @@ struct RuntimeCapabilities: Equatable, Sendable {
     // MARK: Graphics
 
     var metalDeviceName: String = "none"
-    var lowPowerGPU: Bool = false
 
     // MARK: Vision
 
@@ -288,7 +292,7 @@ extension RuntimeCapabilities {
     }
 
     private mutating func discoverCameras() {
-        authorisation = authorisationName(AVCaptureDevice.authorizationStatus(for: .video))
+        authorisation = Self.authorisationName(AVCaptureDevice.authorizationStatus(for: .video))
 
         let types: [AVCaptureDevice.DeviceType] = [
             .builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera,
@@ -313,8 +317,15 @@ extension RuntimeCapabilities {
             return
         }
             metalDeviceName = device.name
-            lowPowerGPU = device.isLowPower
-            // No Neural Engine row, deliberately. A GPU family query is not an answer
+            // No GPU-power row, and the `MTLDevice.isLowPower` read that used to be here
+            // is gone because it is a **macOS-only** property. On iOS it does not compile,
+            // and there is no iOS equivalent that answers the same question — Low Power
+            // Mode is a device-wide setting reported by `ProcessInfo.isLowPowerModeEnabled`
+            // and recorded above, which is a different fact from whether the GPU itself is
+            // the low-power part. The field was also never read by anything, so removing it
+            // loses no report line.
+            //
+            // No Neural Engine row, either. A GPU family query is not an answer
             // about the ANE, and there is no public API that reports which compute unit
             // actually ran — so a field named for the ANE and answered from the GPU would
             // be a capability claim the platform cannot support. The one that was here
