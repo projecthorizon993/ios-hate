@@ -498,6 +498,15 @@ final class CameraViewModel: ObservableObject {
     /// reason a single set of lens buttons is enough.
     func selectLens(_ camera: BackCameraCapabilities) {
         guard let device = sessionController.configuration?.device else { return }
+        // Refuse rather than compute a meaningless target. Without this, indistinguishable
+        // lenses all resolve to 1.0x, the app reports success, and the user watches nothing
+        // happen. See `CameraCapabilities.lensesAreDistinguishable`.
+        guard capabilities.lensesAreDistinguishable else {
+            AppLog.warn(AppLog.camera,
+                        "lens selection refused: the lenses report identical optical data, "
+                        + "so there is no reachable target")
+            return
+        }
         let target = zoomLabelFactor(for: camera)
         let isCurrent = abs(target - readout.zoomFactor) < 0.01
         let destination: CGFloat = isCurrent ? 1 : target

@@ -14,13 +14,16 @@ final class CameraStep1Tests: XCTestCase {
                             kind: BackCameraCapabilities.Kind,
                             relativeScale: Double,
                             hasOpticalZoomSteps: Bool = false,
-                            flash: Bool = false) -> BackCameraCapabilities {
+                            flash: Bool = false,
+                            videoDimensions: String = "n/a") -> BackCameraCapabilities {
         BackCameraCapabilities(uniqueID: uniqueID,
                                kind: kind,
                                relativeScale: relativeScale,
                                hasOpticalZoomSteps: hasOpticalZoomSteps,
                                minimumFocusDistance: -1,
-                               flashAvailable: flash)
+                               flashAvailable: flash,
+                               videoDimensions: videoDimensions,
+                               switchOverZoomFactors: [])
     }
 
     /// Relative scales chosen so the ratios are the same numbers a real phone would
@@ -154,6 +157,98 @@ final class CameraStep1Tests: XCTestCase {
         capabilities.backCameras = [makeCamera("composite", kind: .composite, relativeScale: 24)]
 
         XCTAssertEqual(capabilities.physicalLenses.map(\.uniqueID), ["composite"])
+    }
+
+    /// The observed iPhone 11 Pro case, verbatim.
+    ///
+    /// Six separately discovered back devices — three of them distinct composites — all
+    /// reported the identical focal-length proxy 3168.0. With every lens equal, every zoom
+    /// label computes to `3168 / 3168 = 1.0`, so the user saw three chips reading "1x", and
+    /// every tap computed a destination of 1.0 — which is where the camera already was.
+    ///
+    /// The selector must be hidden rather than rendered with meaningless labels, and the
+    /// tap must be refused rather than reported as a success. This is rule 4 of
+    /// `docs/HANDOFF.md`: never show a control that does nothing.
+    func testLensesThatReportIdenticalOpticsOfferNoLensSelector() {
+        var capabilities = CameraCapabilities()
+        capabilities.backCameras = [
+            makeCamera("uw", kind: .ultraWide, relativeScale: 3168),
+            makeCamera("w", kind: .wide, relativeScale: 3168),
+            makeCamera("t", kind: .telephoto, relativeScale: 3168)
+        ]
+
+        XCTAssertFalse(capabilities.lensesAreDistinguishable,
+                       "three lenses reading the same scale cannot be told apart")
+        XCTAssertFalse(capabilities.lensSelector.isAvailable,
+                       "chips that would all read 1x are not a control, they are decoration")
+        // And no label is produced for any of them, rather than a plausible-looking "1x".
+        XCTAssertNil(capabilities.zoomLabel(for: capabilities.backCameras[0]))
+        XCTAssertNil(capabilities.zoomLabel(for: capabilities.backCameras[2]))
+    }
+
+    /// The converse, so the guard above is not simply refusing everything: a device that
+    /// *does* report distinct optics keeps its selector and its measured labels.
+    func testDistinctLensOpticsKeepTheSelectorAndTheirMeasuredLabels() {
+        var capabilities = CameraCapabilities()
+        capabilities.backCameras = [
+            makeCamera("uw", kind: .ultraWide, relativeScale: 13),
+            makeCamera("w", kind: .wide, relativeScale: 26),
+            makeCamera("t", kind: .telephoto, relativeScale: 78)
+        ]
+
+        XCTAssertTrue(capabilities.lensesAreDistinguishable)
+        XCTAssertTrue(capabilities.lensSelector.isAvailable)
+        XCTAssertEqual(capabilities.zoomLabel(for: capabilities.backCameras[0]), "0.5x")
+        XCTAssertEqual(capabilities.zoomLabel(for: capabilities.backCameras[1]), "1.0x")
+        XCTAssertEqual(capabilities.zoomLabel(for: capabilities.backCameras[2]), "3.0x")
+    }
+
+    /// A lens whose optics could not be measured at all — the zero the derivation returns
+    /// when there is no largest still — carries no information, so it must not be treated as
+    /// a distinct measurement either.
+    func testAnUnmeasurableLensIsNotTreatedAsDistinct() {
+        var capabilities = CameraCapabilities()
+        capabilities.backCameras = [
+            makeCamera("uw", kind: .ultraWide, relativeScale: 0),
+            makeCamera("w", kind: .wide, relativeScale: 26)
+        ]
+
+        XCTAssertFalse(capabilities.lensesAreDistinguishable)
+        XCTAssertFalse(capabilities.lensSelector.isAvailable)
+    }
+
+    /// A single lens has nothing to switch between and is unaffected by the guard.
+    func testASingleLensIsUnaffectedByTheIdenticalOpticsGuard() {
+        var capabilities = CameraCapabilities()
+        capabilities.backCameras = [makeCamera("w", kind: .wide, relativeScale: 3168)]
+
+        XCTAssertTrue(capabilities.lensesAreDistinguishable)
+        XCTAssertFalse(capabilities.lensSelector.isAvailable)
+        XCTAssertEqual(capabilities.lensSelector.reason ?? "", "Single camera — no lens switching")
+    }
+
+    /// The gap this leaves, recorded rather than papered over.
+    ///
+    /// With the selector hidden, a multi-lens iPhone offers **no** way to change lens. That
+    /// is honest and it is a worse product than a working 0.5x/1x/2x row, and the way out is
+    /// a measurement that actually varies per lens — `videoDimensions` and
+    /// `switchOverZoomFactors` are recorded on every lens for exactly that purpose. What
+    /// they report on real hardware is not yet known; `docs/device-record-01.md` is where
+    /// the answer goes.
+    func testTheHiddenSelectorIsABlockingGapNotAClosedOne() {
+        var capabilities = CameraCapabilities()
+        capabilities.backCameras = [
+            makeCamera("uw", kind: .ultraWide, relativeScale: 3168, videoDimensions: "1920x1080"),
+            makeCamera("w", kind: .wide, relativeScale: 3168, videoDimensions: "1920x1080"),
+            makeCamera("t", kind: .telephoto, relativeScale: 3168, videoDimensions: "1920x1080")
+        ]
+
+        // If the video dimensions ever do differ per lens, the information is already in
+        // hand and the selector can be brought back on real measurements. This asserts the
+        // data is captured, so the next step is a derivation and not another probe.
+        XCTAssertEqual(Set(capabilities.backCameras.map(\.videoDimensions)).count, 1)
+        XCTAssertFalse(capabilities.lensesAreDistinguishable,
+                       "the guard reads relativeScale, which is still degenerate here")
     }
 
     // MARK: - The session and the capability model agree

@@ -81,6 +81,23 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
     var minimumFocusDistance: Double
     var flashAvailable: Bool
 
+    /// Video dimensions of the format the device is currently on, as width x height.
+    ///
+    /// Recorded because `relativeScale` is unusable — it came back as one constant for
+    /// every lens on an iPhone 11 Pro, since the lenses share a still resolution *and* the
+    /// virtual devices report a shared default `activeFormat`. The video dimensions are a
+    /// different per-lens quantity and are the most likely place a real focal-length ratio
+    /// could come from. Whether they actually differ per lens on that hardware is
+    /// **unknown** — this row exists so the next device run answers it.
+    var videoDimensions: String = "n/a"
+    /// `device.virtualDeviceSwitchOverVideoZoomFactors`, verbatim.
+    ///
+    /// The only documented way iOS offers to learn where a composite hands over to a
+    /// different physical lens, so this is the natural basis for lens chips on a multi-lens
+    /// device. Recorded rather than used, because what it actually reports on this hardware
+    /// has not been observed.
+    var switchOverZoomFactors: [Double] = []
+
     static func describe(_ device: AVCaptureDevice) -> BackCameraCapabilities {
         BackCameraCapabilities(
             uniqueID: device.uniqueID,
@@ -88,17 +105,43 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
             relativeScale: Self.relativeScale(of: device.activeFormat),
             hasOpticalZoomSteps: !device.virtualDeviceSwitchOverVideoZoomFactors.isEmpty,
             minimumFocusDistance: Double(device.minimumFocusDistance),
-            flashAvailable: device.isFlashAvailable
+            flashAvailable: device.isFlashAvailable,
+            videoDimensions: Self.videoDimensions(of: device.activeFormat),
+            switchOverZoomFactors: device.virtualDeviceSwitchOverVideoZoomFactors
         )
+    }
+
+    /// Width x height of the format's video, which is lens-specific where the still
+    /// dimensions are not.
+    private static func videoDimensions(of format: AVCaptureDevice.Format) -> String {
+        let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        return "\(dimensions.width)x\(dimensions.height)"
     }
 
     /// Derived from the largest still the format can produce.
     ///
-    /// Still area scales with the square of the focal length, so the ratio of these
-    /// square roots between two lenses **is** the focal length ratio between them —
-    /// which is precisely what a zoom chip such as "2x" claims. Unlike a hard-coded
-    /// `0.5x 1x 2x` it is measured, so a device that reports no telephoto lens simply
-    /// never produces a 2x chip.
+    /// **This does not measure focal length, and on a modern iPhone it returns a
+    /// constant.** It was justified as "still area scales with the square of the focal
+    /// length, so the ratio of these square roots between two lenses *is* the focal length
+    /// ratio". That reasoning is only sound if each lens's still dimensions track its own
+    /// focal length. Two things break it, both observed on an iPhone 11 Pro
+    /// (`docs/device-record-01.md` finding 3):
+    ///
+    /// 1. **The lenses share a resolution.** Ultra wide, wide and telephoto are all 12MP,
+    ///    so the ratio is 1.0 between every pair regardless of the optics.
+    /// 2. **The read is not lens-specific.** Six separately discovered devices — three of
+    ///    them distinct composites — all reported the identical value 3168.0. Each virtual
+    ///    device comes up with the same default `activeFormat`, and on a composite that
+    ///    format is shared, so this reads the same dimensions every time. 3168 is also not
+    ///    the 11 Pro's 12MP still (4032x3024 gives √ ≈ 3492), so it is not even a real
+    ///    still size.
+    ///
+    /// The value is kept because it still orders lenses correctly where it is not
+    /// degenerate, but it must never be used to label one. `lensesAreDistinguishable` is
+    /// what consumers are required to ask first, and `lensSelector` hides the control
+    /// entirely when the answer is no. Showing three chips that all read "1x" — three
+    /// controls that do nothing — is the exact defect rule 4 in `docs/HANDOFF.md` exists to
+    /// prevent.
     private static func relativeScale(of format: AVCaptureDevice.Format) -> Double {
         let largest = format.supportedMaxPhotoDimensions.max {
             Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height)
@@ -243,11 +286,31 @@ struct CameraCapabilities: Equatable, Sendable {
             ?? backCameras.first
     }
 
+    /// Whether the app can tell these lenses apart, which it cannot on most modern iPhones.
+    ///
+    /// The requirement is that each lens report a **distinct** `relativeScale`. Equal scales
+    /// mean the zoom label for every lens computes to 1.0 — three chips reading "1x", and a
+    /// tap that computes a destination of 1.0, which is where the camera already is. That
+    /// is the state observed on an iPhone 11 Pro, where six discovered devices all reported
+    /// the same value.
+    ///
+    /// `false` therefore means **hide the lens selector**, not "label them arbitrarily" and
+    /// certainly not a hard-coded `0.5x 1x 2x`, which is a guess dressed as a measurement.
+    var lensesAreDistinguishable: Bool {
+        let scales = physicalLenses.map(\.relativeScale)
+        guard scales.count > 1 else { return true }
+        // A zero scale is the "could not measure" value and carries no information either.
+        guard scales.allSatisfy({ $0 > 0 }) else { return false }
+        return Set(scales).count == scales.count
+    }
+
     /// Zoom chip label for a lens, as a measured ratio against `referenceCamera`.
     ///
-    /// `nil` when the ratio cannot be established, in which case the UI shows no chip
-    /// rather than a made-up `0.5x`.
+    /// `nil` when the ratio cannot be established — including the case where the lenses
+    /// cannot be told apart at all — in which case the UI shows no chip rather than a
+    /// `1x` that means nothing.
     func zoomLabel(for camera: BackCameraCapabilities) -> String? {
+        guard lensesAreDistinguishable else { return nil }
         guard let reference = referenceCamera, reference.relativeScale > 0 else { return nil }
         let ratio = camera.relativeScale / reference.relativeScale
         guard ratio > 0 else { return nil }
@@ -264,8 +327,16 @@ struct CameraCapabilities: Equatable, Sendable {
 
     var lensSelector: FeatureAvailability {
         let lenses = physicalLenses
-        if lenses.count > 1 { return .available }
         if lenses.isEmpty { return .unavailable(reason: "No back camera reported") }
+        if lenses.count > 1 && !lensesAreDistinguishable {
+            // Observed on an iPhone 11 Pro, where every discovered lens reported the same
+            // focal-length proxy and so every chip would read "1x". Three controls that do
+            // nothing are worse than no control, and a hard-coded 0.5x/1x/2x would be a
+            // guess presented as a measurement. Hidden until the app can measure the
+            // lenses; see `docs/device-record-01.md` finding 3.
+            return .unavailable(reason: "Lenses report identical optical data — nothing to switch between")
+        }
+        if lenses.count > 1 { return .available }
         return .unavailable(reason: "Single camera — no lens switching")
     }
 

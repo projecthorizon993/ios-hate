@@ -225,8 +225,8 @@ struct RuntimeCapabilities: Equatable, Sendable {
             ("codecs", ReportFormat.list(photoCodecs)),
             ("raw types", ReportFormat.list(rawPixelTypes, empty: "none")),
             ("proRAW", proRawSupported ? "yes (max \(maxPhotoDimensions))" : "no"),
-            ("back lenses", ReportFormat.list(backCameras.map { "\($0.kind.rawValue)@\($0.relativeScale)" })),
-            ("vision", "person segmentation \(personSegmentationAvailable), saliency \(attentionSaliencyAvailable)"),
+             ("back lenses", ReportFormat.list(backCameras.map { "\($0.kind.rawValue)@\($0.relativeScale)" })),
+             ("lens optics", ReportFormat.list(backCameras.map { optics($0) }, empty: "none")),            ("vision", "person segmentation \(personSegmentationAvailable), saliency \(attentionSaliencyAvailable)"),
             ("system", "\(processorCount) cores, \(ReportFormat.number(Double(physicalMemoryBytes) / 1_073_741_824, decimals: 1)) GB, low power \(isLowPowerMode), thermal \(thermalState)"),
             ("display", "P3 \(wideGamut), max \(maximumFramesPerSecond) fps, gamut \(displayGamut)")
         ]
@@ -240,6 +240,23 @@ struct RuntimeCapabilities: Equatable, Sendable {
         for (label, value) in lines {
             AppLog.note(AppLog.diagnostics, "  \(label): \(value)")
         }
+    }
+
+    /// What each discovered lens reports, for finding a real focal-length source.
+    ///
+    /// `relativeScale` came back as one constant for every lens on an iPhone 11 Pro, so it
+    /// cannot label anything. The video dimensions are the most likely replacement source;
+    /// the virtual switch-over factors are the only documented way iOS offers to learn
+    /// where a composite hands to a different physical lens. Whether either actually
+    /// differs per lens on that hardware is unknown, which is why this row exists.
+    private func optics(_ camera: BackCameraCapabilities) -> String {
+        let switchOver = camera.switchOverZoomFactors
+            .map { ReportFormat.number($0) }
+            .joined(separator: "/")
+        return "\(camera.kind.rawValue): scale \(ReportFormat.number(camera.relativeScale))"
+            + ", video \(camera.videoDimensions)"
+            + ", minFocus \(ReportFormat.number(camera.minimumFocusDistance))"
+            + ", switchOver \(switchOver.isEmpty ? "none" : switchOver)"
     }
 }
 

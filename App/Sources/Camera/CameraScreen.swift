@@ -313,7 +313,10 @@ struct CameraScreen: View {
     @ViewBuilder
     private var lensButtons: some View {
         let lenses = model.selectableLenses
-        if lenses.count > 1 {
+        // `lensSelector` is the gate, and the `count > 1` test is not enough on its own:
+        // on a multi-lens phone whose lenses report identical optical data, the count is
+        // 3 and every button would read "1x" and do nothing. Observed on an iPhone 11 Pro.
+        if lenses.count > 1, model.capabilities.lensSelector.isAvailable {
             HStack(spacing: Theme.Space.xxs) {
                 ForEach(lenses, id: \.kind) { camera in
                     lensButton(camera, lenses: lenses)
