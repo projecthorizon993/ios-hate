@@ -11,9 +11,8 @@ struct LooksChipBar: View {
 
     @ObservedObject var model: CameraViewModel
     @Binding var expanded: Bool
-    let carousel: () -> AnyView
 
-    /// The chip's label. The look's name when there is one, "Original" when there is not —
+    /// The chip's label. The look's name when there is one, "Original" when there is not -
     /// which is a real choice the user makes, not an absence.
     private var currentLabel: String {
         model.settings.look?.name ?? "Original"
@@ -22,15 +21,10 @@ struct LooksChipBar: View {
     private var isActive: Bool { model.settings.look != nil }
 
     var body: some View {
-        VStack(spacing: Theme.Space.s) {
-            chip
-            if expanded {
-                carousel()
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .animation(.spring(response: Theme.Motion.mode, dampingFraction: 0.85),
-                               value: expanded)
-            }
-        }
+        // The chip only. The carousel is drawn by `CameraScreen.dockedPanel` over the
+        // viewfinder, so this type must not also draw it — the same control appearing
+        // twice is worse than one appearing in the wrong place.
+        chip
     }
 
     private var chip: some View {
