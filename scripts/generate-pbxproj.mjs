@@ -501,7 +501,13 @@ if (problems.length > 0) {
 }
 
 if (check) {
-  const current = readFileSync(PBXPROJ, "utf8");
+  // Compared with line endings normalised. This repository is checked out on Windows,
+  // where git rewrites LF to CRLF in the working copy, so a freshly created worktree has
+  // a CRLF `project.pbxproj` while the generator emits LF. Byte comparison would report
+  // the file as stale in every worktree and in CI, which is exactly the false failure
+  // that would stop an agent from finishing. The content is what matters here, not the
+  // platform's line-ending convention.
+  const current = readFileSync(PBXPROJ, "utf8").replace(/\r\n/g, "\n");
   if (current !== generated) {
     console.error("error: project.pbxproj is out of date. Run: node scripts/generate-pbxproj.mjs");
     process.exit(1);

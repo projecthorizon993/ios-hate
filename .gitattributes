@@ -1,0 +1,14 @@
+# Normalise line endings in the repository, and in the working tree, to LF.
+#
+# Without this, a worktree created on Windows checks out CRLF while
+# scripts/generate-pbxproj.mjs emits LF, so `project.pbxproj` differs from its own
+# generator on every fresh clone. That produced a false "project file is out of date"
+# failure in all five agent worktrees. Swift, JSON, YAML and Markdown have no reason to
+# carry CRLF in a repository; the one place that cares is JavaScript on Windows, and
+# node handles LF there without complaint.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.icns binary
+*.xcassets/** binary
