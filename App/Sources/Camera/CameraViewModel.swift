@@ -236,6 +236,12 @@ final class CameraViewModel: ObservableObject {
                      maxDimensions: runtime.maxPhotoDimensions)
         AppLog.note(AppLog.camera,
                     "pro panel: \(proCapabilities.availabilitySummary)")
+        // Re-apply rather than assume: the device has just been configured, so any manual
+        // value held across a reconfiguration is still only a value until the device is
+        // told.
+        if let configuration = sessionController.configuration, manual != .none {
+            sessionController.apply(manual: manual, to: configuration)
+        }
         looks = lookLibrary.all
         pushSettingsToPreview()
         startReadout()
@@ -383,6 +389,12 @@ final class CameraViewModel: ObservableObject {
             AppLog.note(AppLog.camera, "manual: \(manual.summarise) -> \(clamped.summarise)")
         }
         manual = clamped
+        // Clamping stops an illegal value reaching AVFoundation. It does not put the
+        // legal one there — the device has to be told, or the panel is a control over
+        // nothing, which is the state this was in for five steps.
+        if let configuration = sessionController.configuration {
+            sessionController.apply(manual: clamped, to: configuration)
+        }
     }
 
     func setManual(iso: Float) { updateManual { $0.iso = iso } }
@@ -575,6 +587,10 @@ final class CameraViewModel: ObservableObject {
         // where the active format reports high photo quality.
         request.preferQuality = HDRStatus.requestedQuality(
             hasPhotoQualitySupport: capabilities.photoQualitySupported)
+        // The other half of the prioritisation decision. Without this the request is
+        // `.balanced` on any format that supports photo quality, and the system may
+        // override the ISO and shutter the user just dialled in.
+        request.manualExposureActive = manual.isExposureManual
         return request
     }
 

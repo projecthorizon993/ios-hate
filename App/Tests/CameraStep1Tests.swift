@@ -388,8 +388,115 @@ final class CameraStep1Tests: XCTestCase {
             XCTAssertTrue(mode.isImplemented, "\(mode) should be implemented")
             XCTAssertFalse(mode.label.isEmpty, "\(mode) needs a label")
         }
-        // The mode switcher's order is the chrome, and `DESIGN_SPEC.md` requires it not
-        // to move when a mode is filled in.
         XCTAssertEqual(CameraMode.allCases, [.auto, .pro, .looks])
+    }
+
+    // MARK: - Manual exposure gating
+
+    /// A composite device cannot do manual exposure, and the panel must not pretend
+    /// otherwise.
+    ///
+    /// `ProCapabilities.probe` needs a live `AVCaptureDevice`, so it cannot be called
+    /// here. What *can* be tested is the rule that consumes it: given a capability set
+    /// with no custom-exposure support, `ManualSettings.clamped(to:)` must withdraw every
+    /// exposure value rather than pass a value the device will refuse.
+    ///
+    /// This is the fixture the plan's Step 5 asks for, and it is the assertion that would
+    /// have failed while the panel offered sliders over a composite device.
+    func testACompositeDeviceWithdrawsEveryManualExposureValue() {
+        let compositeLike = ProCapabilities(
+            supportsCustomExposure: false,
+            isoRange: nil,
+            shutterRange: nil,
+            exposureCompensationRange: nil,
+            canLockExposure: false,
+            canLockFocus: false,
+            canLockWhiteBalance: false
+        )
+
+        let requested = ManualSettings(iso: 400,
+                                       shutterSeconds: 1.0 / 120,
+                                       exposureTargetOffset: 1.5,
+                                       lockExposure: true,
+                                       lockFocus: true,
+                                       lockWhiteBalance: true)
+        let clamped = requested.clamped(to: compositeLike)
+
+        XCTAssertNil(clamped.iso)
+        XCTAssertNil(clamped.shutterSeconds)
+        XCTAssertEqual(clamped.exposureTargetOffset, 0)
+        XCTAssertFalse(clamped.lockExposure)
+        XCTAssertFalse(clamped.lockFocus)
+        XCTAssertFalse(clamped.lockWhiteBalance)
+        XCTAssertTrue(compositeLike.isEmpty, "nothing should be offered at all")
+    }
+
+    /// The converse: a device that does support custom exposure keeps the values, and
+    /// clamps them to its real range rather than dropping them.
+    func testADeviceThatSupportsCustomExposureKeepsAndClampsItsValues() {
+        let capable = ProCapabilities(
+            supportsCustomExposure: true,
+            isoRange: 50...400,
+            shutterRange: (1.0 / 8000)...(1.0 / 30),
+            exposureCompensationRange: -3...3,
+            canLockExposure: true,
+            canLockFocus: true,
+            canLockWhiteBalance: true
+        )
+
+        let clamped = ManualSettings(iso: 6400, exposureTargetOffset: 9).clamped(to: capable)
+        XCTAssertEqual(clamped.iso, 400, "an out-of-range ISO clamps to the ceiling, not to nil")
+        XCTAssertEqual(clamped.exposureTargetOffset, 3)
+    }
+
+    /// The summary must name the platform's reason, not just say "nothing available".
+    /// A panel reading "no manual controls" on a device that visibly has three lenses is
+    /// indistinguishable from a bug.
+    func testTheSummaryExplainsWhyACompositeDeviceHasNoManualControls() {
+        let compositeLike = ProCapabilities(supportsCustomExposure: false)
+        let summary = compositeLike.availabilitySummary
+
+        XCTAssertTrue(summary.contains("composite"), "summary was: \(summary)")
+        XCTAssertTrue(summary.contains("do not support manual exposure"), "summary was: \(summary)")
+    }
+
+    /// `photoQualityPrioritization` is decided from this, and `.balanced` would let the
+    /// system override the user's ISO in low light. So the flag has to be true exactly
+    /// when something was dialled in.
+    func testManualExposureIsFlaggedOnlyWhenSomethingWasDialledIn() {
+        XCTAssertFalse(ManualSettings.none.isExposureManual)
+        XCTAssertFalse(ManualSettings(iso: nil, shutterSeconds: nil).isExposureManual)
+        XCTAssertTrue(ManualSettings(iso: 100).isExposureManual)
+        XCTAssertTrue(ManualSettings(shutterSeconds: 1.0 / 60).isExposureManual)
+        XCTAssertTrue(ManualSettings(lockExposure: true).isExposureManual)
+        // An exposure bias of zero is the neutral point, not a manual setting.
+        XCTAssertFalse(ManualSettings(exposureTargetOffset: 0).isExposureManual)
+    }
+
+    /// The prioritisation and the string written into the file's own recipe must be the
+    /// same decision, derived from one function.
+    ///
+    /// These were two independent expressions once, and they disagreed: the settings got
+    /// `.speed` while the recipe said `"balanced"`, so a manual capture's file reported
+    /// the opposite of what had been done to it.
+    func testTheRecordedPrioritisationMatchesTheOneApplied() {
+        // Built by assignment rather than the memberwise initialiser, because the
+        // declaration order of `Request` is not the order these two matter in and a
+        // positional call would have to repeat the defaults to get here.
+        var manual = PhotoCaptureController.Request()
+        manual.preferQuality = true
+        manual.manualExposureActive = true
+
+        var quality = PhotoCaptureController.Request()
+        quality.preferQuality = true
+
+        let neither = PhotoCaptureController.Request()
+
+        XCTAssertEqual(PhotoCaptureController.name(for: PhotoCaptureController.prioritization(for: manual)),
+                       "speed", "manual must win over a quality request")
+        XCTAssertEqual(PhotoCaptureController.name(for: PhotoCaptureController.prioritization(for: quality)),
+                       "quality")
+        XCTAssertEqual(PhotoCaptureController.name(for: PhotoCaptureController.prioritization(for: neither)),
+                       "balanced")
     }
 }

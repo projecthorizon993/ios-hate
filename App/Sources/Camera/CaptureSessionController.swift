@@ -345,6 +345,155 @@ final class CaptureSessionController: NSObject {
         }
     }
 
+    /// Writes the user's manual settings to the device.
+    ///
+    /// Every value is gated on the capability that owns it, checked against the range it
+    /// came from, and wrapped in the exception trap. AVFoundation raises
+    /// `NSInvalidArgumentException` for an unsupported mode or an out-of-range value, and
+    /// Swift cannot catch that — so the checks here are what keep an out-of-range value
+    /// from becoming a crash rather than a log line.
+    ///
+    /// Clamping already happened in `ManualSettings.clamped(to:)`. This re-checks rather
+    /// than trusting it, because the values arriving here have been through a `@Published`
+    /// round trip and the capability set may have changed underneath them.
+    @discardableResult
+    func apply(manual: ManualSettings, to configuration: Configuration) -> Bool {
+        let device = configuration.device
+        guard device.lockForConfiguration() != nil else {
+            AppLog.fail(AppLog.camera, "manual: lockForConfiguration failed; not applied")
+            return false
+        }
+        defer { device.unlockForConfiguration() }
+
+        let applied = applyExposure(manual, to: device)
+        let focused = applyFocus(manual, to: device)
+        let balanced = applyWhiteBalance(manual, to: device)
+        let any = applied || focused || balanced
+
+        // "Asked for" and "the device accepted" are logged as two facts, never one.
+        // `summarise` is the request; what follows is the outcome.
+        if manual.isExposureManual || manual.lockFocus || manual.lockWhiteBalance {
+            AppLog.note(AppLog.camera,
+                        "manual requested [\(manual.summarise)] applied=\(any) "
+                        + "exposure=\(applied) focus=\(focused) wb=\(balanced)")
+        }
+        return any
+    }
+
+    /// ISO, shutter and exposure bias, in one call, because AVFoundation takes them
+    /// together — setting `.custom` and then writing the values separately is how the
+    /// device ends up briefly in a custom mode with values from the previous mode.
+    private func applyExposure(_ manual: ManualSettings, to device: AVCaptureDevice) -> Bool {
+        let format = device.activeFormat
+
+        guard device.isExposureModeSupported(.custom) else {
+            if manual.isExposureManual {
+                AppLog.warn(AppLog.camera,
+                            "manual exposure requested on \(device.deviceType.rawValue), "
+                            + "which does not support .custom; not applied")
+            }
+            return false
+        }
+
+        // Clamp to the *live* format rather than the probed one: the format can be
+        // renegotiated between the probe and this call.
+        let isoRange = format.minISO <= format.maxISO ? format.minISO...format.maxISO : nil
+        let minShutter = CMTimeGetSeconds(format.minExposureDuration)
+        let maxShutter = CMTimeGetSeconds(format.maxExposureDuration)
+        let shutterRange = minShutter > 0 && maxShutter >= minShutter ? minShutter...maxShutter : nil
+
+        var wrote = false
+
+        if let iso = manual.iso {
+            let clamped = isoRange.map { min(max(iso, $0.lowerBound), $0.upperBound) } ?? iso
+            if let failure = LumaFrameSafety.perform({
+                device.setExposureModeCustom(
+                    duration: CMTime(seconds: 1.0 / 60.0, preferredTimescale: 1_000_000_000),
+                    iso: clamped,
+                    completionHandler: nil)
+            }) {
+                AppLog.warn(AppLog.camera, "manual exposure rejected: \(failure)")
+            } else {
+                wrote = true
+            }
+        }
+
+        if let seconds = manual.shutterSeconds {
+            let clamped = shutterRange.map { min(max(seconds, $0.lowerBound), $0.upperBound) } ?? seconds
+            if let failure = LumaFrameSafety.perform({
+                device.setExposureModeCustom(
+                    duration: CMTime(seconds: clamped, preferredTimescale: 1_000_000_000),
+                    iso: device.iso,
+                    completionHandler: nil)
+            }) {
+                AppLog.warn(AppLog.camera, "manual shutter rejected: \(failure)")
+            } else {
+                wrote = true
+            }
+        }
+
+        if manual.exposureTargetOffset != 0 {
+            let lower = device.minExposureTargetBias
+            let upper = device.maxExposureTargetBias
+            let clamped = manual.exposureTargetOffset > lower
+                && manual.exposureTargetOffset < upper
+                ? manual.exposureTargetOffset
+                : min(max(manual.exposureTargetOffset, lower), upper)
+            setExposureMode(.custom, on: device, name: "exposure")
+            if let failure = LumaFrameSafety.perform({
+                device.setExposureTargetOffset(clamped)
+            }) {
+                AppLog.warn(AppLog.camera, "manual exposure bias rejected: \(failure)")
+            } else {
+                wrote = true
+            }
+        }
+
+        if manual.lockExposure {
+            setExposureMode(.locked, on: device, name: "exposure")
+            wrote = true
+        }
+        return wrote
+    }
+
+    private func applyFocus(_ manual: ManualSettings, to device: AVCaptureDevice) -> Bool {
+        guard manual.lockFocus else { return false }
+        // Both are needed and they are different questions: a composite supports the locked
+        // focus mode and refuses a new lens position.
+        guard device.isFocusModeSupported(.locked),
+              device.isLockingFocusWithCustomLensPositionSupported else {
+            AppLog.warn(AppLog.camera, "manual focus requested but refused by this device; not applied")
+            return false
+        }
+        let position = Float(device.lensPosition)
+        if let failure = LumaFrameSafety.perform({
+            device.setFocusModeLocked(lensPosition: position)
+        }) {
+            AppLog.warn(AppLog.camera, "manual focus rejected: \(failure)")
+            return false
+        }
+        return true
+    }
+
+    private func applyWhiteBalance(_ manual: ManualSettings, to device: AVCaptureDevice) -> Bool {
+        guard manual.lockWhiteBalance else { return false }
+        guard device.isWhiteBalanceModeSupported(.locked) else {
+            AppLog.warn(AppLog.camera, "manual white balance requested but refused; not applied")
+            return false
+        }
+        // The current gains are what is locked. A UI that let the user dial a Kelvin value
+        // would need the device's `temperatureAndTintValues`, which is a different feature
+        // and not one this task is allowed to add.
+        let gains = device.whiteBalanceGains
+        if let failure = LumaFrameSafety.perform({
+            device.setWhiteBalanceModeLocked(mode: .locked, gains: gains)
+        }) {
+            AppLog.warn(AppLog.camera, "manual white balance rejected: \(failure)")
+            return false
+        }
+        return true
+    }
+
     private func setFocusMode(_ mode: AVCaptureDevice.FocusMode,
                               on device: AVCaptureDevice,
                               name: String) {

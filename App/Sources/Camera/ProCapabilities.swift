@@ -15,6 +15,26 @@ import Foundation
 /// a control ends up looking available and then refusing.
 struct ProCapabilities: Equatable {
 
+    /// Whether the **bound** device can be put into `.custom` exposure at all.
+    ///
+    /// This is the gate the whole manual panel hangs off, and it is not a formality.
+    /// Apple documents that the composite device types — `.builtInTripleCamera` and
+    /// `.builtInDualWideCamera` — do **not** support `ExposureMode.custom`, do not allow
+    /// locking focus to a new lens position, and do not allow locking white balance to
+    /// new gains. A composite also states that its exposure duration, ISO, gains and lens
+    /// position may change when it switches between its constituent cameras.
+    ///
+    /// So a Pro dial on a composite device is a control over nothing. Rather than let the
+    /// panel show a full set of sliders that cannot move the image, everything that
+    /// requires `.custom` is withdrawn when this is false.
+    ///
+    /// `CaptureSessionController` currently binds a composite, so on a Pro iPhone this
+    /// is false and the panel is empty. Fixing that means binding a constituent device
+    /// instead, which is a session reconfiguration and needs a device to verify;
+    /// `docs/IOS_PLAN.md` 3.2 records it. Until then the honest state is an empty panel
+    /// rather than a lying one.
+    var supportsCustomExposure: Bool = false
+
     var isoRange: ClosedRange<Float>?
     var shutterRange: ClosedRange<Double>?
     var exposureCompensationRange: ClosedRange<Float>?
@@ -35,19 +55,27 @@ struct ProCapabilities: Equatable {
     static func probe(device: AVCaptureDevice, format: AVCaptureDevice.Format) -> ProCapabilities {
         var capabilities = ProCapabilities()
 
+        // The single question everything else is conditioned on.
+        capabilities.supportsCustomExposure = device.isExposureModeSupported(.custom)
+
         // A range whose minimum exceeds its maximum is not a range. Some formats report
         // that for a mode they cannot actually use, and an inverted `ClosedRange` would
         // trap rather than refuse.
-        if format.minISO <= format.maxISO {
+        //
+        // The ranges are only published when `.custom` is available. ISO, shutter duration
+        // and exposure bias are all meaningless without it: there is nowhere to write
+        // them. Publishing them anyway is what made the panel offer sliders that silently
+        // did nothing.
+        if capabilities.supportsCustomExposure, format.minISO <= format.maxISO {
             capabilities.isoRange = format.minISO...format.maxISO
         }
         let minShutter = CMTimeGetSeconds(format.minExposureDuration)
         let maxShutter = CMTimeGetSeconds(format.maxExposureDuration)
-        if minShutter > 0, maxShutter >= minShutter {
+        if capabilities.supportsCustomExposure, minShutter > 0, maxShutter >= minShutter {
             capabilities.shutterRange = minShutter...maxShutter
         }
 
-        if device.isExposureModeSupported(.custom) {
+        if capabilities.supportsCustomExposure {
             let bias = device.minExposureTargetBias
             let scale = device.maxExposureTargetBias
             if bias <= scale {
@@ -55,10 +83,18 @@ struct ProCapabilities: Equatable {
             }
         }
 
-        capabilities.canLockExposure = device.isExposureModeSupported(.locked)
-        // `.locked` focus is not the same as "is a focus mode this device has". A device
-        // with no lens-position control reports false here, and the slider has to go.
+        capabilities.canLockExposure = capabilities.supportsCustomExposure
+            && device.isExposureModeSupported(.locked)
+
+        // `.locked` focus is not the same as "can the lens be moved". A composite supports
+        // the locked focus *mode* and refuses a new lens position, so the two have to be
+        // asked separately or the slider lies.
         capabilities.canLockFocus = device.isFocusModeSupported(.locked)
+            && device.isLockingFocusWithCustomLensPositionSupported
+
+        // The same caveat applies to white balance on a composite, but there is no
+        // separate query for "can the gains be changed", so this is the best available
+        // answer rather than a certain one.
         capabilities.canLockWhiteBalance = device.isWhiteBalanceModeSupported(.locked)
 
         return capabilities
@@ -89,6 +125,12 @@ struct ProCapabilities: Equatable {
     /// the hardware, not what the user asked for.
     var availabilitySummary: String {
         var available: [String] = []
+        if !supportsCustomExposure {
+            // Said first and said plainly, because on a composite device it is the whole
+            // answer, and a panel listing "RAW" and nothing else reads as a bug rather
+            // than as the platform.
+            return "no manual exposure on \(ProCapabilities.compositeReason)"
+        }
         if isoRange != nil { available.append("ISO") }
         if shutterRange != nil { available.append("shutter") }
         if canLockExposure { available.append("exposure lock") }
@@ -100,6 +142,12 @@ struct ProCapabilities: Equatable {
             ? "no manual controls on this device and format"
             : available.joined(separator: ", ")
     }
+
+    /// Named once so the reason is consistent wherever it is shown, and so it names the
+    /// platform's reason rather than ours.
+    static let compositeReason =
+        "this camera, which reports itself as a composite multi-lens device. "
+        + "Apple documents that composite devices do not support manual exposure."
 }
 
 /// What the user dialled in on the Pro panel.
@@ -123,12 +171,24 @@ struct ManualSettings: Equatable, Codable, Sendable {
 
     static let none = ManualSettings()
 
+    /// Whether the user has dialled in anything that makes this a manual exposure.
+    ///
+    /// Drives `photoQualityPrioritization`. Apple's documented behaviour for `.balanced`,
+    /// which is the default and is what the app used unconditionally, is that photo
+    /// capture *may override the capture device's exposure duration and ISO when the scene
+    /// is dark enough to require multi-image fusion* — which would discard exactly the
+    /// values the user set, in precisely the low light where a manual camera is being used
+    /// deliberately. `.speed` is the mode that honours them.
+    var isExposureManual: Bool { iso != nil || shutterSeconds != nil || lockExposure }
+
+
     /// What the user has actually asked to change, for the log and the metadata.
     ///
     /// Deliberately verbose: "user asked for a locked exposure at ISO 100" and "the device
     /// accepted a locked exposure at ISO 100" are different sentences and conflating them
     /// is how a badge ends up promising something the hardware refused.
     var summarise: String {
+
         var parts: [String] = []
         if let iso { parts.append("iso=\(Int(iso))") }
         if let shutterSeconds { parts.append("sh=\(String(format: "%.4f", shutterSeconds))") }
