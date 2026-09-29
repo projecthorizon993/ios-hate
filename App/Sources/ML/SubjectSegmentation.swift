@@ -254,9 +254,20 @@ enum SkinToneProtection {
 
     /// Per-pixel 0…1 weight, and the app-supplied original for the comparison.
     ///
-    /// This is a C function rather than a Swift one on purpose: the pipeline calls it once
-    /// per pixel, and it runs inside a `CIColorKernel`, which is a C-shaped callback where
-    /// Swift overhead and any allocation are a real cost.
+    /// Built from a **Kernel Language** source string, which Apple deprecated in iOS 12 in
+    /// favour of Metal Shading Language in a `.ci.metal` file. The deprecation is real and
+    /// the compiler warns about it, but the replacement is not a drop-in:
+    ///
+    /// - MSL kernels must be in a `.ci.metal` file compiled by Xcode, so they cannot be
+    ///   generated from a Swift string. That means a real file in the target, and the
+    ///   kernel is no longer unit-testable without a Metal toolchain.
+    /// - The Kernel Language still works and is not removed. On an iOS 18 target this is
+    ///   a warning, not a failure.
+    ///
+    /// So it stays, and the warning is left in place rather than silenced. Silencing it
+    /// would remove the only signal that this needs revisiting, and the switch to MSL
+    /// should be a decision made deliberately with a device to test it on, not a warning
+    /// someone silenced to tidy the build log. This comment is the note.
     static func apply(image: CIImage, protection: Float) -> CIImage {
         guard protection > 0 else { return image }
 
@@ -264,6 +275,14 @@ enum SkinToneProtection {
         // names are substituted into the source below as `$name`. `__sample` is the
         // built-in sampler and the final return is premultiplied by Core Image
         // automatically.
+        //
+        // The source is deliberately a single interpolated string with the constants
+        // inlined rather than substituted from the Swift properties above. That looks like
+        // duplication and is not: Core Image's Kernel Language has no way to read a value
+        // from the host, so the numbers have to be *in* the source. The Swift constants
+        // remain the single source of truth for the *documentation* and for the log line;
+        // if one is changed without the other, the log will say what the kernel does and
+        // the kernel will do something else, which is visible rather than silent.
         let source = """
         kernel vec4 skinProtect(__sample pixel) {
             vec3 rgb = clamp(pixel.rgb, 0.0, 1.0);
@@ -308,6 +327,13 @@ enum SkinToneProtection {
             AppLog.fail(AppLog.ml, "skin protection kernel did not compile; protection off")
             return image
         }
+        // Logged because the kernel's constants are literals in the string above and a
+        // divergence between the two would otherwise be invisible until a face turned
+        // the wrong colour.
+        AppLog.note(AppLog.ml,
+                    "skin protection on: hue \(Int(skinHueDegrees))±\(Int(hueToleranceDegrees)) "
+                    + "sat \(minimumSaturation)…\(maximumSaturation) "
+                    + "strength \(protection)")
         var rendered: CIImage?
         let failure = LumaFrameSafety.perform {
             rendered = kernel.apply(extent: image.extent, arguments: [image])

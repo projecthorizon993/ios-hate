@@ -84,10 +84,15 @@ enum LookThumbnailer {
 
     /// A neutral placeholder tile, so a look whose table is missing still occupies a slot
     /// instead of collapsing the strip and moving every other tile under the finger.
+    ///
+    /// `UIColor(_:)` rather than reaching for a colour method directly: the theme's tokens
+    /// are `SwiftUI.Color`, because that is what the rest of the UI needs, and
+    /// `UIGraphicsImageRenderer` wants a `UIColor`. Keeping one source of truth for the
+    /// colour means this has to convert rather than re-declaring the hex.
     static func placeholder() -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
         return renderer.image { context in
-            Theme.ColorToken.surfaceRaised.setFill()
+            UIColor(Theme.ColorToken.surfaceRaised).setFill()
             context.fill(CGRect(x: 0, y: 0, width: size, height: size))
         }
     }
