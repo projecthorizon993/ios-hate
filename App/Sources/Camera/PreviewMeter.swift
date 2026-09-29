@@ -47,6 +47,15 @@ final class PreviewMeter: NSObject {
     /// Called on the main queue.
     var onSample: ((Sample) -> Void)?
 
+    /// Called on the meter queue, once per frame, with the **unlocked** buffer.
+    ///
+    /// This is how the processed preview gets its frames. The session carries one video
+    /// data output, shared: bi-planar 420 costs a third of the bandwidth of BGRA, and two
+    /// outputs of different formats on one session is more than the pipeline needs. The
+    /// buffer is handed over after the meter's own read is done, so the two are readers of
+    /// the same memory rather than competitors for a lock.
+    var onFrame: ((CVPixelBuffer) -> Void)?
+
     private let queue = DispatchQueue(label: "com.example.LumaFrame.meter", qos: .utility)
     private var windowFrames: Int = 0
     private var windowStart: CFTimeInterval = 0
@@ -124,6 +133,12 @@ extension PreviewMeter: AVCaptureVideoDataOutputSampleBufferDelegate {
                                     width: width,
                                     height: height,
                                     bytesPerRow: bytesPerRow)
+
+        // Hand the frame on before the publish-rate guard below, so the processed preview
+        // gets **every** frame while the debug overlay is only published a few times a
+        // second. They are different consumers with different rates, and gating the
+        // preview by the overlay's publish rate would cap the preview at 4 Hz.
+        onFrame?(pixelBuffer)
 
         let elapsed = now - windowStart
         let fps = elapsed > 0 ? Double(windowFrames) / elapsed : 0

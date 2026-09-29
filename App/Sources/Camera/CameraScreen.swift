@@ -311,6 +311,53 @@ struct CameraScreen: View {
         }
     }
 
+    /// Lens buttons, in every mode.
+    ///
+    /// They live in the contextual row rather than the status row because they are
+    /// controls, and `DESIGN_SPEC.md` is explicit that the top row is status only, so
+    /// nothing is ever under the user's finger at the top while composing.
+    ///
+    /// **A device with one lens gets no buttons at all**, not a disabled one. The spec:
+    /// "a single-lens device has no zoom steps and no lens buttons at all."
+    @ViewBuilder
+    private var lensButtons: some View {
+        let lenses = model.selectableLenses
+        if lenses.count > 1 {
+            HStack(spacing: Theme.Space.xxs) {
+                ForEach(lenses, id: \.kind) { camera in
+                    lensButton(camera, lenses: lenses)
+                }
+            }
+        }
+    }
+
+    private func lensButton(_ camera: BackCameraCapabilities,
+                            lenses: [BackCameraCapabilities]) -> some View {
+        let label = model.lensTitle(for: camera, reference: lenses)
+        let isCurrent = model.isCurrentLens(camera, lenses: lenses)
+
+        return Button {
+            model.selectLens(camera)
+        } label: {
+            Text(label)
+                .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                .foregroundStyle(isCurrent
+                                 ? Theme.ColorToken.surfaceBase
+                                 : Theme.ColorToken.textSecondary)
+                .padding(.horizontal, Theme.Space.s)
+                .frame(minHeight: Theme.Space.minTouch)
+                .background(isCurrent
+                            ? Theme.ColorToken.accentActive
+                            : Theme.ColorToken.surfaceRaised)
+                .clipShape(Capsule())
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(camera.kind.rawValue) lens")
+        .accessibilityValue(isCurrent ? "Selected" : "")
+        .accessibilityHint("Switches to this lens. Select it again to return to one times.")
+        .accessibilityAddTraits(isCurrent ? [.isSelected, .isButton] : .isButton)
+    }
+
     /// Opens the tone panel in the same docked slot the carousel uses, so only one of the
     /// two is ever open. Tone is a separate gesture from choosing a look because it is a
     /// different kind of adjustment, not because it needs a different screen.
@@ -353,6 +400,8 @@ struct CameraScreen: View {
             }
 
             Spacer(minLength: 0)
+
+            lensButtons
 
             if model.isCapturing {
                 Text("processing")

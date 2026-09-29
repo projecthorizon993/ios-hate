@@ -111,6 +111,10 @@ final class CameraViewModel: ObservableObject {
         meter.onSample = { [weak self] sample in
             self?.sample = sample
         }
+        // Frames for the processed preview, straight from the meter's buffer.
+        meter.onFrame = { [weak self] pixelBuffer in
+            self?.processedPreview.render(pixelBuffer: pixelBuffer)
+        }
     }
 
     /// Configures the session and starts the meter. Safe to call more than once: only
@@ -129,17 +133,14 @@ final class CameraViewModel: ObservableObject {
         capabilities.attachBackCameras(CaptureSessionController.discoverBackCameras())
         self.capabilities = capabilities
 
-        // The processed preview's video output is attached **unconditionally**, not when
-        // processing starts.
-        //
-        // It used to be added only when a look was active, which meant the processed
-        // viewfinder received no frames and rendered black — the output was never in the
-        // session. Adding an output is a session reconfiguration, and reconfiguring on
-        // every look toggle would restart the preview and be visible as a jump, which the
-        // design spec forbids. So the output is always attached and the frames are simply
-        // not used when the recipe is identity.
+        // The meter's video output is the session's **only** video data output, and the
+        // processed preview reads from it too. The preview used to own a second one: it
+        // was never added to the session, so the processed viewfinder got no frames and
+        // rendered black, and the first fix — adding it unconditionally — put two video
+        // data outputs of different pixel formats on one session for no benefit. Sharing
+        // is fewer bytes and one fewer thing to fail.
         sessionController.configure(facing: facing,
-                                    extraOutputs: [photo.output, meter.output, processedPreview.output]) { [weak self] result in
+                                    extraOutputs: [photo.output, meter.output]) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let configuration):
@@ -401,21 +402,114 @@ final class CameraViewModel: ObservableObject {
         value.exposureTargetOffset = device.exposureTargetOffset
         value.zoomFactor = device.videoZoomFactor
         value.relativeScale = BackCameraCapabilities.describe(device).relativeScale
-        let active = activeCamera(relativeScale: value.relativeScale)
+        // The lens is chosen from the **zoom factor**, not from the device's relative
+        // scale. The device's scale is a property of the hardware and never changes, so
+        // matching on it made the label constant: on a triple-camera phone the active
+        // device is always the composite and the readout was stuck on whatever the
+        // composite reported, whatever the user had zoomed to. `videoZoomFactor` is 1.0 at
+        // the wide lens, 0.5 at ultra wide and 3.0 at telephoto, which is the number that
+        // actually tracks the reach.
+        let active = activeCamera(zoomFactor: value.zoomFactor)
         value.lensLabel = active.flatMap { capabilities.zoomLabel(for: $0) }
         readout = value
     }
 
-    /// Closest reported lens to the reach the device is actually running at. The
-    /// device may be mid-zoom between two lenses, so this is a match, not an identity.
-    private func activeCamera(relativeScale: Double?) -> BackCameraCapabilities? {
-        guard let relativeScale else { return nil }
-        return capabilities.backCameras.min {
-            abs($0.relativeScale - relativeScale) < abs($1.relativeScale - relativeScale)
+    /// The lens whose reach is closest to the current zoom factor.
+    ///
+    /// A match, not an identity: mid-way between 1x and 3x there is no lens being used,
+    /// and the label should show the nearest one rather than snapping to the wrong one.
+    private func activeCamera(zoomFactor: CGFloat) -> BackCameraCapabilities? {
+        let lenses = capabilities.physicalLenses
+        guard !lenses.isEmpty else { return nil }
+        // `zoomLabel` reports each lens relative to the wide one, so the factor to match
+        // is the same number: 1.0 is wide, 0.5 is ultra wide, 3.0 is telephoto.
+        return lenses.min { lhs, rhs in
+            abs(zoomLabelFactor(for: lhs) - zoomFactor)
+                < abs(zoomLabelFactor(for: rhs) - zoomFactor)
         }
     }
 
+    /// One lens's zoom factor, from the same arithmetic the label uses.
+    private func zoomLabelFactor(for camera: BackCameraCapabilities) -> CGFloat {
+        guard let reference = capabilities.referenceCamera,
+              reference.relativeScale > 0 else { return 1 }
+        return CGFloat(camera.relativeScale / reference.relativeScale)
+    }
+
     // MARK: - Actions
+
+    /// Zooms to a lens, or back to the wide one.
+    ///
+    /// Implemented as a **zoom factor**, not as a format change. On a phone with a
+    /// composite back camera there is one `AVCaptureDevice` and several physical lenses
+    /// behind it; changing `activeFormat` would be changing the sensor's output format
+    /// rather than picking a lens, and it is what makes a multi-lens phone refuse to zoom
+    /// in a way that reads as a bug. `videoZoomFactor` is the supported control and it is
+    /// the only one that spans lenses.
+    ///
+    /// Tapping the current lens returns to 1x, which is the standard behaviour and the
+    /// reason a single set of lens buttons is enough.
+    func selectLens(_ camera: BackCameraCapabilities) {
+        guard let device = sessionController.configuration?.device else { return }
+        let target = zoomLabelFactor(for: camera)
+        let isCurrent = abs(target - readout.zoomFactor) < 0.01
+        let destination: CGFloat = isCurrent ? 1 : target
+
+        // `availableVideoZoomFactors` is the list of factors the device actually accepts.
+        // Asking for anything else raises `NSInvalidArgumentException`, and the trap turns
+        // that into a log line rather than a crash — but it is better to snap to a real
+        // factor so the label and the hardware agree.
+        let available = device.availableVideoZoomFactors
+        guard !available.isEmpty else {
+            AppLog.warn(AppLog.camera, "device reports no video zoom factors; lens switch refused")
+            return
+        }
+        let clamped = available.min { abs($0 - destination) < abs($1 - destination) }
+
+        let failure = LumaFrameSafety.perform { device.videoZoomFactor = clamped }
+        if let failure {
+            AppLog.warn(AppLog.camera, "lens switch to \(clamped)x raised \(failure)")
+            present("This camera would not change lens", isError: true)
+            return
+        }
+        Haptics.selection()
+        AppLog.note(AppLog.camera, "lens -> \(clamped)x (\(camera.kind.rawValue))")
+        // Read the readout straight back rather than waiting for the next poll, so the
+        // label updates on the same frame as the tap.
+        refreshReadout()
+    }
+
+    /// The lenses the user can pick, in reach order.
+    var selectableLenses: [BackCameraCapabilities] {
+        capabilities.physicalLenses.sorted { $0.relativeScale < $1.relativeScale }
+    }
+
+    /// A lens button's title: the reach relative to the wide lens, so 0.5x, 1x, 3x.
+    ///
+    /// The wide lens is written `1x` and not `1.0x` because that is how every phone writes
+    /// it, and the ultra wide keeps its decimal because that is the only way to
+    /// distinguish it from the wide one.
+    func lensTitle(for camera: BackCameraCapabilities,
+                   reference lenses: [BackCameraCapabilities]) -> String {
+        let wide = lenses.first { $0.relativeScale >= 1 } ?? lenses.first
+        guard let wide, wide.relativeScale > 0, camera.relativeScale > 0 else {
+            return "1x"
+        }
+        let ratio = camera.relativeScale / wide.relativeScale
+        if abs(ratio - 1) < 0.01 { return "1x" }
+        if ratio < 1 { return String(format: "%.1fx", ratio) }
+        return String(format: "%.1fx", ratio)
+    }
+
+    /// `true` when this lens is the one the camera is actually at.
+    func isCurrentLens(_ camera: BackCameraCapabilities,
+                       lenses: [BackCameraCapabilities]) -> Bool {
+        guard let wide = lenses.first(where: { $0.relativeScale >= 1 }) ?? lenses.first,
+              wide.relativeScale > 0
+        else { return false }
+        let target = CGFloat(camera.relativeScale / wide.relativeScale)
+        return abs(target - readout.zoomFactor) < 0.06
+    }
 
     func capture() {
         guard sessionState.isCapturable else {

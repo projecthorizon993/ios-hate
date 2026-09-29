@@ -36,10 +36,16 @@ final class ProcessedPreview: NSObject {
     /// below a sensor frame, which is the whole point.
     static let maximumPixelSize: CGFloat = 1280
 
-    /// The capture output feeding this. Owned here rather than by the session controller
-    /// because it is only wanted when something is being processed.
-    let output = AVCaptureVideoDataOutput()
-
+    /// Frames are handed in by `PreviewMeter`, which owns the session's single video data
+    /// output.
+    ///
+    /// It used to own a second one. It was never added to the session on the first
+    /// version, so the processed viewfinder got no frames at all and rendered black; when
+    /// that was fixed by adding it unconditionally, the session had to carry two video
+    /// data outputs with different pixel formats, which is bandwidth nobody needs. One
+    /// output, two consumers: the meter reads the luma plane and the pipeline gets the
+    /// same buffer. Sharing is also faster, since bi-planar 420 is a third of the bytes of
+    /// BGRA.
     private let queue = DispatchQueue(label: "com.example.LumaFrame.processedpreview",
                                       qos: .userInitiated)
     private let pipeline: ProcessingPipeline
@@ -78,11 +84,6 @@ final class ProcessedPreview: NSObject {
             AppLog.warn(AppLog.processing, "no Metal device; stills will be processed on the CPU")
         }
         super.init()
-        output.alwaysDiscardsLateVideoFrames = true
-        output.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-        ]
-        output.setSampleBufferDelegate(self, queue: queue)
     }
 
     /// `false` when there is no Metal device, in which case the caller should keep the
@@ -213,12 +214,14 @@ final class ProcessedPreview: NSObject {
 
 // MARK: - Frame intake
 
-extension ProcessedPreview: AVCaptureVideoDataOutputSampleBufferDelegate {
+extension ProcessedPreview {
 
-    func captureOutput(_ output: AVCaptureOutput,
-                       didOutput sampleBuffer: CMSampleBuffer,
-                       from connection: AVCaptureConnection) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+    /// Processes one frame handed over by the session's video data output.
+    ///
+    /// Not a delegate any more. The buffer arrives unlocked, so the meter's own read and
+    /// this are two independent readers of the same memory rather than two consumers
+    /// fighting over a lock.
+    func render(pixelBuffer: CVPixelBuffer) {
         var image = CIImage(cvPixelBuffer: pixelBuffer)
 
         // Downscale before anything else. Everything downstream is proportional to the
