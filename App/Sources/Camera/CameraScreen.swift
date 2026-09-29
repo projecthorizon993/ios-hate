@@ -18,7 +18,7 @@ struct CameraScreen: View {
     @State private var bridge: PreviewBridge?
     @State private var deviceOrientation = UIDevice.current.orientation
     @State private var focusReticle: CGPoint?
-    @State private var isShowingReport = false
+    @State private var isShowingDeveloper = false
     @State private var isShowingLooks = false
     @State private var isShowingPro = false
     @State private var isShowingTone = false
@@ -66,25 +66,16 @@ struct CameraScreen: View {
         .onDisappear {
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
             Task { await model.stop() }
-            // If the screen goes away while the report sheet is still up, the device
-            // must not be marked as released: something else now owns the app.
-            if !isShowingReport { model.resumeAfterDiagnostics() }
         }
-        // `onDismiss` resumes the camera. It used to be wired to `presentReport`, which
-        // means dismissing the sheet tore the camera down and immediately presented the
-        // sheet again — an endless handover loop, each pass reconfiguring the session,
-        // for as long as the user tried to close it.
-        .sheet(isPresented: $isShowingReport, onDismiss: { model.resumeAfterDiagnostics() }) {
-            ReportScreen()
-        }
-        // Steps 3 and 4 are **not** sheets. They dock under their chip in the bottom stack
-        // and cover only the lower part of the viewfinder, because a look is chosen by
-        // looking and a pro value is dialled while watching the viewfinder change. A sheet
-        // covers the camera, which is the thing being adjusted. Both also stay out of the
-        // diagnostics camera handover — that exists because the report opens a second
-        // capture session, and neither of these does.
-        .sheet(isPresented: $isShowingReport, onDismiss: { model.resumeAfterDiagnostics() }) {
-            ReportScreen()
+        // The developer panel, replacing the capability report.
+        //
+        // It is a sheet because it is a read-only list of values and there is nothing to
+        // adjust while it is open — unlike Looks and Pro, which dock over the viewfinder so
+        // the camera stays visible. It reads cached values and opens no second capture
+        // session, so the camera never has to be handed over and the previous
+        // release/resume pair is now a no-op.
+        .sheet(isPresented: $isShowingDeveloper) {
+            NavigationStack { DeveloperPanel(model: model) }
         }
     }
 
@@ -161,12 +152,12 @@ struct CameraScreen: View {
             if model.showDebugOverlay {
                 VStack {
                     Spacer()
-                    Button("capability report") { presentReport() }
+                    Button("developer") { presentDeveloper() }
                         .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
                         .foregroundStyle(Theme.ColorToken.textSecondary)
                         .padding(.horizontal, Theme.Space.s)
                         .frame(minHeight: Theme.Space.minTouch)
-                        .accessibilityHint("Opens the Step 0 capability report")
+                        .accessibilityHint("Opens the developer panel: what this device reports it can do")
                 }
             }
         }
@@ -502,18 +493,14 @@ struct CameraScreen: View {
         model.start()
     }
 
-    /// The report opens a capture session of its own, so the camera screen hands the
-    /// device over before the sheet appears and takes it back on dismiss. Doing it in
-    /// the button action rather than here means the handover happens exactly once per
-    /// presentation and cannot be left half-done by a cancellation.
-    private func presentReport() {
-        // Awaited before the sheet appears. The report opens a capture session of its
-        // own, so the handover has to be complete first; showing the sheet first is what
-        // let the two sessions overlap.
-        Task { @MainActor in
-            await model.releaseForDiagnostics()
-            isShowingReport = true
-        }
+    /// Opens the developer panel.
+    ///
+    /// No camera handover, and no `Task` wrapping. The panel used to need both: the
+    /// capability report opened a capture session of its own, so the camera was torn down
+    /// and rebuilt around it, and that handover was a race before it was a fix. The panel
+    /// reads cached values, so there is nothing to wait for.
+    private func presentDeveloper() {
+        isShowingDeveloper = true
     }
 
     /// A banner is a status line, not something the user has to dismiss by hand while

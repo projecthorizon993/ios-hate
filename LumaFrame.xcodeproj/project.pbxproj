@@ -59,18 +59,6 @@
 				A9B807F26FFF0D1CE9AE6399,
 				A68230CEB61D9C1121D8B689,
 				A13290FFC0709B92BC31D9A2,
-				A93C2BC80AA6B2A2B957FE07,
-				A3DDE0A0989729BF8A7048E5,
-				A8DF73D8C2935C8B865035B8,
-				AA15B182A01ECEF25F499396,
-				A78CB644BA53B53F2CF114A3,
-				AE3AA951A82811C6F5B59AE4,
-				A73BF38D30A4CDFFDCD09A8C,
-				AFD192E62FD31061D495CB30,
-				A02A2A153CFFED4CEFEDA4D9,
-				AE8EFB11C7107A7DFD5AFC3D,
-				A46FA81BF8D2894BBEE02C5A,
-				A87A7D5BF5DFE40C21C7490A,
 				A16A78DC6A49B5E024FCF3C6,
 				ACCAC5BECADD9D6CD6270C61,
 				A2FDDBE28212E07C5BD396D4,
@@ -88,17 +76,19 @@
 				A5BC11F303052291E6FB2C1B,
 				AEB620EE64789952E59B006A,
 				AB174A3B018201C704EA6219,
+				AF8B792DE0339D5A6861CE02,
 				AF5DA351FBF73C7FBFF2B805,
 				A4BA07DD1E0851A352093BC1,
 				AFA822C55F0EB6711410EAA3,
 				A5E20936E5F8525DAA7DFD3A,
+				AB4E3B931C24460A832FD0B2,
+				AD4C02E59330F5E268002A57,
 				A549153AEC2703901FADC6CE,
 				ADA0DEBE0747651E8E6C6109,
 				AC938FD7C68ED288AC7E4FED,
 				AD2B88580548E280FD38F0B1,
 				A2890D903D2D4D036C61B290,
 				A2DBE3DC77B7D5D67C72CF65,
-				A7681A1A19F9BB62FD3BBEEF,
 				A10000000000000000000058
 			);
 			name = LumaFrame;
@@ -296,18 +286,6 @@
 				C4888E370535EB70A6866A2F,
 				CB0E88CBDD99CD1D81739D45,
 				C6907871D060BA394FCBA123,
-				CE440584A046EA2ED99BBAF4,
-				C51CC1AE42E91FF1A12557C7,
-				CCE63BAEA758D0C9BB9AB9A6,
-				C4154B853A94A9A8B76BF960,
-				C32F0453C2705575275EBD9C,
-				C5746E540D7D8C66FB225411,
-				C3335EBEB15A39A57687F196,
-				C14F55B0BA7335DEE40563B0,
-				C9567CE8C0EE524653499FA9,
-				CC2FECD8B4DB2903760D5AAB,
-				CBC555BBDADBCEB25D89CCED,
-				C1389DB9408908EB53F4801C,
 				C495B0E33B8AAAA32C96D76A,
 				CB021E25F76124D8F5CD5ACD,
 				C8D601BA67B59311E3BA79BB,
@@ -325,10 +303,13 @@
 				CA974A731C2FD5B4E35E7AEB,
 				C8F0875D32195865344EC1F9,
 				C4AA261019E06676EC934AA8,
+				C2D8C1C6070AB6B6D35F331B,
 				C1F850435B6C78A454F5B4BC,
 				C4DA73A05B3B8030C75BC53C,
 				C6FEE4DA81F4AE9A32EEE859,
 				CE7682ADF4BECB5A828EAE47,
+				C66307299FD3BD55253EDEB3,
+				CF9ACD8DD6FA00319CDB0B47,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -340,7 +321,6 @@
 				D8343F3D69C04F13AD71A04B,
 				DF8246E931F2AD3EAA34D9E7,
 				DE69752AFD735837BE0E75AB,
-				D0D1942134E71C67DBB59C17,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -499,78 +479,6 @@
 			path = App/Sources/DesignSystem/Theme.swift;
 			sourceTree = "<group>";
 		};
-		A93C2BC80AA6B2A2B957FE07 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/AVFoundationProbe.swift;
-			sourceTree = "<group>";
-		};
-		A3DDE0A0989729BF8A7048E5 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/CapabilityCollector.swift;
-			sourceTree = "<group>";
-		};
-		A8DF73D8C2935C8B865035B8 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/CoreMLProbe.swift;
-			sourceTree = "<group>";
-		};
-		AA15B182A01ECEF25F499396 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/DeviceProbe.swift;
-			sourceTree = "<group>";
-		};
-		A78CB644BA53B53F2CF114A3 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/ProbeTrace.swift;
-			sourceTree = "<group>";
-		};
-		AE3AA951A82811C6F5B59AE4 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/Report.swift;
-			sourceTree = "<group>";
-		};
-		A73BF38D30A4CDFFDCD09A8C = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/ReportExporter.swift;
-			sourceTree = "<group>";
-		};
-		AFD192E62FD31061D495CB30 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/ReportScreen.swift;
-			sourceTree = "<group>";
-		};
-		A02A2A153CFFED4CEFEDA4D9 = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/ReportSectionView.swift;
-			sourceTree = "<group>";
-		};
-		AE8EFB11C7107A7DFD5AFC3D = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/ReportSkipped.swift;
-			sourceTree = "<group>";
-		};
-		A46FA81BF8D2894BBEE02C5A = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/ReportViewModel.swift;
-			sourceTree = "<group>";
-		};
-		A87A7D5BF5DFE40C21C7490A = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Sources/Diagnostics/ShareSheet.swift;
-			sourceTree = "<group>";
-		};
 		A16A78DC6A49B5E024FCF3C6 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -673,6 +581,12 @@
 			path = App/Sources/Support/AppLog.swift;
 			sourceTree = "<group>";
 		};
+		AF8B792DE0339D5A6861CE02 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Support/DeveloperPanel.swift;
+			sourceTree = "<group>";
+		};
 		AF5DA351FBF73C7FBFF2B805 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -695,6 +609,18 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Sources/Support/MemoryProbe.swift;
+			sourceTree = "<group>";
+		};
+		AB4E3B931C24460A832FD0B2 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Support/ReportFormat.swift;
+			sourceTree = "<group>";
+		};
+		AD4C02E59330F5E268002A57 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Support/RuntimeCapabilities.swift;
 			sourceTree = "<group>";
 		};
 		A549153AEC2703901FADC6CE = {
@@ -731,12 +657,6 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Tests/ProcessingPipelineTests.swift;
-			sourceTree = "<group>";
-		};
-		A7681A1A19F9BB62FD3BBEEF = {
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.swift;
-			path = App/Tests/ReportTextTests.swift;
 			sourceTree = "<group>";
 		};
 		C15352A586C2134E09B448B6 = {
@@ -815,54 +735,6 @@
 			isa = PBXBuildFile;
 			fileRef = A13290FFC0709B92BC31D9A2;
 		};
-		CE440584A046EA2ED99BBAF4 = {
-			isa = PBXBuildFile;
-			fileRef = A93C2BC80AA6B2A2B957FE07;
-		};
-		C51CC1AE42E91FF1A12557C7 = {
-			isa = PBXBuildFile;
-			fileRef = A3DDE0A0989729BF8A7048E5;
-		};
-		CCE63BAEA758D0C9BB9AB9A6 = {
-			isa = PBXBuildFile;
-			fileRef = A8DF73D8C2935C8B865035B8;
-		};
-		C4154B853A94A9A8B76BF960 = {
-			isa = PBXBuildFile;
-			fileRef = AA15B182A01ECEF25F499396;
-		};
-		C32F0453C2705575275EBD9C = {
-			isa = PBXBuildFile;
-			fileRef = A78CB644BA53B53F2CF114A3;
-		};
-		C5746E540D7D8C66FB225411 = {
-			isa = PBXBuildFile;
-			fileRef = AE3AA951A82811C6F5B59AE4;
-		};
-		C3335EBEB15A39A57687F196 = {
-			isa = PBXBuildFile;
-			fileRef = A73BF38D30A4CDFFDCD09A8C;
-		};
-		C14F55B0BA7335DEE40563B0 = {
-			isa = PBXBuildFile;
-			fileRef = AFD192E62FD31061D495CB30;
-		};
-		C9567CE8C0EE524653499FA9 = {
-			isa = PBXBuildFile;
-			fileRef = A02A2A153CFFED4CEFEDA4D9;
-		};
-		CC2FECD8B4DB2903760D5AAB = {
-			isa = PBXBuildFile;
-			fileRef = AE8EFB11C7107A7DFD5AFC3D;
-		};
-		CBC555BBDADBCEB25D89CCED = {
-			isa = PBXBuildFile;
-			fileRef = A46FA81BF8D2894BBEE02C5A;
-		};
-		C1389DB9408908EB53F4801C = {
-			isa = PBXBuildFile;
-			fileRef = A87A7D5BF5DFE40C21C7490A;
-		};
 		C495B0E33B8AAAA32C96D76A = {
 			isa = PBXBuildFile;
 			fileRef = A16A78DC6A49B5E024FCF3C6;
@@ -931,6 +803,10 @@
 			isa = PBXBuildFile;
 			fileRef = AB174A3B018201C704EA6219;
 		};
+		C2D8C1C6070AB6B6D35F331B = {
+			isa = PBXBuildFile;
+			fileRef = AF8B792DE0339D5A6861CE02;
+		};
 		C1F850435B6C78A454F5B4BC = {
 			isa = PBXBuildFile;
 			fileRef = AF5DA351FBF73C7FBFF2B805;
@@ -947,6 +823,14 @@
 			isa = PBXBuildFile;
 			fileRef = A5E20936E5F8525DAA7DFD3A;
 		};
+		C66307299FD3BD55253EDEB3 = {
+			isa = PBXBuildFile;
+			fileRef = AB4E3B931C24460A832FD0B2;
+		};
+		CF9ACD8DD6FA00319CDB0B47 = {
+			isa = PBXBuildFile;
+			fileRef = AD4C02E59330F5E268002A57;
+		};
 		D7EA069DAB30A429FBAE2818 = {
 			isa = PBXBuildFile;
 			fileRef = AC938FD7C68ED288AC7E4FED;
@@ -962,10 +846,6 @@
 		DE69752AFD735837BE0E75AB = {
 			isa = PBXBuildFile;
 			fileRef = A2DBE3DC77B7D5D67C72CF65;
-		};
-		D0D1942134E71C67DBB59C17 = {
-			isa = PBXBuildFile;
-			fileRef = A7681A1A19F9BB62FD3BBEEF;
 		};
 		A10000000000000000000053 = {
 			isa = PBXBuildFile;

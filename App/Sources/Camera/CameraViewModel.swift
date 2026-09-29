@@ -45,6 +45,19 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isBannerError = false
 
     @Published private(set) var sessionState: CaptureSessionController.State = .idle
+    /// What this device can do, discovered at run time. Filled in at launch and again
+    /// whenever the session is configured, because the format-level answers change when
+    /// the lens does.
+    @Published private(set) var runtimeCapabilities = RuntimeCapabilities()
+
+    func setRuntimeCapabilities(_ capabilities: RuntimeCapabilities) {
+        runtimeCapabilities = capabilities
+    }
+
+    /// The photographer's view of the same hardware, derived from the same read. Kept
+    /// separate from `RuntimeCapabilities` because the two answer different questions and
+    /// have different lifetimes: this one is rebuilt on every configuration change and
+    /// holds only what the UI needs.
     @Published private(set) var capabilities: CameraCapabilities = .unknown
     @Published private(set) var exposureRange: ExposureRange?
     @Published private(set) var hdr: HDRStatus = .unsupported
@@ -122,6 +135,16 @@ final class CameraViewModel: ObservableObject {
     func start() {
         canFlip = CaptureSessionController.hasDevice(facing: .back)
             && CaptureSessionController.hasDevice(facing: .front)
+        // Discovered before the session, so the developer panel has something to show the
+        // moment it is opened. The output-level values are filled in later, by
+        // `finishConfiguration`, because they are empty until the photo output is on a
+        // running session.
+        let discovered = RuntimeCapabilities.discover(
+            display: RuntimeCapabilities.displayFacts(),
+            cameraIsOwned: false)
+        discovered.logEverything()
+        setRuntimeCapabilities(discovered)
+
         guard !hasConfigured else { return }
         hasConfigured = true
         AppLog.note(AppLog.camera, "camera screen start, facing=\(facing.rawValue)")
@@ -151,28 +174,27 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    /// Gives the device up entirely, so the capability report can open a session of its
-    /// own. This is a full teardown — inputs and outputs removed — not a `stopRunning`,
-    /// because a stopped-but-configured session still counts as holding the device.
+    /// The camera is **never** handed over now.
     ///
-    /// `async`, and awaited before the report is allowed to start. This handover used to
-    /// be fire-and-forget: the teardown was queued on the session queue, `markReleased()`
-    /// ran straight afterwards, and the report then opened a second session while this one
-    /// still held the hardware. Nothing ordered the two. Now the caller cannot proceed
-    /// until the teardown has actually completed.
+    /// The capability report used to need the physical camera to itself, because it opened
+    /// a second `AVCaptureSession` to read output-level RAW and ProRAW. That was the
+    /// contention the first on-device hang was blamed on, and the handover around it was
+    /// the race that made things worse before it was understood.
+    ///
+    /// The report is gone. `RuntimeCapabilities.attachingOutput(_:)` reads the same
+    /// properties from the photo output that is **already attached to the running session**,
+    /// so nothing needs a second session and nothing needs the camera given up.
+    ///
+    /// The methods are kept as no-ops rather than deleted, because the call sites in the
+    /// view are the clearest statement of what used to happen and a reader comparing
+    /// against an older checkout needs to find that.
     func releaseForDiagnostics() async {
-        AppLog.note(AppLog.camera, "releasing the camera for diagnostics")
-        readoutTimer?.invalidate()
-        readoutTimer = nil
-        await sessionController.tearDown()
-        CameraRelease.shared.markReleased()
+        AppLog.note(AppLog.camera, "no camera handover needed: capabilities read from the live session")
     }
 
-    /// Takes the device back after the report and rebuilds the session.
+    /// Counterpart to `releaseForDiagnostics()`, and equally a no-op.
     func resumeAfterDiagnostics() {
-        CameraRelease.shared.markRetaken()
-        AppLog.note(AppLog.camera, "resuming the camera after diagnostics")
-        configure()
+        AppLog.note(AppLog.camera, "no camera resume needed")
     }
 
     func stop() async {
@@ -194,12 +216,24 @@ final class CameraViewModel: ObservableObject {
         capabilities = probed
 
         photo.configureOutput(capabilities: probed)
+
+        // The developer-facing capability table is read here rather than at launch,
+        // because this is the first moment the photo output is attached to a session with
+        // a video source and **running** — which is the only state in which
+        // `availableRawPhotoPixelFormatTypes` and `isAppleProRAWSupported` mean anything.
+        // Read earlier they would come back empty, and an empty codec list is what makes a
+        // capture report "this camera offers no codec".
+        var runtime = runtimeCapabilities
+        runtime.applying(format: configuration.format, device: configuration.device)
+        runtime.attachingOutput(photo.output)
+        runtime.logEverything()
+        setRuntimeCapabilities(runtime)
+
         proCapabilities = ProCapabilities
             .probe(device: configuration.device, format: configuration.format)
-            .withRaw(raw: !photo.output.availableRawPhotoPixelFormatTypes.isEmpty,
-                     proRaw: photo.output.isAppleProRAWSupported,
-                     maxDimensions: "\(photo.output.maxPhotoDimensions.width)"
-                                    + "x\(photo.output.maxPhotoDimensions.height)")
+            .withRaw(raw: !probed.rawPixelTypes.isEmpty,
+                     proRaw: probed.proRawSupported,
+                     maxDimensions: runtime.maxPhotoDimensions)
         AppLog.note(AppLog.camera,
                     "pro panel: \(proCapabilities.availabilitySummary)")
         looks = lookLibrary.all
