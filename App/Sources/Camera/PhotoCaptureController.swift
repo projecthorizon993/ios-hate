@@ -41,6 +41,39 @@ final class PhotoCaptureController: NSObject {
         /// `.quality` where it is unsupported is silently downgraded, so the app decides
         /// explicitly and logs the decision.
         var preferQuality = false
+        /// Set when the user has dialled in a manual ISO, shutter or exposure lock.
+        ///
+        /// Decides `photoQualityPrioritization`, and it is the opposite of `preferQuality`.
+        /// Apple documents that `.balanced` — the default — *allows photo capture to
+        /// temporarily override the capture device's exposure duration and ISO if the
+        /// scene is dark enough to require multi-image fusion*, so `.balanced` silently
+        /// discards a manual exposure in exactly the low light where a manual camera is
+        /// being used on purpose. `.speed` honours the values and gives up the fusion.
+        ///
+        /// A capture is either Auto or manual, so the two flags are never both meaningful;
+        /// if they somehow are, manual wins, because losing a look the user chose is worse
+        /// than losing an HDR badge.
+        var manualExposureActive = false
+    }
+
+    /// The prioritisation a request resolves to, in one place.
+    ///
+    /// Manual wins over quality when both are set: losing a look the user chose is worse
+    /// than losing an HDR badge, and the user can turn the manual value off.
+    static func prioritization(for request: Request) -> AVCapturePhotoSettings.QualityPrioritization {
+        if request.manualExposureActive { return .speed }
+        if request.preferQuality { return .quality }
+        return .balanced
+    }
+
+    /// The same string the recipe records, so the file and the request cannot disagree.
+    static func name(for prioritization: AVCapturePhotoSettings.QualityPrioritization) -> String {
+        switch prioritization {
+        case .speed: return "speed"
+        case .quality: return "quality"
+        case .balanced: return "balanced"
+        @unknown default: return "unknown"
+        }
     }
 
     /// A finished capture, before it is written anywhere.
@@ -140,8 +173,15 @@ final class PhotoCaptureController: NSObject {
         // The file records the **request**, because that is all that exists at the moment
         // the settings are built. AVFoundation resolves quality afterwards and the
         // resolution lands in the log, not retroactively in the file.
+        //
+        // The prioritisation is decided once, here, and both the metadata and the settings
+        // read it. Deciding it twice is how the two drift: the first version of this set
+        // `.speed` on the settings and wrote `"balanced"` into the recipe, so every manual
+        // capture's own file would have said the opposite of what was done to it.
+        let prioritization = Self.prioritization(for: request)
+
         var recorded = metadata
-        recorded.photoQualityPrioritization = request.preferQuality ? "quality" : "balanced"
+        recorded.photoQualityPrioritization = Self.name(for: prioritization)
         recorded.proRaw = request.proRaw
         recorded.raw = request.raw
         pendingMetadata = recorded
@@ -156,7 +196,21 @@ final class PhotoCaptureController: NSObject {
         } else {
             settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: codec])
         }
-        settings.photoQualityPrioritization = request.preferQuality ? .quality : .balanced
+        // Three modes, not two, and the middle one is the bug this replaces.
+        //
+        // - manual:  `.speed` — honour the user's ISO and shutter, give up multi-frame
+        // - quality: `.quality` — native HDR for stills, where the format supports it
+        // - neither: `.balanced`, the default
+        //
+        // The old code was `preferQuality ? .quality : .balanced`, which meant every
+        // capture on a format with photo-quality support asked for `.balanced` and
+        // therefore let the system override a manual exposure.
+        settings.photoQualityPrioritization = prioritization
+        if request.manualExposureActive && request.preferQuality {
+            AppLog.note(AppLog.camera,
+                        "manual exposure overrides quality prioritisation; "
+                        + "multi-frame fusion is unavailable in this capture")
+        }
 
         let wantsFlash = request.flash == .on && output.supportedFlashModes.contains(.on)
         settings.flashMode = wantsFlash ? .on : .off

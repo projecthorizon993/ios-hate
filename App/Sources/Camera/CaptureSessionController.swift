@@ -336,13 +336,235 @@ final class CaptureSessionController: NSObject {
     /// error when the device is not locked. So each one is guarded by a support check
     /// and then run through `LumaFrameSafety`, which is the wrapper that actually
     /// converts a raised exception into a log line.
+    /// Returns whether the device actually took the mode.
+    ///
+    /// It used to return `Void`, which meant a caller reporting "applied" after calling it
+    /// was reporting a request, not an outcome. That is the specific thing this function's
+    /// own log line warns against, six lines above where it was happening.
+    @discardableResult
     private func setExposureMode(_ mode: AVCaptureDevice.ExposureMode,
                                  on device: AVCaptureDevice,
-                                 name: String) {
-        guard device.isExposureModeSupported(mode) else { return }
+                                 name: String) -> Bool {
+        guard device.isExposureModeSupported(mode) else {
+            AppLog.warn(AppLog.camera, "\(name) mode \(mode) is not supported by this device")
+            return false
+        }
         if let failure = LumaFrameSafety.perform({ device.exposureMode = mode }) {
             AppLog.warn(AppLog.camera, "\(name) mode rejected: \(failure)")
+            return false
         }
+        return true
+    }
+
+    /// Writes the user's manual settings to the device.
+    ///
+    /// Every value is gated on the capability that owns it, checked against the range it
+    /// came from, and wrapped in the exception trap. AVFoundation raises
+    /// `NSInvalidArgumentException` for an unsupported mode or an out-of-range value, and
+    /// Swift cannot catch that — so the checks here are what keep an out-of-range value
+    /// from becoming a crash rather than a log line.
+    ///
+    /// Clamping already happened in `ManualSettings.clamped(to:)`. This re-checks rather
+    /// than trusting it, because the values arriving here have been through a `@Published`
+    /// round trip and the capability set may have changed underneath them.
+    @discardableResult
+    func apply(manual: ManualSettings, to configuration: Configuration) -> Bool {
+        let device = configuration.device
+        // `lockForConfiguration()` is `throws` and returns `Void`. Comparing it to `nil`
+        // does not compile, and the failure has to come from the `catch`, not from a
+        // sentinel.
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            AppLog.fail(AppLog.camera, "manual: lockForConfiguration failed: \(error.localizedDescription)")
+            return false
+        }
+        defer { device.unlockForConfiguration() }
+
+        let applied = applyExposure(manual, to: device)
+        let focused = applyFocus(manual, to: device)
+        let balanced = applyWhiteBalance(manual, to: device)
+        let any = applied || focused || balanced
+
+        // "Asked for" and "the device accepted" are logged as two facts, never one.
+        // `summarise` is the request; what follows is the outcome.
+        if manual.isExposureManual || manual.lockFocus || manual.lockWhiteBalance {
+            AppLog.note(AppLog.camera,
+                        "manual requested [\(manual.summarise)] applied=\(any) "
+                        + "exposure=\(applied) focus=\(focused) wb=\(balanced)")
+        }
+        return any
+    }
+
+    /// ISO, shutter and exposure bias, resolved to one pair and written once.
+    ///
+    /// `setExposureModeCustom(duration:iso:)` takes duration and ISO together and there is
+    /// no partial form of it, so a caller that wants to change one of them must also name
+    /// the other. **The value named for the one the user did not choose has to be the
+    /// device's current value.** Substituting a constant — which is what an earlier
+    /// version of this did, writing 1/60 s whenever only ISO was set — applies an exposure
+    /// nobody dialled in, which is the same defect as a control that does nothing, only
+    /// harder to notice because the slider did move.
+    ///
+    /// The bias is written after that call rather than before, and via
+    /// `setExposureTargetBias` rather than by assigning `exposureMode`. Entering `.custom`
+    /// through the property setter can reset duration and ISO to values this function never
+    /// chose, which would discard the pair written a line earlier.
+    ///
+    /// `exposureTargetOffset` is the read-only *metered* offset from the target, and there
+    /// is no `setExposureTargetOffset`. The writable quantity is the bias, and the
+    /// `min/maxExposureTargetBias` used for the clamp above are its limits.
+    private func applyExposure(_ manual: ManualSettings, to device: AVCaptureDevice) -> Bool {
+        let format = device.activeFormat
+
+        guard device.isExposureModeSupported(.custom) else {
+            if manual.isExposureManual {
+                AppLog.warn(AppLog.camera,
+                            "manual exposure requested on \(device.deviceType.rawValue), "
+                            + "which does not support .custom; not applied")
+            }
+            return false
+        }
+
+        // Clamp to the *live* format rather than the probed one: the format can be
+        // renegotiated between the probe and this call.
+        let isoRange = format.minISO <= format.maxISO ? format.minISO...format.maxISO : nil
+        let minShutter = CMTimeGetSeconds(format.minExposureDuration)
+        let maxShutter = CMTimeGetSeconds(format.maxExposureDuration)
+        let shutterRange = minShutter > 0 && maxShutter >= minShutter ? minShutter...maxShutter : nil
+
+        var wrote = false
+
+        // `.custom` is only entered when there is something to enter it for. A settings
+        // value of `lockExposure` alone locks whatever the device is already running, so
+        // forcing `.custom` first would replace the auto exposure the user did not ask to
+        // change.
+        let wantsCustom = manual.iso != nil
+            || manual.shutterSeconds != nil
+            || manual.exposureTargetOffset != 0
+
+        if wantsCustom {
+            let pair = Self.resolveExposurePair(manual,
+                                                currentSeconds: CMTimeGetSeconds(device.exposureDuration),
+                                                currentISO: device.iso,
+                                                shutterRange: shutterRange,
+                                                isoRange: isoRange)
+
+            if let failure = LumaFrameSafety.perform({
+                device.setExposureModeCustom(
+                    duration: CMTime(seconds: pair.seconds, preferredTimescale: 1_000_000_000),
+                    iso: pair.iso,
+                    completionHandler: nil)
+            }) {
+                AppLog.warn(AppLog.camera, "manual exposure rejected: \(failure)")
+            } else {
+                wrote = true
+                // What was sent, which is not always what was asked for: the clamp may
+                // have moved a value, and an unset one was carried over from the device.
+                // Both halves are in the line because the difference between them is the
+                // thing that has to be explainable from a device log.
+                AppLog.note(AppLog.camera,
+                            "manual exposure applied: iso=\(Int(pair.iso)) shutter=\(pair.seconds)s"
+                            + " requested iso=\(manual.iso.map { String(Int($0)) } ?? "auto")"
+                            + " shutter=\(manual.shutterSeconds.map { String($0) } ?? "auto")")
+            }
+
+            if manual.exposureTargetOffset != 0 {
+                let lower = device.minExposureTargetBias
+                let upper = device.maxExposureTargetBias
+                let clamped = min(max(manual.exposureTargetOffset, lower), upper)
+                if let failure = LumaFrameSafety.perform({
+                    device.setExposureTargetBias(clamped, completionHandler: nil)
+                }) {
+                    AppLog.warn(AppLog.camera, "manual exposure bias rejected: \(failure)")
+                } else {
+                    wrote = true
+                    AppLog.note(AppLog.camera,
+                                "manual bias applied: \(clamped)EV"
+                                + (clamped == manual.exposureTargetOffset ? "" : " (clamped)"))
+                }
+            }
+        }
+
+        if manual.lockExposure {
+            // The return value is used, not ignored: a refused lock must not be reported
+            // as applied.
+            if setExposureMode(.locked, on: device, name: "exposure") {
+                wrote = true
+            }
+        }
+        return wrote
+    }
+
+    /// A duration and an ISO, which is the only shape `setExposureModeCustom` accepts.
+    struct ExposurePair: Equatable {
+        var seconds: Double
+        var iso: Float
+    }
+
+    /// Resolves what to actually send, given what was asked for and what the device is
+    /// doing now.
+    ///
+    /// Pure, and separate from the write, for one reason: the rule worth protecting here is
+    /// **a value the user did not set must come from the device**. That rule cannot be
+    /// tested through `AVCaptureDevice`, which does not exist in a headless test process,
+    /// and an untestable rule is the rule that comes back. Extracted, the bug this replaces
+    /// — writing a fixed 1/60 s whenever only ISO was dialled in — is a two-line test.
+    ///
+    /// The current values are passed in rather than read from a device, and the ranges are
+    /// the live format's rather than the probed ones, because the format can be
+    /// renegotiated between the probe and the write.
+    static func resolveExposurePair(_ manual: ManualSettings,
+                                    currentSeconds: Double,
+                                    currentISO: Float,
+                                    shutterRange: ClosedRange<Double>?,
+                                    isoRange: ClosedRange<Float>?) -> ExposurePair {
+        let requestedISO = manual.iso ?? currentISO
+        let requestedSeconds = manual.shutterSeconds ?? currentSeconds
+        return ExposurePair(
+            seconds: shutterRange.map { min(max(requestedSeconds, $0.lowerBound), $0.upperBound) }
+                ?? requestedSeconds,
+            iso: isoRange.map { min(max(requestedISO, $0.lowerBound), $0.upperBound) }
+                ?? requestedISO
+        )
+    }
+
+    private func applyFocus(_ manual: ManualSettings, to device: AVCaptureDevice) -> Bool {
+        guard manual.lockFocus else { return false }
+        // Both are needed and they are different questions: a composite supports the locked
+        // focus mode and refuses a new lens position.
+        guard device.isFocusModeSupported(.locked),
+              device.isLockingFocusWithCustomLensPositionSupported else {
+            AppLog.warn(AppLog.camera, "manual focus requested but refused by this device; not applied")
+            return false
+        }
+        let position = Float(device.lensPosition)
+        if let failure = LumaFrameSafety.perform({
+            device.setFocusModeLocked(lensPosition: position)
+        }) {
+            AppLog.warn(AppLog.camera, "manual focus rejected: \(failure)")
+            return false
+        }
+        return true
+    }
+
+    private func applyWhiteBalance(_ manual: ManualSettings, to device: AVCaptureDevice) -> Bool {
+        guard manual.lockWhiteBalance else { return false }
+        guard device.isWhiteBalanceModeSupported(.locked) else {
+            AppLog.warn(AppLog.camera, "manual white balance requested but refused; not applied")
+            return false
+        }
+        // The current gains are what is locked. A UI that let the user dial a Kelvin value
+        // would need the device's `temperatureAndTintValues`, which is a different feature
+        // and not one this task is allowed to add.
+        let gains = device.whiteBalanceGains
+        if let failure = LumaFrameSafety.perform({
+            device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
+        }) {
+            AppLog.warn(AppLog.camera, "manual white balance rejected: \(failure)")
+            return false
+        }
+        return true
     }
 
     private func setFocusMode(_ mode: AVCaptureDevice.FocusMode,
