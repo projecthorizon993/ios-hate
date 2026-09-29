@@ -3,7 +3,7 @@ import SwiftUI
 /// Step 4's host screen. The controls themselves are `ProDial`.
 ///
 /// The panel is built from `ProCapabilities` rather than a fixed layout, so a control the
-/// hardware cannot honour is absent rather than present and disabled — a row of dead
+/// hardware cannot honour is absent rather than present and disabled. A row of dead
 /// switches is an inventory of what the device is not, which is not something anyone
 /// composing a photo wants.
 struct ProScreen: View {
@@ -46,7 +46,7 @@ struct ProScreen: View {
     }
 
     /// RAW lives outside the dial because it is a switch, not a dial. ProRAW is only
-    /// offered where RAW is, because it is a RAW variant — a ProRAW control on a device
+    /// offered where RAW is, because it is a RAW variant. A ProRAW control on a device
     /// with no RAW output would be a control that cannot work.
     @ViewBuilder
     private var rawSection: some View {

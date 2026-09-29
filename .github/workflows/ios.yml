@@ -40,6 +40,14 @@ jobs:
       - name: Check Swift source balance
         run: node scripts/check-swift-balance.mjs
 
+      # Before the compiler, not after. A Swift file that is not valid UTF-8 produces
+      # "error: invalid UTF-8 found in source file" pointing at a comment, with nothing in
+      # the message about encoding — two CI runs were spent reading that as a toolchain
+      # problem before a single stray 0x97 byte was found by hand. This names the file and
+      # the exact offset.
+      - name: Check Swift source encoding
+        run: node scripts/check-swift-encoding.mjs
+
       - name: Select a simulator
         id: sim
         run: |
@@ -129,6 +137,9 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Check Swift source encoding
+        run: node scripts/check-swift-encoding.mjs
 
       - name: Verify Xcode toolchain and scheme
         run: |
