@@ -726,6 +726,10 @@ final class CameraStep1Tests: XCTestCase {
     /// The same gate has to reach the panel. `ProParameter.supported(by:)` is what the Pro
     /// panel renders from, so a withdrawn lock must not produce a WB chip — this is the
     /// user-visible half of the assertion above, and it is the half a user would see.
+    ///
+    /// `@MainActor` because `ProParameter` lives in the SwiftUI file, where the static is
+    /// main-actor isolated. Same reason the prioritisation test below carries it.
+    @MainActor
     func testNoWhiteBalanceChipIsRenderedForACompositeLikeCapabilitySet() {
         let compositeLike = ProCapabilities(supportsCustomExposure: false, isCompositeDevice: true)
 
