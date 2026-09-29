@@ -40,153 +40,79 @@ These exist because the previous approach broke them. Follow them literally.
 | Repo | `D:\project\app`, branch `main` |
 | `main` | the tip. This file is committed on it, so read the state from the tables below rather than from a hash, which is always one commit stale. |
 | Target | iOS 18.0, Swift 5.9, iPhone only (`TARGETED_DEVICE_FAMILY = 1`), portrait only |
-| Sources | 28 Swift files under `App/Sources`, 4 under `App/Tests` |
+| Sources | 29 Swift files under `App/Sources`, 4 under `App/Tests` |
 | Third-party deps | **none** — Apple frameworks only |
 | CI | `.github/workflows/ios.yml`: unit tests + unsigned IPA, on `macos-15` |
 | Android | a separate branch, `android-step0`. Not your problem. |
 
-### Merge status — read this, it is not what the git log suggests
+### Merge status — all five are merged
 
 | Branch | Status |
 | --- | --- |
+| `agent/a1-lut-colour` (`29a7c01`) | **merged**, including the trap fix |
+| `agent/a2-manual-exposure` (`cb2cdc0`) | **merged** |
 | `agent/a3-ui-consolidation` (`3ed828d`) | **merged** |
 | `agent/a4-looks-storage` (`1074c68`) | **merged** |
 | `agent/a5-diagnostics` (`e3cf9de`) | **merged** |
-| `agent/a1-lut-colour` (`29a7c01`) | original commit merged; the **trap fix `29a7c01` is not** |
-| `agent/a2-manual-exposure` (`cb2cdc0`) | **not merged at all** |
 
 Worktrees for all five live under `C:\Users\Admin\AppData\Local\Temp\opencode\lf-a1..a5`.
 `lf-a1` is stale — it predates the tooling in `scripts/`. Trust `main`, not the worktrees.
 
----
+### What Phase 0 cost, and what it bought
 
-## 3. PHASE 0 — make it build
+Phase 0 took **eight CI runs**, and the reason is worth keeping: the gate had no
+compiler, so eight compile errors surfaced one run at a time, each after a full build.
+Seven were mechanical (`QualityPrioritization` is on the *output*; `MTLDevice.isLowPower`
+is macOS-only; `UIDisplayGamut.P3` is capitalised; a static called without `Self.`; an
+escaping Objective-C block capturing a mutating `self`; a `device.whiteBalanceGains`
+property that does not exist). One was a test of mine that was simply wrong.
 
-**Goal: `main` compiles, CI green, zero outstanding compile errors. Claim nothing about
-behaviour.** This is the only thing that matters until it is done.
-
-### 0.1 Merge A1's trap fix
-
-```bash
-git merge --no-ff agent/a1-lut-colour -m "Merge a1: LUT colour management and the Int(Float) trap fix"
-```
-
-Why: `LUTProcessor.shortest(_:)` used `String(Int(value))` on a parsed `DOMAIN_MIN` /
-`DOMAIN_MAX`. `Int(_: Float)` **traps** on overflow and non-finite values, and the parser
-bounds sample data but not domain values. A `.cube` declaring `DOMAIN_MAX 1e40 1e40 1e40`
-parses fine, is correctly identified as log-encoded, then kills the app while being
-formatted into the error message written to explain that. Reachable from a user picking a
-file in Files.app. Fixed in `29a7c01`.
-
-**Verify it applied:** `git grep -n "isFinite" -- App/Sources/Processing/LUTProcessor.swift`
-must show the guard inside `shortest(_:)`.
-
-### 0.2 Merge A2
-
-```bash
-git merge --no-ff agent/a2-manual-exposure -m "Merge a2: manual exposure write-back and photoQualityPrioritization"
-```
-
-**This branch has never compiled.** It was reviewed, three compile errors were found and
-fixed in `cb2cdc0`, and CI has still never seen it. Merge it, then watch CI. If it fails,
-fix on `main` — do not debug inside a merge.
-
-A2 does three things: it writes manual ISO/shutter/bias and focus/WB locks to the device
-(previously it clamped the values and dropped them, so the Pro dial controlled nothing);
-it sets `photoQualityPrioritization = .speed` when a manual exposure is active, because
-Apple documents that the default `.balanced` lets the system **override** a manual ISO in
-low light; and it gates the Pro panel on `isExposureModeSupported(.custom)`.
-
-### 0.3 Gate the white-balance lock on the composite restriction
-
-A2 withdrew ISO, shutter and bias when the bound device cannot do `.custom`, but left
-`canLockWhiteBalance` ungated. Apple documents that `.builtInTripleCamera` and
-`.builtInDualWideCamera` do not allow locking AWB to new gains. So on a Pro iPhone the
-user still gets a WB lock chip that cannot work — the exact defect 0.2's gating was meant
-to close.
-
-```
-App/Sources/Camera/ProCapabilities.swift
-    capabilities.canLockWhiteBalance = device.isWhiteBalanceModeSupported(.locked)
-```
-
-There is no separate "can the gains change" query, so the honest options are to gate it
-on the same composite check used for exposure, or to record explicitly that it is an
-uncertain answer and suppress the chip. Either is acceptable. What is not acceptable is
-leaving it as-is and calling the panel gated.
-
-**Accept when:** a composite-like capability set offers no WB lock, and a test asserts it.
-
-### 0.4 Make the capability model and the session agree
-
-Two halves of the same fact currently disagree:
-
-- `CaptureSessionController.pickDevice(facing:)` (`CaptureSessionController.swift`) prefers
-  a **composite** device, with a comment saying this keeps one session alive.
-- `CameraCapabilities.attachBackCameras` filters composites **out** of the capability model.
-
-So the UI offers physical lens chips while the session runs a different device. No test
-covers the session half, which is why CI is green on a contradiction.
-
-Two acceptable resolutions, and the choice is yours to make and record:
-
-- **(a)** Bind a constituent device in Pro mode, so manual exposure works. Cost: a session
-  reconfiguration per lens change. This is the real fix but it is Phase 3 work and needs a
-  device.
-- **(b)** Make both halves agree that Auto uses a composite and Pro uses a constituent, and
-  fall back to hiding Pro when no constituent is available.
-
-**Accept when:** a test fails if the two disagree. Whatever you choose, write down which.
-
-### 0.5 One derivation for quality prioritisation
-
-`PhotoCaptureController` has three independent `preferQuality ? ...` expressions. A2 added
-`prioritization(for:)` and `name(for:)` on the branch; if any survived the merge or any
-duplicate remains, every one of them must read from the single function. A manual capture
-whose recipe says `"balanced"` while `.speed` was applied is a file lying about itself.
-
-```
-App/Sources/Camera/PhotoCaptureController.swift
-    git grep -n "preferQuality ?" -- App
-```
-
-**Accept when:** `git grep "preferQuality ?"` returns nothing in `App/Sources`.
-
-### 0.6 Working colour space on every CIContext
-
-The LUT is now applied with `CIColorCubeWithColorSpace`, which takes the table's authored
-space and converts into the context's working space. The default working space is linear
-sRGB, so this is behaviourally inert *until it is not* — which is why it should be stated
-rather than inherited. Four contexts were missed:
-
-```
-App/Sources/Camera/PreviewSurface.swift     (3 sites: CIContext(mtlDevice:), CIContext(), and one more)
-App/Sources/Looks/Looks.swift               (LookThumbnailer's context, after the a4 merge)
-```
-
-`ProcessingPipeline.encodeJPEG` already has it. Add `.workingColorSpace` to the others
-using `ColorSpace.linearSRGB.cgColorSpace`.
-
-### 0.7 Phase 0 gate
-
-```bash
-node scripts/audit-sources.mjs      # must print "no structural errors"
-node scripts/generate-pbxproj.mjs --check
-node scripts/validate-pbxproj.mjs
-```
-
-Then push and require **both** `Unit tests` and `Build unsigned IPA` green on `main`.
-
-**Do not proceed to Phase 1 until that is true.** If CI is red, stop and fix it. Everything
-below assumes a building app.
+The single most expensive mistake was guessing a platform fact instead of looking it up.
+Three runs went into one enum's spelling, and a fourth went into a claim this document
+itself got wrong — see section 8.
 
 ---
 
-## 4. PHASE 1 — put it on a phone
+## 3. PHASE 0 — make it build — **DONE, GATE GREEN**
+
+`Unit tests` and `Build unsigned IPA` both pass on `main`. The app compiles and the test
+suite executes for the first time. **Nothing about behaviour is claimed** — no code has
+ever run on a phone. Proceed to Phase 1, which is where that starts.
+
+What each item turned out to be:
+
+| # | Item | What it was |
+| --- | --- | --- |
+| 0.1 | Merge A1's trap fix | Merged, but the commit carried a **stray `}` at EOF** that does not compile. Removed on `main`. |
+| 0.2 | Merge A2 | Four compile errors. The branch had never been compiled, as documented. |
+| 0.3 | Gate the WB lock | Fixed — but the handoff's own premise was wrong. See section 8. |
+| 0.4 | Make the model and session agree | `CameraPlan.resolve` — one rule, two readers. |
+| 0.5 | One quality derivation | The third derivation was still there. Now `git grep "preferQuality ?"` is empty in `App/Sources`. |
+| 0.6 | Working colour space on every CIContext | Four contexts, plus the default on `CubeLUT.authoredSpace` removed. |
+| 0.7 | The gate | Green, on the ninth push. |
+
+**0.4 in detail.** `CameraPlan.resolve` takes `[BackCameraCapabilities]`, not
+`AVCaptureDevice`, which is what makes the agreement testable in CI at all. Both
+`pickDevice` and `attachBackCameras` read it. Binding a constituent in Pro mode is
+deliberately *not* done — it is a session reconfiguration per lens change, it has never
+run on a device, and it is Phase 3.1. `proRequiresRebinding` records the empty panel's
+cause rather than leaving it a gap.
+
+**0.6 in detail.** `CubeLUT.authoredSpace` defaulted to `.sRGB`. That default was a false
+claim handed to `CIColorCubeWithColorSpace` as `inputColorSpace`. The default is gone and
+all four construction sites state the space.
+
+---
+
+## 4. PHASE 1 — put it on a phone — **NOT STARTED**
 
 **This phase has never happened. It is the most valuable thing you can do and it needs no
 new code.** Produce a written record; that artefact does not exist and is worth more than
 any further implementation.
+
+It is now *unblocked* — the app compiles, the tests run, and an unsigned IPA is built by
+CI on every push. The IPA is a job artifact, so it is downloadable from the run page
+without a local build. Nothing else stands in the way.
 
 Two devices minimum:
 
@@ -242,16 +168,24 @@ Carried from a review. Do not treat these as done.
 
 | Severity | Where | Issue |
 | --- | --- | --- |
-| MAJOR | `CaptureSessionController.pickDevice` | Prefers a composite, so the Pro panel is empty on every Pro iPhone. Honest, but a worse product. Phase 3. |
+| MAJOR | `CaptureSessionController.pickDevice` | Prefers a composite, so the Pro panel is empty on every Pro iPhone. Honest, and now *recorded* rather than accidental — `proRequiresRebinding` names the cause. The fix is Phase 3.1. |
 | MAJOR | `ProCapabilities` | `isEmpty` is dead code — only a test reads it. The panel renders an **empty strip of the same height** rather than hiding. |
 | MAJOR | `ProCapabilities.availabilitySummary` | Reaches only an `AppLog.note`. The reason a control is missing is written to a log file the user must go and find. |
-| MAJOR | `CubeLUT.authoredSpace` | Defaults to `.sRGB`. A future non-unit construction site gets a false claim for free. |
 | MAJOR | `apply(manual:to:)` | Runs on the main thread: `lockForConfiguration` plus up to four AVFoundation writes, in the frame-rate-sensitive path. |
-| MAJOR | tests | `testColorManagedCubeFilterIsAvailable` **cannot fail** if `LUTProcessor` reverts to the invariant filter — it asserts a string it also owns. Make it assert on the processor. |
-| MAJOR | tests | `testACompositeDeviceWithdrawsEveryManualExposureValue` exercises a function that was not changed, and would have passed on the parent commit. **The composite-exposure defect has no executing regression test.** |
+| MAJOR | tests | A1's rendering path has **zero executed assertions in CI** — both rendering tests skip headless. Availability is asserted; pixels are not. |
 | MINOR | A1 commit message | Asserts as fact that headless CI returns `nil` for Metal-backed filter lookups, while shipping a test asserting the opposite. One is wrong; it was never run. |
-| MINOR | tests | A1's rendering path has **zero executed assertions in CI** — both rendering tests skip headless. Availability is asserted; pixels are not. |
 | MINOR | `RuntimeCapabilities` (now `CapabilityReport.swift`) | Still uses the old focus rule, so the capability report and the Pro panel disagree about focus on a composite. |
+
+**Closed in Phase 0**, and worth keeping a list of because the pattern repeats:
+
+- `CubeLUT.authoredSpace` defaulted to `.sRGB` — a free false claim for any site that
+  forgot the field, handed to `CIColorCubeWithColorSpace` as `inputColorSpace`. Default
+  removed; all four sites state it.
+- `testColorManagedCubeFilterIsAvailable` asserted a string it also owned, so reverting
+  `LUTProcessor` to the invariant filter would have left CI green. The filter name is now
+  one constant read by both the processor and the test.
+- `MTLDevice.isLowPower` is **macOS-only** and did not exist on iOS. The `lowPowerGPU`
+  field it fed was never read, so it was removed rather than replaced.
 
 ---
 
@@ -285,6 +219,35 @@ Two platform facts that are load-bearing and were wrong before, so check them be
 trusting any code that contradicts them:
 
 - `isAppleProRAWSupported` is on **`AVCapturePhotoOutput`**, not `AVCaptureDevice`.
+- `photoQualityPrioritization` is typed **`AVCapturePhotoOutput.QualityPrioritization`**,
+  even though the property being assigned is on `AVCapturePhotoSettings`. The intuitive
+  spelling does not exist. Same shape of mistake as the line above.
 - Apple documents that **composite camera devices** (`.builtInTripleCamera`,
   `.builtInDualWideCamera`) do **not** support `ExposureMode.custom`, and do not allow
   locking focus to a new lens position or AWB to new gains.
+
+### Correction: the white-balance query this document used to say did not exist
+
+The old 0.3 said:
+
+> There is no separate "can the gains change" query.
+
+**That was wrong, and it cost a CI run.** The query is
+`AVCaptureDevice.isLockingWhiteBalanceWithCustomDeviceGainsSupported`, iOS 10+, and it is
+exactly that question. Apple documents that when it is false,
+`setWhiteBalanceModeLocked(with:)` with any gains other than
+`AVCaptureDevice.currentWhiteBalanceGains` **throws**.
+
+So the WB gate is a certain answer rather than the `ExposureMode.custom` proxy it was
+briefly written as, and the residual uncertainty the first version documented is gone.
+`ProCapabilities.whiteBalanceLockIsOffered` now takes both facts, and the test asserts all
+three truth-table combinations so neither question can be silently dropped.
+
+Note the shape of the mistake. It was not a slip; it was a confident negative about a
+platform API, written into the document that exists to stop the next person repeating
+itself. The same document was wrong three times in the other direction, where a case name
+was recalled instead of looked up (`UIDisplayGamut.P3` is capitalised, and
+`AVCapturePhotoOutput.QualityPrioritization` is on the output).
+
+**The rule that replaces both: look the API up. Every time. A confident claim about a
+platform symbol costs a CI run to check, and CI runs take four minutes each.**
