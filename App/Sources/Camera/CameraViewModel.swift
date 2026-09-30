@@ -607,6 +607,17 @@ final class CameraViewModel: ObservableObject {
         var metadata = makeMetadata()
         let request = makeRequest()
         metadata.hdrStatus = hdr.label
+        // The look, at the moment of the shutter press.
+        //
+        // The recipe does travel inside the file, and `updateSettings` logs it — but those
+        // are two separate lines, and a log where a look is selected at 02:46:11 and a
+        // photo stored at 02:46:19 cannot say which look the photo has. On device that
+        // ambiguity is the whole test: "does a look visibly change the photo" is the one
+        // thing no compiler and no simulator can answer, and the only evidence available is
+        // a pair of lines a few seconds apart. `identity` here is the tell that a look was
+        // *not* applied, which is exactly the case that looked like "looks don't work".
+        AppLog.note(AppLog.camera, "shutter: look=\(settings.look?.name ?? "none") "
+                    + "intensity=\(settings.lookIntensity) recipe=\(settings.summarise())")
         photo.capture(metadata: metadata, request: request)
     }
 
