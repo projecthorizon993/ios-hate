@@ -148,6 +148,9 @@ final class CameraViewModel: ObservableObject {
         guard !hasConfigured else { return }
         hasConfigured = true
         AppLog.note(AppLog.camera, "camera screen start, facing=\(facing.rawValue)")
+        // Marks where this run begins. One log file accumulates every session, so without
+        // this a run boundary has to be inferred from timestamps.
+        LumaFrameLogFile.markRun("launch facing=\(facing.rawValue)")
         configure()
     }
 

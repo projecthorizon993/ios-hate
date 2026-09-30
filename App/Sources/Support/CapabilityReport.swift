@@ -600,6 +600,8 @@ struct DeveloperPanel: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var logged = false
+    /// Non-nil once a shareable copy exists, which is what `ShareLink` takes.
+    @State private var shareURL: URL?
 
     var body: some View {
         ScrollView {
@@ -641,22 +643,51 @@ struct DeveloperPanel: View {
         }
     }
 
+    /// "Share log" first, because it is the button the device-testing loop actually needs.
+    ///
+    /// Every Phase 1 run has needed the log, and every one has cost a round trip while
+    /// someone went looking for `Documents` in Files.app. `ShareLink` needs its URL up
+    /// front, so the file is prepared on appear and the button appears only once there is
+    /// something to share — a control that cannot do anything does not get shown.
     private var actions: some View {
-        HStack(spacing: Theme.Space.s) {
-            Button {
-                model.runtimeCapabilities.logEverything()
-                logged = true
-            } label: {
-                Text("Log capabilities")
-                    .font(.system(size: Theme.TypeSize.caption))
-                    .foregroundStyle(Theme.ColorToken.surfaceBase)
-                    .padding(.horizontal, Theme.Space.m)
-                    .frame(minHeight: Theme.Space.minTouch)
-                    .background(Theme.ColorToken.accentActive)
-                    .clipShape(Capsule())
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.s) {
+                if let shareURL {
+                    ShareLink(item: shareURL) {
+                        Text("Share log")
+                            .font(.system(size: Theme.TypeSize.caption))
+                            .foregroundStyle(Theme.ColorToken.surfaceBase)
+                            .padding(.horizontal, Theme.Space.m)
+                            .frame(minHeight: Theme.Space.minTouch)
+                            .background(Theme.ColorToken.accentActive)
+                            .clipShape(Capsule())
+                    }
+                    .accessibilityHint("Opens the share sheet with the whole log file, which is what to attach to a bug report")
+                }
+                Button {
+                    model.runtimeCapabilities.logEverything()
+                    shareURL = LumaFrameLogFile.exportShareableCopy(build: buildTag)
+                    logged = true
+                } label: {
+                    Text("Log capabilities")
+                        .font(.system(size: Theme.TypeSize.caption))
+                        .foregroundStyle(Theme.ColorToken.surfaceBase)
+                        .padding(.horizontal, Theme.Space.m)
+                        .frame(minHeight: Theme.Space.minTouch)
+                        .background(Theme.ColorToken.accentActive)
+                        .clipShape(Capsule())
+                }
+                .accessibilityHint("Writes every capability to the log file, and refreshes the shareable copy")
             }
-            .accessibilityHint("Writes every capability to the log file, which is what to send with a bug report")
+            .task { shareURL = LumaFrameLogFile.exportShareableCopy(build: buildTag) }
         }
+    }
+
+    /// Version and build, so two logs from two different builds are never confused.
+    private var buildTag: String {
+        let info = Bundle.main.infoDictionary
+        let short = (info?["CFBundleVersion"] as? String) ?? "0"
+        return short.replacingOccurrences(of: ".", with: "-")
     }
 
     /// Says where the log is, because a developer looking for the file will not guess that

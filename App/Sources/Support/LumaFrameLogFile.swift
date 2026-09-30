@@ -32,6 +32,47 @@ enum LumaFrameLogFile {
         fileURL()?.path ?? "Documents is not available on this device"
     }
 
+    /// A copy of the whole log as a shareable file, or `nil` if it could not be made.
+    ///
+    /// The point is to stop the Phase 1 loop depending on the user finding
+    /// `Documents` through Files.app. Every device test so far has needed a log, and every
+    /// one has cost a round trip because the file was somewhere a person has to go and look
+    /// for it. One tap in the Developer panel should produce something sendable.
+    ///
+    /// Written to a temporary directory rather than into `Documents`, so it does not
+    /// accumulate in the folder the user can see, and named with the build so two logs from
+    /// different runs are not confused when both are attached to the same report.
+    @discardableResult
+    static func exportShareableCopy(build: String) -> URL? {
+        guard let url = fileURL() else { return nil }
+        // Read through the same serial queue the writer uses, so the copy cannot be taken
+        // halfway through a line.
+        let text = queue.sync { () -> String in
+            (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        }
+        guard !text.isEmpty else { return nil }
+
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumaFrame-\(build).txt")
+        do {
+            try text.data(using: .utf8)?.write(to: destination, options: .atomic)
+        } catch {
+            // Sharing is a convenience; failing to prepare the file must not be fatal and
+            // must not be silent either.
+            AppLog.warn(AppLog.diagnostics, "log export failed: \(error.localizedDescription)")
+            return nil
+        }
+        return destination
+    }
+
+    /// Marks the start of a run, so a log containing several sessions is readable.
+    ///
+    /// Cheap, and the alternative is inferring run boundaries from timestamps.
+    static func markRun(_ note: String) {
+        append("")
+        append("---- run: \(note) ----")
+    }
+
     /// One line, timestamped, flushed before returning.
     static func append(_ line: String) {
         queue.sync { write(line) }
