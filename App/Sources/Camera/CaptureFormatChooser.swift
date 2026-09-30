@@ -92,6 +92,13 @@ enum CaptureFormatChooser {
 
     /// One-line description for the log, so a capture can be traced back to the exact
     /// format that produced it. Never used in the UI.
+    ///
+    /// `videoMaxZoomFactor` is included because the lens chips depend on it and it was the
+    /// missing half of a bug: `selectLens` clamps to `minAvailableVideoZoomFactor`, which is
+    /// a *device* property reflecting the **active** format, so a format that cannot zoom
+    /// below 1x silently makes the ultra wide unreachable — and every lens then reports the
+    /// same 1.0 destination. Which formats carry headroom below 1x is not knowable without
+    /// a device, so the whole candidate list is reported rather than guessed at.
     static func describe(_ format: AVCaptureDevice.Format) -> String {
         let largest = format.supportedMaxPhotoDimensions.max {
             Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height)
@@ -99,11 +106,14 @@ enum CaptureFormatChooser {
         let stillText = largest.map { "\($0.width)x\($0.height)" } ?? "n/a"
         let fourCC = ReportFormat.fourCC(CMFormatDescriptionGetMediaSubType(format.formatDescription))
         let maxShutter = ReportFormat.shutter(CMTimeGetSeconds(format.maxExposureDuration))
-        return "\(stillText) still | \(fourCC) video | "
+        let video = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        return "\(stillText) still | \(video.width)x\(video.height) video | "
+            + "\(fourCC) | "
             + "highQuality=\(format.isHighPhotoQualitySupported) "
             + "highest=\(format.isHighestPhotoQualitySupported) "
             + "hdr=\(format.isVideoHDRSupported) "
             + "binned=\(format.isVideoBinned) "
+            + "maxZoom=\(ReportFormat.number(Double(format.videoMaxZoomFactor))) "
             + "maxShutter=\(maxShutter)"
     }
 }

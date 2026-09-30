@@ -152,6 +152,21 @@ struct RuntimeCapabilities: Equatable, Sendable {
     var flashAvailable: Bool = false
     var authorisation: String = "unknown"
     var backCameras: [BackCameraCapabilities] = []
+    /// Raw `deviceType.rawValue` plus a short `uniqueID` for every back device discovered.
+    ///
+    /// Kept because the summarised `backCameras` cannot answer "why are there three
+    /// composites" — `Kind` maps all three composite types to one value, so the raw types
+    /// have to be visible to tell whether iOS is returning one device under several types
+    /// or three distinct things.
+    var backCameraTypes: [String] = []
+    /// One `CaptureFormatChooser.describe` line per format the first back device reports.
+    ///
+    /// The lens chips depend entirely on which format is active, and `CaptureFormatChooser`
+    /// ranks on still resolution without ever considering zoom range. The full list is what
+    /// would settle whether any format has room below 1x — the ultra wide's requirement —
+    /// and it is collected because that question has now come up three times with no data
+    /// to answer it.
+    var candidateFormats: [String] = []
 
     /// The active format's fourCC, which is the honest answer to "what format is this".
     var activeFormat: String = "unknown"
@@ -226,7 +241,9 @@ struct RuntimeCapabilities: Equatable, Sendable {
             ("raw types", ReportFormat.list(rawPixelTypes, empty: "none")),
             ("proRAW", proRawSupported ? "yes (max \(maxPhotoDimensions))" : "no"),
              ("back lenses", ReportFormat.list(backCameras.map { "\($0.kind.rawValue)@\($0.relativeScale)" })),
-             ("lens optics", ReportFormat.list(backCameras.map { optics($0) }, empty: "none")),            ("vision", "person segmentation \(personSegmentationAvailable), saliency \(attentionSaliencyAvailable)"),
+             ("lens optics", ReportFormat.list(backCameras.map { optics($0) }, empty: "none")),
+             ("back types", ReportFormat.list(backCameraTypes, empty: "none")),
+             ("formats", ReportFormat.list(candidateFormats, empty: "none")),            ("vision", "person segmentation \(personSegmentationAvailable), saliency \(attentionSaliencyAvailable)"),
             ("system", "\(processorCount) cores, \(ReportFormat.number(Double(physicalMemoryBytes) / 1_073_741_824, decimals: 1)) GB, low power \(isLowPowerMode), thermal \(thermalState)"),
             ("display", "P3 \(wideGamut), max \(maximumFramesPerSecond) fps, gamut \(displayGamut)")
         ]
@@ -357,7 +374,24 @@ extension RuntimeCapabilities {
         backCameraCount = devices.filter { $0.position == .back }.count
         frontCameraCount = devices.filter { $0.position == .front }.count
         flashAvailable = devices.contains { $0.position == .back && $0.isFlashAvailable }
-        backCameras = devices.filter { $0.position == .back }.map { BackCameraCapabilities.describe($0) }
+        // Not mapped through `BackCameraCapabilities.describe`, because that collapses a
+        // device to a `Kind` and the question being asked here — why the report lists three
+        // composites on a phone that has one — is precisely which raw types came back. The
+        // raw list is kept alongside the summarised one.
+        backCameraTypes = devices.filter { $0.position == .back }
+            .map { "\($0.deviceType.rawValue) [\($0.uniqueID.prefix(8))]" }
+        backCameras = backCamerasOf(devices)
+        // Every format, because the lens chips depend on which one is active and the choice
+        // of format is currently made on still resolution alone — see `CaptureFormatChooser`.
+        // Without the full list there is no way to tell whether any format has the zoom
+        // headroom below 1x that the ultra wide needs.
+        candidateFormats = devices.filter { $0.position == .back }.first.flatMap { device in
+            device.formats.map { CaptureFormatChooser.describe($0) }
+        } ?? []
+    }
+
+    private func backCamerasOf(_ devices: [AVCaptureDevice]) -> [BackCameraCapabilities] {
+        devices.filter { $0.position == .back }.map { BackCameraCapabilities.describe($0) }
     }
 
     private mutating func discoverGraphics() {
