@@ -38,3 +38,4 @@ decompiled/
 *.tailspin.gz
 *.spin
 *.hang
+LumaFrame*.txt
