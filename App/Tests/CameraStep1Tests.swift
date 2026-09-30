@@ -277,10 +277,10 @@ final class CameraStep1Tests: XCTestCase {
     /// was stored as HEIC. That file is valid, but a photo the user cannot open outside the
     /// app that took it is a poor default for a camera.
     func testStillPhotosAskForJpegBeforeHevc() {
-        XCTAssertEqual(PhotoCaptureController.preferredCodec(in: ["hvc1", "jpeg"]), .jpeg)
-        XCTAssertEqual(PhotoCaptureController.preferredCodec(in: ["jpeg"]), .jpeg)
+        XCTAssertEqual(PhotoCaptureController.preferredCodec(in: [.hevc, .jpeg]), .jpeg)
+        XCTAssertEqual(PhotoCaptureController.preferredCodec(in: [.jpeg]), .jpeg)
         // HEVC is still used when it is all there is, rather than failing.
-        XCTAssertEqual(PhotoCaptureController.preferredCodec(in: ["hvc1"]), .hevc)
+        XCTAssertEqual(PhotoCaptureController.preferredCodec(in: [.hevc]), .hevc)
         XCTAssertNil(PhotoCaptureController.preferredCodec(in: []))
     }
 
