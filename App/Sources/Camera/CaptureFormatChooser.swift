@@ -15,6 +15,24 @@ enum CaptureFormatChooser {
     /// not worth the still quality it buys.
     static let minimumPreviewFrameRate: Double = 30
 
+    /// Largest video stream the viewfinder will accept, in pixels.
+    ///
+    /// This is the fix for the grainy preview, and it came from device data rather than
+    /// from a guess. `score` used to rank on still area and use video area only as the last
+    /// tiebreaker, so on an iPhone 11 Pro it picked
+    /// `4032x3024 still | 4032x3024 video` — a **12 megapixel video stream**. The still is
+    /// what the user wants, so nothing argued against it, and the result was a viewfinder
+    /// doing 12 MP at 30 fps on an A13. That is the reported symptom: soft, grainy edges and
+    /// a viewfinder that does not feel live.
+    ///
+    /// 1920x1440 is the ceiling: it is full 1080p-class resolution and, on this hardware,
+    /// 4:3, which matches the 4:3 stills. The `4032x3024 still | 1920x1440 video` format also
+    /// reports `isHighPhotoQualitySupported = true` and `isVideoHDRSupported = true`, which
+    /// the previously chosen format did not — so the HDR badge and
+    /// `photoQualityPrioritization` were both inert before this. One change fixes the
+    /// viewfinder, the aspect mismatch and the dead quality priority together.
+    static let maximumVideoPixels = 1920 * 1440
+
     /// Formats supporting the top of that rate range, best still quality first.
     ///
     /// Ranking, in order, with the reason each level exists:
@@ -24,16 +42,30 @@ enum CaptureFormatChooser {
     ///    badge degrades to "ready" and never claims a fusion.
     /// 2. Not binned. A binned format is a lower-resolution readout of a larger sensor
     ///    and reads as a soft photo.
-    /// 3. Largest still area. What the user gets out of the app.
-    /// 4. Longest exposure. This is the low-light product; on two formats of equal
+    /// 3. Video stream within `maximumVideoPixels`. The viewfinder and the meter run on
+    ///    this, and an oversized stream is what made the preview look grainy.
+    /// 4. Largest still area. What the user gets out of the app.
+    /// 5. Longest exposure. This is the low-light product; on two formats of equal
     ///    still size, the one that can hold the shutter open wins.
-    /// 5. Largest video area. Ties only.
+    /// 6. Largest video area within the cap. Ties only.
     static func bestFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
-        let usable = device.formats.filter { supportsPreviewRate($0, fps: minimumPreviewFrameRate) }
-        guard !usable.isEmpty else {
+        let previewable = device.formats.filter {
+            supportsPreviewRate($0, fps: minimumPreviewFrameRate)
+        }
+        guard !previewable.isEmpty else {
             AppLog.warn(AppLog.camera, "no format sustains \(Int(minimumPreviewFrameRate))fps; "
                       + "falling back to the device default")
             return device.activeFormat
+        }
+        // The cap is a filter rather than a ranking key, because a format that overshoots
+        // it is not worse — it is unusable for a viewfinder, and no still resolution buys
+        // that back. If nothing fits the cap, take the smallest available rather than the
+        // largest, so the fallback is a soft preview rather than a stalled one.
+        let usable = previewable.filter { videoPixelCount($0) <= maximumVideoPixels }
+        if usable.isEmpty {
+            AppLog.warn(AppLog.camera, "no format keeps the video stream under "
+                      + "\(maximumVideoPixels)px; taking the smallest available")
+            return previewable.min { videoPixelCount($0) < videoPixelCount($1) }
         }
         return usable.max { score($0) < score($1) }
     }

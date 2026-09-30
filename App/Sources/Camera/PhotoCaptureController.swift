@@ -140,9 +140,24 @@ final class PhotoCaptureController: NSObject {
     /// Only `.hevc` and `.jpeg` are tested. `AVVideoCodecType` has no `.heif` case —
     /// naming one silently resolves it against `UTType` instead and produces a type
     /// error that points nowhere near the real mistake.
+    /// The codec to ask for, and **JPEG first**.
+    ///
+    /// It used to prefer `.hevc`, so on a device offering both — an iPhone 11 Pro offers
+    /// `jpeg, hvc1` — every photo was captured as HEVC. Nothing was broken: the log shows
+    /// `photo stored: heic 4032x3024` and the file is a valid HEIC. But HEIC is a container
+    /// that many things outside this app do not handle, so a photo the user cannot open
+    /// anywhere is a poor default for a camera whose whole job is producing pictures.
+    ///
+    /// This is `preferredCodec`, not `PhotoContainer.detect` — detection stays general,
+    /// because a photo can still arrive as HEIC from a RAW pipeline or a future codec
+    /// change, and refusing to open it would be worse than opening it.
     nonisolated static func preferredCodec(for output: AVCapturePhotoOutput) -> AVVideoCodecType? {
-        let available = output.availablePhotoCodecTypes
-        for candidate in [AVVideoCodecType.hevc, .jpeg] where available.contains(candidate) {
+        preferredCodec(in: output.availablePhotoCodecTypes)
+    }
+
+    /// The preference order, separated from the output so it can be asserted without one.
+    nonisolated static func preferredCodec(in available: [AVVideoCodecType]) -> AVVideoCodecType? {
+        for candidate in [AVVideoCodecType.jpeg, .hevc] where available.contains(candidate) {
             return candidate
         }
         return available.first

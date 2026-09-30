@@ -251,6 +251,39 @@ final class CameraStep1Tests: XCTestCase {
                        "the guard reads relativeScale, which is still degenerate here")
     }
 
+    /// The grainy-preview fix, expressed as the numbers that caused it.
+    ///
+    /// On an iPhone 11 Pro the device offers a `4032x3024 still | 4032x3024 video` format —
+    /// a 12 megapixel video stream — and the chooser picked it, because it ranked on still
+    /// area and used video area only as a last tiebreaker. Nothing argued against it. The
+    /// viewfinder, the meter and the processed preview all run on that stream, so the
+    /// reported symptom was a soft, grainy preview.
+    ///
+    /// The cap is what stops it. 1920x1440 is full 1080p-class and 4:3, matching the 4:3
+    /// stills, and the format that pairs it with a full-size still also reports
+    /// `isHighPhotoQualitySupported` and `isVideoHDRSupported` — which the oversized one
+    /// did not, so the HDR badge and `photoQualityPrioritization` were both inert too.
+    func testTheVideoStreamIsCappedAtAViewfinderSizedResolution() {
+        XCTAssertEqual(CaptureFormatChooser.maximumVideoPixels, 1920 * 1440)
+        // The format that was actually chosen on device, and the cap that rejects it.
+        XCTAssertGreaterThan(4032 * 3024, CaptureFormatChooser.maximumVideoPixels)
+        // The one that should be chosen instead, with the size it actually has.
+        XCTAssertLessThanOrEqual(1920 * 1440, CaptureFormatChooser.maximumVideoPixels)
+    }
+
+    /// JPEG is asked for first, even when HEVC is available.
+    ///
+    /// Observed on device: `codecs: jpeg, hvc1` and the chooser took `hvc1`, so every photo
+    /// was stored as HEIC. That file is valid, but a photo the user cannot open outside the
+    /// app that took it is a poor default for a camera.
+    func testStillPhotosAskForJpegBeforeHevc() {
+        XCTAssertEqual(PhotoCaptureController.preferredCodec(in: ["hvc1", "jpeg"]), .jpeg)
+        XCTAssertEqual(PhotoCaptureController.preferredCodec(in: ["jpeg"]), .jpeg)
+        // HEVC is still used when it is all there is, rather than failing.
+        XCTAssertEqual(PhotoCaptureController.preferredCodec(in: ["hvc1"]), .hevc)
+        XCTAssertNil(PhotoCaptureController.preferredCodec(in: []))
+    }
+
     // MARK: - The session and the capability model agree
 
     /// The regression test for a contradiction CI was green on.
