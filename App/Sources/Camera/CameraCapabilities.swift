@@ -59,6 +59,22 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
         /// composite only survives when nothing else was found.
         case composite
         case unknown
+
+        /// The name shown to the user and written into a photo's metadata.
+        ///
+        /// Present because the user asked what sensor a photo came from and the app had no
+        /// answer. It is the *type* of lens, read from `deviceType` at runtime — never a
+        /// device name, marketing name or `hw.machine`, all of which are barred by rule 6 of
+        /// `docs/HANDOFF.md` precisely because they cannot be tested against.
+        var zoomLabel: String {
+            switch self {
+            case .ultraWide: return "Ultra wide"
+            case .wide: return "Wide"
+            case .telephoto: return "Telephoto"
+            case .composite: return "Multi-lens"
+            case .unknown: return "Unknown"
+            }
+        }
     }
 
     var id: String { uniqueID }
@@ -93,10 +109,16 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
     /// `device.virtualDeviceSwitchOverVideoZoomFactors`, verbatim.
     ///
     /// The only documented way iOS offers to learn where a composite hands over to a
-    /// different physical lens, so this is the natural basis for lens chips on a multi-lens
-    /// device. Recorded rather than used, because what it actually reports on this hardware
-    /// has not been observed.
+    /// different physical lens, so it is what the zoom chips and the active-lens readout are
+    /// built from. Observed on an iPhone 11 Pro: `[2.0]` and `[2.0, 4.0]` on the composite
+    /// devices, empty on each physical lens.
     var switchOverZoomFactors: [Double] = []
+    /// `device.minAvailableVideoZoomFactor`.
+    ///
+    /// A property of the **active format**, so it is captured at discovery rather than read
+    /// at press time. `1.0` on every format of an iPhone 11 Pro, which is why there is no
+    /// 0.5x stop on that device: the ultra wide is not reachable by zoom there.
+    var minAvailableVideoZoomFactor: Double = 1
 
     static func describe(_ device: AVCaptureDevice) -> BackCameraCapabilities {
         BackCameraCapabilities(
@@ -110,7 +132,8 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
             // `virtualDeviceSwitchOverVideoZoomFactors` is `[NSNumber]`; converted here so
             // every consumer of this type deals in `Double` and nothing has to remember.
             switchOverZoomFactors: device.virtualDeviceSwitchOverVideoZoomFactors
-                .map { Double($0.doubleValue) }
+                .map { Double($0.doubleValue) },
+            minAvailableVideoZoomFactor: device.minAvailableVideoZoomFactor
         )
     }
 
@@ -140,11 +163,8 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
     ///    still size.
     ///
     /// The value is kept because it still orders lenses correctly where it is not
-    /// degenerate, but it must never be used to label one. `lensesAreDistinguishable` is
-    /// what consumers are required to ask first, and `lensSelector` hides the control
-    /// entirely when the answer is no. Showing three chips that all read "1x" — three
-    /// controls that do nothing — is the exact defect rule 4 in `docs/HANDOFF.md` exists to
-    /// prevent.
+    /// degenerate, but it must never be used to label one. `zoomStops` and
+    /// `plan.activeLens(atZoomFactor:)` are what the UI reads instead.
     private static func relativeScale(of format: AVCaptureDevice.Format) -> Double {
         let largest = format.supportedMaxPhotoDimensions.max {
             Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height)
@@ -184,7 +204,6 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
 /// Pro panel is empty by design rather than by accident — and `ProCapabilities` gates
 /// itself on the bound device, so the empty panel and the session agree.
 struct CameraPlan: Equatable, Sendable {
-
     /// The device the session binds, or `nil` when discovery found nothing.
     var bound: BackCameraCapabilities?
     /// The lenses reachable from `bound`, in reach order. Never more than the bound device
@@ -205,6 +224,94 @@ struct CameraPlan: Equatable, Sendable {
     /// already supports `.custom`. The empty-panel case is exactly "a composite is bound
     /// *and* a constituent exists to bind instead", which is what this is.
     var proRequiresRebinding: Bool
+
+    /// The zoom factors at which a lens can actually be selected, in reach order.
+    ///
+    /// Built from `bound.switchOverZoomFactors`, which is
+    /// `AVCaptureDevice.virtualDeviceSwitchOverVideoZoomFactors` — the only documented way
+    /// iOS offers to learn where a composite hands over to a different physical lens. On an
+    /// iPhone 11 Pro it reports `[2.0]` and `[2.0, 4.0]`, so 1x, 2x and 4x are real
+    /// switch points. **1.0 is always included**: it is the wide lens and the destination
+    /// every other stop is measured from.
+    ///
+    /// This replaces deriving zoom labels from still resolution, which produced three chips
+    /// reading "1x" on a device that switches lenses perfectly well. Observed on that phone:
+    /// six devices, every `relativeScale` identically 3168.0, because the lenses share a
+    /// sensor resolution and the virtual devices report a shared default `activeFormat`.
+    /// See `relativeScale(of:)` for why that measurement cannot work.
+    ///
+    /// **There is no 0.5x here, and that is correct rather than missing.** The same device
+    /// reported `minAvailableVideoZoomFactor == 1.0` on every one of its formats, so the
+    /// ultra wide is not reachable by zoom at all on this hardware. A 0.5x chip would be a
+    /// control that cannot do anything.
+    var zoomStops: [ZoomStop] {
+        var factors: [Double] = [1.0]
+        factors.append(contentsOf: (bound?.switchOverZoomFactors ?? []).filter { $0 > 1.0 })
+        // De-duplicated because a device can report the same point twice, and sorted so the
+        // chips read shortest-reach first.
+        return Array(Set(factors.map { ZoomStop(factor: $0) })).sorted { $0.factor < $1.factor }
+    }
+
+    /// The physical lenses behind the bound composite, shortest reach first.
+    ///
+    /// Ordered by `Kind`, **not** by `relativeScale`. The scale is unusable — every lens on
+    /// a modern iPhone reports the same still dimensions — but `Kind` is a semantic
+    /// ordering of lens types (ultra wide, then wide, then telephoto), which is a fact
+    /// about what a lens *is* rather than a measurement, and it is all that is needed to
+    /// pair lenses with switch points.
+    var constituentOrder: [BackCameraCapabilities.Kind] {
+        let rank: [BackCameraCapabilities.Kind: Int] = [
+            .ultraWide: 0, .wide: 1, .telephoto: 2
+        ]
+        return offeredLenses
+            .filter { $0.kind != .composite && $0.kind != .unknown }
+            .sorted { (rank[$0.kind] ?? 99) < (rank[$1.kind] ?? 99) }
+            .map(\.kind)
+    }
+
+    /// Which physical lens the bound device is using at `zoomFactor`.
+    ///
+    /// iOS never says this directly, so it is read off the switch points: they partition
+    /// the zoom range into one band per lens, and the band the current factor falls in is
+    /// the lens in use. On an iPhone 11 Pro — constituents ultra wide, wide, telephoto, and
+    /// switch points 2.0 and 4.0 — the bands are 1.0–2.0 wide, 2.0–4.0 telephoto, and 4.0
+    /// and above still telephoto, with anything below 1.0 the ultra wide.
+    ///
+    /// **`nil` when the arithmetic does not line up**, rather than a guess. Three
+    /// constituents need exactly two switch points; if the device reports a different
+    /// number, this returns `nil` and the UI says it does not know, because a name in a
+    /// photo's metadata that is a plausible fabrication is worse than no name. That is the
+    /// same reason `relativeScale` is not used to label anything.
+    func activeLens(atZoomFactor zoomFactor: Double) -> BackCameraCapabilities.Kind? {
+        let lenses = constituentOrder
+        let points = (bound?.switchOverZoomFactors ?? []).filter { $0 > 0 }.sorted()
+        guard lenses.count >= 2, points.count == lenses.count - 1 else { return nil }
+        // Below the first point is the shortest lens, when the range extends that far.
+        if let lowest = belowOneXMinimum, zoomFactor < lowest, let first = lenses.first {
+            return first
+        }
+        // Otherwise find the last switch point the factor is at or above; that index is the
+        // lens in use. Clamped to the last lens so a factor beyond the final point does not
+        // run off the end.
+        var index = 0
+        for (offset, point) in points.enumerated() where zoomFactor >= point {
+            index = offset + 1
+        }
+        return index < lenses.count ? lenses[index] : lenses.last
+    }
+
+    /// The lowest zoom factor the bound device will accept, or `nil` when it reports none
+    /// below 1.0.
+    ///
+    /// Recorded on the device rather than read at press time, because
+    /// `minAvailableVideoZoomFactor` is a property of the **active format** and this is
+    /// captured at discovery. On an iPhone 11 Pro it came back as exactly 1.0 on every
+    /// format, which is why no 0.5x stop exists: the ultra wide is not reachable by zoom
+    /// on that hardware, and a 0.5x chip there would be a control that does nothing.
+    var belowOneXMinimum: Double? {
+        guard let minimum = bound?.minAvailableVideoZoomFactor, minimum < 1.0 else { return nil }
+        return minimum
+    }
 
     /// Derives the plan from a discovery result.
     ///
@@ -236,6 +343,28 @@ struct CameraPlan: Equatable, Sendable {
                           offeredLenses: offered,
                           hasConstituentForPro: !constituents.isEmpty,
                           proRequiresRebinding: isBoundComposite && !constituents.isEmpty)
+    }
+}
+
+/// One selectable zoom position, and the label it gets.
+///
+/// A stop is a **zoom factor the device reported**, not a focal length the app guessed.
+/// The label is the factor itself, formatted the way every phone writes it — "1x", "2x",
+/// "4x" — because that is what the factor means to a user and inventing a different
+/// number from it would be the same mistake in a new place.
+struct ZoomStop: Hashable, Sendable, Identifiable {
+    var factor: Double
+    var id: Double { factor }
+
+    /// `1x` rather than `1.0x`, and a whole number rather than `1.5x`, because that is how
+    /// every phone writes it.
+    var label: String {
+        if abs(factor - factor.rounded()) < 0.001 {
+            return "\(Int(factor.rounded()))x"
+        }
+        // A half-stop is the one fraction worth showing; anything else is noise the user
+        // cannot act on.
+        return String(format: "%.1fx", factor)
     }
 }
 
@@ -289,31 +418,18 @@ struct CameraCapabilities: Equatable, Sendable {
             ?? backCameras.first
     }
 
-    /// Whether the app can tell these lenses apart, which it cannot on most modern iPhones.
+    /// Zoom chip label for a lens, as a ratio against `referenceCamera`.
     ///
-    /// The requirement is that each lens report a **distinct** `relativeScale`. Equal scales
-    /// mean the zoom label for every lens computes to 1.0 — three chips reading "1x", and a
-    /// tap that computes a destination of 1.0, which is where the camera already is. That
-    /// is the state observed on an iPhone 11 Pro, where six discovered devices all reported
-    /// the same value.
+    /// **No longer used.** Kept only because `referenceCamera` still has a caller, and
+    /// deleting a public helper on a struct this size is a separate piece of work. Nothing
+    /// in the app labels a lens from this any more: the zoom chips come from the device's
+    /// reported switch-over factors, and the active-lens readout comes from the bands those
+    /// factors define. `relativeScale` returned one constant for every lens on an iPhone 11
+    /// Pro, so this computes `1.0` for all three — which is the "1 1 1" the user saw.
     ///
-    /// `false` therefore means **hide the lens selector**, not "label them arbitrarily" and
-    /// certainly not a hard-coded `0.5x 1x 2x`, which is a guess dressed as a measurement.
-    var lensesAreDistinguishable: Bool {
-        let scales = physicalLenses.map(\.relativeScale)
-        guard scales.count > 1 else { return true }
-        // A zero scale is the "could not measure" value and carries no information either.
-        guard scales.allSatisfy({ $0 > 0 }) else { return false }
-        return Set(scales).count == scales.count
-    }
-
-    /// Zoom chip label for a lens, as a measured ratio against `referenceCamera`.
-    ///
-    /// `nil` when the ratio cannot be established — including the case where the lenses
-    /// cannot be told apart at all — in which case the UI shows no chip rather than a
-    /// `1x` that means nothing.
+    /// If a future caller reaches for this, it will produce meaningless labels. Use
+    /// `zoomStops` or `plan.activeLens(atZoomFactor:)` instead.
     func zoomLabel(for camera: BackCameraCapabilities) -> String? {
-        guard lensesAreDistinguishable else { return nil }
         guard let reference = referenceCamera, reference.relativeScale > 0 else { return nil }
         let ratio = camera.relativeScale / reference.relativeScale
         guard ratio > 0 else { return nil }
@@ -328,19 +444,35 @@ struct CameraCapabilities: Equatable, Sendable {
 
     // MARK: - Gating
 
+    /// Whether the app can offer a lens selector at all.
+    ///
+    /// Now driven by whether the **bound device reported switch-over factors**, not by
+    /// whether its lenses can be told apart by still resolution. Those are different
+    /// questions and only the first one is about switching: an iPhone 11 Pro reports the
+    /// same still dimensions for all three lenses and yet switches perfectly well, at
+    /// 2x and 4x. Hiding the selector because the labels were unmeasurable threw away a
+    /// working feature.
+    ///
+    /// Fewer than two stops means there is nothing to switch between, which is the honest
+    /// reason to hide it — a single lens, or a device that reports no switch points.
     var lensSelector: FeatureAvailability {
-        let lenses = physicalLenses
-        if lenses.isEmpty { return .unavailable(reason: "No back camera reported") }
-        if lenses.count > 1 && !lensesAreDistinguishable {
-            // Observed on an iPhone 11 Pro, where every discovered lens reported the same
-            // focal-length proxy and so every chip would read "1x". Three controls that do
-            // nothing are worse than no control, and a hard-coded 0.5x/1x/2x would be a
-            // guess presented as a measurement. Hidden until the app can measure the
-            // lenses; see `docs/device-record-01.md` finding 3.
-            return .unavailable(reason: "Lenses report identical optical data — nothing to switch between")
+        let stops = plan.zoomStops
+        if physicalLenses.isEmpty && stops.count < 2 {
+            return .unavailable(reason: "No back camera reported")
         }
-        if lenses.count > 1 { return .available }
-        return .unavailable(reason: "Single camera — no lens switching")
+        if stops.count > 1 { return .available }
+        if physicalLenses.count == 1 {
+            return .unavailable(reason: "Single camera — no lens switching")
+        }
+        // Constituents were found but the bound device reported no switch points, so there
+        // is no way to reach any lens other than the wide one. Not a label problem this
+        // time — a real absence of reachable positions.
+        return .unavailable(reason: "Camera reports no reachable lens positions")
+    }
+
+    /// The chips to draw, or empty when there is nothing to switch between.
+    var zoomStops: [ZoomStop] {
+        plan.zoomStops.count > 1 ? plan.zoomStops : []
     }
 
     var rawCapture: FeatureAvailability {

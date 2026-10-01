@@ -452,38 +452,23 @@ final class CameraViewModel: ObservableObject {
         value.exposureTargetOffset = device.exposureTargetOffset
         value.zoomFactor = device.videoZoomFactor
         value.relativeScale = BackCameraCapabilities.describe(device).relativeScale
-        // The lens is chosen from the **zoom factor**, not from the device's relative
-        // scale. The device's scale is a property of the hardware and never changes, so
-        // matching on it made the label constant: on a triple-camera phone the active
-        // device is always the composite and the readout was stuck on whatever the
-        // composite reported, whatever the user had zoomed to. `videoZoomFactor` is 1.0 at
-        // the wide lens, 0.5 at ultra wide and 3.0 at telephoto, which is the number that
-        // actually tracks the reach.
-        let active = activeCamera(zoomFactor: value.zoomFactor)
-        value.lensLabel = active.flatMap { capabilities.zoomLabel(for: $0) }
+        // The lens comes from the **switch points**, not from the device's relative scale.
+        // The scale is a property of the hardware and is identical for every lens on a
+        // modern iPhone, so matching on it made the label constant — the readout was stuck
+        // on whatever the composite happened to report, whatever the user had zoomed to.
+        let active = activeLens(zoomFactor: Double(value.zoomFactor))
+        value.lensLabel = active.map(\.zoomLabel)
         readout = value
     }
 
-    /// The lens whose reach is closest to the current zoom factor.
+    /// The physical lens in use, from the switch-over bands.
     ///
-    /// A match, not an identity: mid-way between 1x and 3x there is no lens being used,
-    /// and the label should show the nearest one rather than snapping to the wrong one.
-    private func activeCamera(zoomFactor: CGFloat) -> BackCameraCapabilities? {
-        let lenses = capabilities.physicalLenses
-        guard !lenses.isEmpty else { return nil }
-        // `zoomLabel` reports each lens relative to the wide one, so the factor to match
-        // is the same number: 1.0 is wide, 0.5 is ultra wide, 3.0 is telephoto.
-        return lenses.min { lhs, rhs in
-            abs(zoomLabelFactor(for: lhs) - zoomFactor)
-                < abs(zoomLabelFactor(for: rhs) - zoomFactor)
-        }
-    }
-
-    /// One lens's zoom factor, from the same arithmetic the label uses.
-    private func zoomLabelFactor(for camera: BackCameraCapabilities) -> CGFloat {
-        guard let reference = capabilities.referenceCamera,
-              reference.relativeScale > 0 else { return 1 }
-        return CGFloat(camera.relativeScale / reference.relativeScale)
+    /// `nil` when the device's constituents and switch points do not line up, which is
+    /// reported as unknown rather than guessed. The previous implementation returned a
+    /// plausible-looking name built from the broken scale, and that name was written into
+    /// every photo's metadata — so saved photos claimed a lens the app had not measured.
+    private func activeLens(zoomFactor: Double) -> BackCameraCapabilities.Kind? {
+        capabilities.plan.activeLens(atZoomFactor: zoomFactor)
     }
 
     // MARK: - Actions
@@ -497,103 +482,57 @@ final class CameraViewModel: ObservableObject {
     /// in a way that reads as a bug. `videoZoomFactor` is the supported control and it is
     /// the only one that spans lenses.
     ///
-    /// Tapping the current lens returns to 1x, which is the standard behaviour and the
-    /// reason a single set of lens buttons is enough.
-    func selectLens(_ camera: BackCameraCapabilities) {
+    /// Moves to a zoom stop the device itself reported.
+    ///
+    /// `videoZoomFactor` is the control, because on a multi-lens phone the physical lenses
+    /// sit behind one `AVCaptureDevice`; changing `activeFormat` would be changing the
+    /// sensor's output format rather than picking a lens. Tapping the current stop returns
+    /// to 1x, which is the standard behaviour.
+    ///
+    /// The stop is a **reported** switch-over factor, not a focal length derived from still
+    /// resolution. That derivation produced three chips reading "1x" on an iPhone 11 Pro,
+    /// and every tap computed a destination of 1.0 — the position the camera was already
+    /// in — while the log recorded it as a successful lens change. The device reported its
+    /// switch points as 2.0 and 4.0 all along.
+    func selectZoom(_ stop: ZoomStop) {
         guard let device = sessionController.configuration?.device else { return }
-        // Refuse rather than compute a meaningless target. Without this, indistinguishable
-        // lenses all resolve to 1.0x, the app reports success, and the user watches nothing
-        // happen. See `CameraCapabilities.lensesAreDistinguishable`.
-        guard capabilities.lensesAreDistinguishable else {
-            AppLog.warn(AppLog.camera,
-                        "lens selection refused: the lenses report identical optical data, "
-                        + "so there is no reachable target")
-            return
-        }
-        let target = zoomLabelFactor(for: camera)
-        let isCurrent = abs(target - readout.zoomFactor) < 0.01
-        let destination: CGFloat = isCurrent ? 1 : target
+        let isCurrent = abs(Double(readout.zoomFactor) - stop.factor) < 0.01
+        let destination = CGFloat(isCurrent ? 1 : stop.factor)
 
-        // `minAvailableVideoZoomFactor` and `maxAvailableVideoZoomFactor` are the range
-        // the *current configuration* allows. Apple documents that setting
-        // `videoZoomFactor` above the active format's `videoMaxZoomFactor` **always
-        // raises**, and that a value between `maxAvailableVideoZoomFactor` and the
-        // format's maximum silently clamps. So the clamp is against the available range,
-        // and it happens here rather than being left to raise.
-        //
-        // These are `CGFloat` and there is no list of valid factors: an earlier version
-        // used an `availableVideoZoomFactors` array that does not exist.
+        // `minAvailableVideoZoomFactor` and `maxAvailableVideoZoomFactor` are the range the
+        // *current configuration* allows. Apple documents that setting `videoZoomFactor`
+        // above the active format's `videoMaxZoomFactor` **always raises**, and that a
+        // value between `maxAvailableVideoZoomFactor` and the format's maximum silently
+        // clamps. So the clamp happens here rather than being left to raise.
         let lower = max(1, device.minAvailableVideoZoomFactor)
         let upper = max(lower, device.maxAvailableVideoZoomFactor)
         let clamped = min(max(destination, lower), upper)
 
-        // A clamp that changes the destination means the requested lens is not reachable
-        // from the active format, and that used to be logged as a success: the line said
-        // `lens -> 1.0x (ultraWide)` with no indication that 1.0x is not the ultra wide.
-        // The user sees a chip that does nothing and the log says it worked.
-        //
-        // `docs/device-record-01.md` finding 2. What this needs to become is a different
-        // *format*, not a different zoom factor — `CaptureFormatChooser` ranks on still
-        // quality and never on zoom range, and the 4032x3024 it picks has a minimum
-        // available zoom factor of 1.0, so every lens below 1x is unreachable. Which
-        // formats do carry a usable range is not knowable without a device, so rather
-        // than guess at the ranking this says what happened and what was asked for.
+        // A clamp that moves the destination is a real failure and is logged as one. The
+        // old line said `lens -> 1.0x (ultraWide)` with nothing to say that 1.0x is not
+        // the ultra wide, so the log claimed success for a control that did nothing.
         if abs(clamped - destination) > 0.001 {
             AppLog.warn(AppLog.camera,
-                        "lens \(camera.kind.rawValue) needs \(destination)x but the active "
-                        + "format only allows \(lower)x...\(upper)x; requested lens is "
-                        + "unreachable from this format")
+                        "zoom stop \(stop.factor)x is outside the active format's "
+                        + "\(lower)x...\(upper)x range; it will not be honoured")
         }
 
         // `ramp` rather than an assignment: the assignment jumps, and a lens change that
-        // snaps is a lens change the user cannot follow. The rate is roughly how fast a
-        // real lens ring moves.
+        // snaps is one the user cannot follow. The rate is roughly how fast a real lens
+        // ring moves.
         let failure = LumaFrameSafety.perform {
             device.ramp(toVideoZoomFactor: clamped, withRate: 4)
         }
         if let failure {
-            AppLog.warn(AppLog.camera, "lens switch to \(clamped)x raised \(failure)")
-            present("This camera would not change lens", isError: true)
+            AppLog.warn(AppLog.camera, "zoom to \(clamped)x raised \(failure)")
+            present("This camera would not change zoom", isError: true)
             return
         }
         Haptics.selection()
         AppLog.note(AppLog.camera,
-                    "lens -> \(clamped)x (\(camera.kind.rawValue)) asked \(destination)x")
-        // Read the readout straight back rather than waiting for the next poll, so the
-        // label updates as soon as the ramp starts.
+                    "zoom -> \(clamped)x asked \(destination)x, switch points "
+                    + "\(capabilities.plan.bound?.switchOverZoomFactors ?? [])")
         refreshReadout()
-    }
-
-    /// The lenses the user can pick, in reach order.
-    var selectableLenses: [BackCameraCapabilities] {
-        capabilities.physicalLenses.sorted { $0.relativeScale < $1.relativeScale }
-    }
-
-    /// A lens button's title: the reach relative to the wide lens, so 0.5x, 1x, 3x.
-    ///
-    /// The wide lens is written `1x` and not `1.0x` because that is how every phone writes
-    /// it, and the ultra wide keeps its decimal because that is the only way to
-    /// distinguish it from the wide one.
-    func lensTitle(for camera: BackCameraCapabilities,
-                   reference lenses: [BackCameraCapabilities]) -> String {
-        let wide = lenses.first { $0.relativeScale >= 1 } ?? lenses.first
-        guard let wide, wide.relativeScale > 0, camera.relativeScale > 0 else {
-            return "1x"
-        }
-        let ratio = camera.relativeScale / wide.relativeScale
-        if abs(ratio - 1) < 0.01 { return "1x" }
-        if ratio < 1 { return String(format: "%.1fx", ratio) }
-        return String(format: "%.1fx", ratio)
-    }
-
-    /// `true` when this lens is the one the camera is actually at.
-    func isCurrentLens(_ camera: BackCameraCapabilities,
-                       lenses: [BackCameraCapabilities]) -> Bool {
-        guard let wide = lenses.first(where: { $0.relativeScale >= 1 }) ?? lenses.first,
-              wide.relativeScale > 0
-        else { return false }
-        let target = CGFloat(camera.relativeScale / wide.relativeScale)
-        return abs(target - readout.zoomFactor) < 0.06
     }
 
     func capture() {
@@ -643,7 +582,10 @@ final class CameraViewModel: ObservableObject {
         metadata.shutterSeconds = readout.shutterSeconds > 0 ? readout.shutterSeconds : nil
         metadata.exposureTargetOffset = Double(readout.exposureTargetOffset)
         metadata.lensRelativeScale = readout.relativeScale
-        metadata.lensKind = activeCamera(zoomFactor: readout.zoomFactor)?.kind.rawValue
+        // The lens actually in use, or explicitly unknown. This travels in the file, so a
+        // guess here would be a claim the photo carries permanently about the sensor that
+        // took it — which is exactly what the old `activeCamera` was doing.
+        metadata.lensKind = activeLens(zoomFactor: Double(readout.zoomFactor))?.rawValue ?? "unknown"
         metadata.zoomFactor = Double(readout.zoomFactor)
         metadata.frontCamera = facing == .front
         metadata.colorSpace = capabilities.wideGamut ? "display-p3" : "srgb"

@@ -312,28 +312,29 @@ struct CameraScreen: View {
     /// "a single-lens device has no zoom steps and no lens buttons at all."
     @ViewBuilder
     private var lensButtons: some View {
-        let lenses = model.selectableLenses
-        // `lensSelector` is the gate, and the `count > 1` test is not enough on its own:
-        // on a multi-lens phone whose lenses report identical optical data, the count is
-        // 3 and every button would read "1x" and do nothing. Observed on an iPhone 11 Pro.
-        if lenses.count > 1, model.capabilities.lensSelector.isAvailable {
+        let stops = model.capabilities.zoomStops
+        if !stops.isEmpty {
             HStack(spacing: Theme.Space.xxs) {
-                ForEach(lenses, id: \.kind) { camera in
-                    lensButton(camera, lenses: lenses)
+                ForEach(stops) { stop in
+                    lensButton(stop)
                 }
             }
         }
     }
 
-    private func lensButton(_ camera: BackCameraCapabilities,
-                            lenses: [BackCameraCapabilities]) -> some View {
-        let label = model.lensTitle(for: camera, reference: lenses)
-        let isCurrent = model.isCurrentLens(camera, lenses: lenses)
+    /// A zoom chip, labelled with the factor the device itself reported.
+    ///
+    /// Drawn from `zoomStops` rather than from the discovered lens list, because the lens
+    /// list carries no usable measurement: on an iPhone 11 Pro all three physical lenses
+    /// report the same still dimensions, so the old labels were all "1x" and every tap
+    /// computed a destination of 1.0. The switch-over factors are the real thing.
+    private func lensButton(_ stop: ZoomStop) -> some View {
+        let isCurrent = abs(Double(model.readout.zoomFactor) - stop.factor) < 0.01
 
         return Button {
-            model.selectLens(camera)
+            model.selectZoom(stop)
         } label: {
-            Text(label)
+            Text(stop.label)
                 .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
                 .foregroundStyle(isCurrent
                                  ? Theme.ColorToken.surfaceBase
@@ -346,9 +347,9 @@ struct CameraScreen: View {
                 .clipShape(Capsule())
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(camera.kind.rawValue) lens")
+        .accessibilityLabel("\(stop.label) zoom")
         .accessibilityValue(isCurrent ? "Selected" : "")
-        .accessibilityHint("Switches to this lens. Select it again to return to one times.")
+        .accessibilityHint("Switches to \(stop.label). Select it again to return to one times.")
         .accessibilityAddTraits(isCurrent ? [.isSelected, .isButton] : .isButton)
     }
 
