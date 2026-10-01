@@ -225,8 +225,9 @@ final class CameraStep1Tests: XCTestCase {
         // Every chip is a number the device actually reported.
         XCTAssertEqual(plan.zoomStops.map(\.label), ["1x", "2x", "4x"])
         // And no chip carries a lens name, on any device, whatever the inference would say.
-        let names: Set<String> = [.ultraWide, .wide, .telephoto, .composite, .unknown]
-            .map(\.zoomLabel)
+        let names: Set<String> = Set(
+            [BackCameraCapabilities.Kind.ultraWide, .wide, .telephoto, .composite, .unknown]
+                .map(\.zoomLabel))
         for label in plan.zoomStops.map(\.label) {
             XCTAssertFalse(names.contains(label), "a chip must not claim a sensor: \(label)")
         }
