@@ -341,9 +341,6 @@ struct CameraScreen: View {
             VStack(spacing: 0) {
                 Text(stop.label)
                     .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
-                Text(stop.factorLabel)
-                    .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
-                    .opacity(isCurrent ? 0.9 : 0.6)
             }
             .foregroundStyle(isCurrent
                              ? Theme.ColorToken.surfaceBase
@@ -357,7 +354,7 @@ struct CameraScreen: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(stop.label)
-        .accessibilityValue(stop.factorLabel)
+        .accessibilityValue(stop.label)
         .accessibilityHint("Switches to the \(stop.label) sensor. Select it again to return to the wide sensor.")
         .accessibilityAddTraits(isCurrent ? [.isSelected, .isButton] : .isButton)
     }

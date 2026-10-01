@@ -633,18 +633,19 @@ final class CaptureSessionController: NSObject {
     /// Binding a constituent instead is a session reconfiguration per lens change and is
     /// `docs/PHASES.md` 3.1; it has never been run on a device, so it is not done here.
     static func pickDevice(facing: CameraFacing) -> AVCaptureDevice? {
-        let position: AVCaptureDevice.Position = facing == .front ? .front : .back
-        let types: [AVCaptureDevice.DeviceType] = [
-            .builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera,
-            .builtInTelephotoCamera, .builtInWideAngleCamera, .builtInUltraWideCamera
-        ]
-        let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: types,
-                                                          mediaType: .video,
-                                                          position: position)
-        let back = discovery.devices.filter { $0.position == .back }
+        // The same discovery the capability model reads, in the same order. This used to
+        // build its own `DiscoverySession` with its own type list, and the two lists were in
+        // opposite order — so the session bound the TripleCamera while the plan recorded the
+        // DualWideCamera as bound. Apple documents that the `devices` array is sorted by the
+        // type order requested, so the order *is* the choice, and there is now only one.
+        let devices = AVCaptureProbeLike.discoverDevices(facing: facing)
+        // `CameraPlan` decides from back cameras, so the front side passes an empty set and
+        // the first discovered device is used directly.
+        let back = devices.filter { $0.position == .back }
+        guard !back.isEmpty else { return devices.first }
         let plan = CameraPlan.resolve(discovered: back.map(BackCameraCapabilities.describe))
-        guard let bound = plan.bound else { return discovery.devices.first }
-        return back.first { $0.uniqueID == bound.uniqueID } ?? discovery.devices.first
+        guard let bound = plan.bound else { return devices.first }
+        return back.first { $0.uniqueID == bound.uniqueID } ?? devices.first
     }
 
     /// Every back camera the device reports, for the capability model.
@@ -810,17 +811,48 @@ enum CameraError: LocalizedError, Equatable {
 
 // MARK: - Discovery
 
-/// Discovery shared with the Step 0 probe so the capability model and the report can
-/// never enumerate different device sets.
+/// Discovery shared by the session, the capability model and the report, so none of them
+/// can enumerate a different device set or a different order.
+///
+/// **One type list, and the order is the priority.** Apple documents that a
+/// `DiscoverySession` "automatically sorts its `devices` list based on the device types you
+/// asked for, so you can use the array order to find the best device with certain
+/// features". So this array is not a set — it is the preference order, and every caller
+/// must use this one.
+///
+/// It did not, and that was a real bug rather than a tidy-up. `pickDevice` asked for
+/// `[triple, dualWide, dual, telephoto, wide, ultraWide]` while `discoverBackDevices` asked
+/// for the exact reverse. The session therefore bound the `builtInTripleCamera` while
+/// `CameraPlan` recorded the `builtInDualWideCamera` as bound — the two halves of one fact
+/// disagreeing again, which is precisely what `CameraPlan` was added to prevent, reintroduced
+/// by handing it a differently ordered discovery. The log showed the plan reporting
+/// `switch points [2.0]`, which is the DualWide's, while the TripleCamera was actually
+/// running.
+///
+/// Composites first, because a composite is the only device that hands between its own
+/// physical lenses at the switch-over factors, which is what the zoom control needs. Then
+/// the single lenses, widest first, so a device with no composite binds its wide lens.
 enum AVCaptureProbeLike {
+    /// The device types to look for, **in preference order**.
+    static let backDeviceTypes: [AVCaptureDevice.DeviceType] = [
+        .builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera,
+        .builtInTelephotoCamera, .builtInWideAngleCamera, .builtInUltraWideCamera
+    ]
+
     static func discoverBackDevices() -> [AVCaptureDevice] {
-        let types: [AVCaptureDevice.DeviceType] = [
-            .builtInUltraWideCamera, .builtInWideAngleCamera, .builtInTelephotoCamera,
-            .builtInDualWideCamera, .builtInDualCamera, .builtInTripleCamera
-        ]
-        let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: types,
+        let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: backDeviceTypes,
                                                           mediaType: .video,
                                                           position: .back)
+        var seen = Set<String>()
+        return discovery.devices.filter { seen.insert($0.uniqueID).inserted }
+    }
+
+    /// Discovery for a given side, in the same preference order.
+    static func discoverDevices(facing: CameraFacing) -> [AVCaptureDevice] {
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: backDeviceTypes,
+            mediaType: .video,
+            position: facing == .front ? .front : .back)
         var seen = Set<String>()
         return discovery.devices.filter { seen.insert($0.uniqueID).inserted }
     }

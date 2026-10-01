@@ -508,14 +508,32 @@ final class CameraViewModel: ObservableObject {
         let upper = max(lower, device.maxAvailableVideoZoomFactor)
         let clamped = min(max(destination, lower), upper)
 
-        // A clamp that moves the destination is a real failure and is logged as one. The
-        // old line said `lens -> 1.0x (ultraWide)` with nothing to say that 1.0x is not
-        // the ultra wide, so the log claimed success for a control that did nothing.
+        // A clamp that moves the destination is a real failure and is logged as one.
         if abs(clamped - destination) > 0.001 {
             AppLog.warn(AppLog.camera,
                         "zoom stop \(stop.factor)x is outside the active format's "
                         + "\(lower)x...\(upper)x range; it will not be honoured")
         }
+
+        // **The device must be locked before the ramp.** Observed on an iPhone 11 Pro:
+        //
+        //   zoom to 2.0x raised NSGenericException: -[AVCaptureDevice
+        //   _rampToVideoZoomFactor:withRate:duration:rampType:rampTuning:] May not be
+        //   called without first successfully gaining exclusive ownership of the device
+        //   using -lockForConfiguration:
+        //
+        // `ramp(toVideoZoomFactor:withRate:)` takes **exclusive ownership**, so it raises
+        // where an ordinary property write would merely be ignored. Every other device write
+        // in this file is already inside a lock, which is why this one was the only thing
+        // that failed.
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            AppLog.warn(AppLog.camera, "zoom: lock failed \(error.localizedDescription)")
+            present("This camera would not change zoom", isError: true)
+            return
+        }
+        defer { device.unlockForConfiguration() }
 
         // `ramp` rather than an assignment: the assignment jumps, and a lens change that
         // snaps is one the user cannot follow. The rate is roughly how fast a real lens

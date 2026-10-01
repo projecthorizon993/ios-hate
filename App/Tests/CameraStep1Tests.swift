@@ -206,14 +206,14 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertEqual(Set(plan.zoomStops.map(\.factor)).count, 3)
     }
 
-    /// The chip is named for the **sensor**, with the factor secondary.
+    /// The chip is the **zoom factor**, not a sensor name.
     ///
-    /// On a multi-lens iPhone the physical lenses sit behind one `AVCaptureDevice` and iOS
-    /// hands over between them at exactly the reported switch points, so a switch point *is*
-    /// a sensor. "Telephoto" is what the user is choosing; "2x" is only how it is reached,
-    /// and leading with the number makes the user do arithmetic about the thing they care
-    /// about.
-    func testEachChipIsNamedForTheSensorItSelects() {
+    /// An earlier version inferred the active lens from which switch-over band the factor
+    /// fell in, and printed "Wide" / "Telephoto" on the chips. The user of an iPhone 11 Pro
+    /// observed a chip reading "Wide" while the ultra wide was demonstrably in use: iOS never
+    /// reports which constituent is active, so the inference was a fabrication, and it was
+    /// printed next to the control that changes the sensor.
+    func testChipsAreLabelledWithTheFactorAndNeverWithAnInferredSensor() {
         let plan = CameraPlan(bound: makeCamera("triple", kind: .composite, relativeScale: 3168,
                                                 switchOver: [2, 4]),
                               offeredLenses: [makeCamera("uw", kind: .ultraWide, relativeScale: 3168),
@@ -222,21 +222,23 @@ final class CameraStep1Tests: XCTestCase {
                               hasConstituentForPro: true,
                               proRequiresRebinding: true)
 
-        XCTAssertEqual(plan.zoomStops.map(\.label), ["Wide", "Telephoto", "Telephoto"])
-        // The factor is still available, because the readout shows it.
-        XCTAssertEqual(plan.zoomStops.map(\.factorLabel), ["1x", "2x", "4x"])
+        // Every chip is a number the device actually reported.
+        XCTAssertEqual(plan.zoomStops.map(\.label), ["1x", "2x", "4x"])
+        // And no chip carries a lens name, on any device, whatever the inference would say.
+        let names: Set<String> = [.ultraWide, .wide, .telephoto, .composite, .unknown]
+            .map(\.zoomLabel)
+        for label in plan.zoomStops.map(\.label) {
+            XCTAssertFalse(names.contains(label), "a chip must not claim a sensor: \(label)")
+        }
     }
 
-    /// A chip falls back to its factor when the sensor cannot be resolved, rather than
-    /// showing a blank. The factor is at least true.
-    func testAChipFallsBackToTheFactorWhenTheSensorIsUnknown() {
-        let plan = CameraPlan(bound: nil, offeredLenses: [],
-                              hasConstituentForPro: false, proRequiresRebinding: false)
-        let stop = ZoomStop(factor: 2, kind: nil)
-
+    /// The same, stated on the type: a `ZoomStop` cannot be given a sensor at all, so the
+    /// inference cannot be reintroduced without changing this type.
+    func testAZoomStopHasNoSensorFieldToPutAnInferenceIn() {
+        let stop = ZoomStop(factor: 2)
         XCTAssertEqual(stop.label, "2x")
-        XCTAssertEqual(stop.factorLabel, "2x")
-        XCTAssertTrue(plan.zoomStops.isEmpty)
+        // A fractional factor keeps its decimal, because 1.5x and 2x are different controls.
+        XCTAssertEqual(ZoomStop(factor: 1.5).label, "1.5x")
     }
 
     /// The device reported `minAvailableVideoZoomFactor == 1.0` on every format, so the

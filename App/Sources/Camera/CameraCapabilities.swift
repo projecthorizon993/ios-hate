@@ -254,7 +254,7 @@ struct CameraPlan: Equatable, Sendable {
         // chips read shortest-reach first.
         return Array(Set(factors))
             .sorted { $0 < $1 }
-            .map { ZoomStop(factor: $0, kind: activeLens(atZoomFactor: $0)) }
+            .map { ZoomStop(factor: $0) }
     }
 
     /// The physical lenses behind the bound composite, shortest reach first.
@@ -359,33 +359,28 @@ struct CameraPlan: Equatable, Sendable {
     }
 }
 
-/// One selectable sensor, and the label it gets.
+/// One selectable zoom position, and the label it gets.
 ///
 /// A stop is a **zoom factor the device reported**, not a focal length the app guessed. On a
 /// multi-lens phone the physical lenses sit behind one `AVCaptureDevice` and iOS hands over
 /// between them at the reported switch points, so setting the factor *is* selecting a
-/// sensor — the two are the same mechanism.
-///
-/// That is why the chip reads as a sensor name and the factor is secondary. "Telephoto" is
-/// what the user is choosing; "2x" is the number that achieves it. Presenting it the other
-/// way round makes the user do arithmetic, and it hides the thing they actually care about.
+/// sensor — the two are the same mechanism, which is why this is a zoom control and not a
+/// lens selector.
 struct ZoomStop: Hashable, Sendable, Identifiable {
     var factor: Double
-    /// The sensor this factor selects, when the switch points can be resolved to one.
-    /// `nil` rather than a name when the bands do not line up — see `activeLens`.
-    var kind: BackCameraCapabilities.Kind?
     var id: Double { factor }
 
-    /// The chip text: the sensor name.
+    /// The chip text, and the factor the readout shows. `1x` rather than `1.0x` because
+    /// that is how every phone writes it.
     ///
-    /// Falls back to the factor when the sensor is unknown, because a chip that says
-    /// something is better than a blank one, and the factor is at least true.
+    /// **Not a sensor name.** An earlier version inferred the active lens from which
+    /// switch-over band the factor fell in, and printed it on the chip. That inference is
+    /// wrong: iOS never reports which constituent is active, and the user of an iPhone 11
+    /// Pro observed a chip reading "Wide" while the ultra wide was demonstrably in use. A
+    /// name the app cannot verify, printed next to the control that changes the sensor, is
+    /// worse than a number that is certainly true. `plan.activeLens(atZoomFactor:)` is kept
+    /// for the log, where a wrong inference costs a log line rather than the user's trust.
     var label: String {
-        kind?.zoomLabel ?? factorLabel
-    }
-
-    /// The factor on its own, for the readout and accessibility.
-    var factorLabel: String {
         if abs(factor - factor.rounded()) < 0.001 {
             return "\(Int(factor.rounded()))x"
         }

@@ -361,13 +361,14 @@ extension RuntimeCapabilities {
     private mutating func discoverCameras() {
         authorisation = Self.authorisationName(AVCaptureDevice.authorizationStatus(for: .video))
 
-        let types: [AVCaptureDevice.DeviceType] = [
-            .builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera,
-            .builtInTelephotoCamera, .builtInWideAngleCamera, .builtInUltraWideCamera
-        ]
-        let session = AVCaptureDevice.DiscoverySession(deviceTypes: types,
-                                                       mediaType: .video,
-                                                       position: .unspecified)
+        // The same type list the session and the capability model use, for the reason in
+        // `AVCaptureProbeLike`: the `devices` array is sorted by the requested type order, so
+        // a different order is a different choice, and a report that enumerated in a
+        // different order than the session describes a different device set.
+        let session = AVCaptureDevice.DiscoverySession(
+            deviceTypes: AVCaptureProbeLike.backDeviceTypes,
+            mediaType: .video,
+            position: .unspecified)
         var seen = Set<String>()
         let devices = session.devices.filter { seen.insert($0.uniqueID).inserted }
 
