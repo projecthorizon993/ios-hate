@@ -256,6 +256,9 @@ final class CameraViewModel: ObservableObject {
                     + "lenses=\(probed.physicalLenses.count) "
                     + "flash=\(probed.flash.isAvailable) "
                     + "hdr=\(self.hdr.label)")
+        // The bound device is a fact - the app chose it - so it is logged by name here, at
+        // every session start, rather than only at the shutter.
+        logCameraSource()
     }
 
     // MARK: - Recipe
@@ -564,7 +567,45 @@ final class CameraViewModel: ObservableObject {
         // *not* applied, which is exactly the case that looked like "looks don't work".
         AppLog.note(AppLog.camera, "shutter: look=\(settings.look?.name ?? "none") "
                     + "intensity=\(settings.lookIntensity) recipe=\(settings.summarise())")
+        logCameraSource()
         photo.capture(metadata: metadata, request: request)
+    }
+
+    /// What is *known* about the camera source at the moment of the shutter, and what is
+    /// not.
+    ///
+    /// The user asked the log to say which sensor a photo came from, which is the right
+    /// question and one the answer to was previously guessed wrong three times. So this
+    /// states precisely what can and cannot be known:
+    ///
+    /// - **The bound device is known**, because the app chose it. `deviceType` is a fact
+    ///   about what was bound, not an inference.
+    /// - **The zoom factor is known**, because the device reports it.
+    /// - **The physical lens behind a composite is not knowable.** iOS exposes no query for
+    ///   which constituent is currently reading the sensor. `switchOverZoomFactors` says
+    ///   where the composite *may* hand over, not where it is, and inferring one from the
+    ///   other was the fabrication the user observed naming the wrong lens.
+    ///
+    /// So the line says which of those three it is, and `physical lens: not observable`
+    /// rather than a name. The only way to make that name true is to bind the constituent
+    /// device itself, which is a session reconfiguration per lens change —
+    /// `docs/PHASES.md` 3.1.
+    private func logCameraSource() {
+        guard let device = sessionController.configuration?.device else {
+            AppLog.warn(AppLog.camera, "camera source: no bound device at the shutter press")
+            return
+        }
+        let points = device.virtualDeviceSwitchOverVideoZoomFactors
+            .map { String(format: "%.2g", $0.doubleValue) }
+            .joined(separator: "/")
+        AppLog.note(AppLog.camera,
+                    "camera source: bound=\(device.deviceType.rawValue) "
+                    + "format=\(CaptureFormatChooser.describe(device.activeFormat)) "
+                    + "zoom=\(String(format: "%.3f", device.videoZoomFactor))x "
+                    + "range=\(String(format: "%.2g", device.minAvailableVideoZoomFactor))"
+                    + "…\(String(format: "%.2g", device.maxAvailableVideoZoomFactor)) "
+                    + "switchOver=\(points.isEmpty ? "none" : points) "
+                    + "physicalLens=not-observable")
     }
 
     /// The request is derived from capabilities, never from a stored preference, so a
