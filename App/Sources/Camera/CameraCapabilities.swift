@@ -164,7 +164,7 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
     ///
     /// The value is kept because it still orders lenses correctly where it is not
     /// degenerate, but it must never be used to label one. `zoomStops` and
-    /// `plan.activeLens(atZoomFactor:)` are what the UI reads instead.
+    /// `zoomStops` is what the UI reads instead.
     private static func relativeScale(of format: AVCaptureDevice.Format) -> Double {
         let largest = format.supportedMaxPhotoDimensions.max {
             Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height)
@@ -257,61 +257,6 @@ struct CameraPlan: Equatable, Sendable {
             .map { ZoomStop(factor: $0) }
     }
 
-    /// The physical lenses behind the bound composite, shortest reach first.
-    ///
-    /// Ordered by `Kind`, **not** by `relativeScale`. The scale is unusable — every lens on
-    /// a modern iPhone reports the same still dimensions — but `Kind` is a semantic
-    /// ordering of lens types (ultra wide, then wide, then telephoto), which is a fact
-    /// about what a lens *is* rather than a measurement, and it is all that is needed to
-    /// pair lenses with switch points.
-    var constituentOrder: [BackCameraCapabilities.Kind] {
-        let rank: [BackCameraCapabilities.Kind: Int] = [
-            .ultraWide: 0, .wide: 1, .telephoto: 2
-        ]
-        return offeredLenses
-            .filter { $0.kind != .composite && $0.kind != .unknown }
-            .sorted { (rank[$0.kind] ?? 99) < (rank[$1.kind] ?? 99) }
-            .map(\.kind)
-    }
-
-    /// Which physical lens the bound device is using at `zoomFactor`.
-    ///
-    /// iOS never names the active constituent, so it is read off the switch points. The
-    /// first attempt at this treated the points as one boundary per lens gap and indexed
-    /// straight into them, which is wrong: an iPhone 11 Pro reports `[2.0, 4.0]` and
-    /// **1.0 is not among them**, so the points are not the lens boundaries and the mapping
-    /// came out shifted by one — 1.0x reported as the ultra wide.
-    ///
-    /// So the rule is anchored on the two things that are certain instead of on the count:
-    ///
-    /// - **1.0 is the wide lens.** It is the reference every camera app measures from, and
-    ///   it is the wide lens by definition of the zoom scale.
-    /// - **below 1.0 is the shortest lens**, when the device's minimum allows that range.
-    /// - **at or above the first reported switch point is a longer lens** — the telephoto,
-    ///   which is the longest named lens behind this composite.
-    ///
-    /// `nil` when the device has no named constituents at all, because then there is no name
-    /// to give. The name goes into every photo's metadata, and a fabricated lens in a file
-    /// is worse than an absent one.
-    func activeLens(atZoomFactor zoomFactor: Double) -> BackCameraCapabilities.Kind? {
-        let lenses = constituentOrder
-        guard !lenses.isEmpty else { return nil }
-        let shortest = lenses.first
-        let longest = lenses.last
-        // Below 1.0 is the shortest lens, but only where that range exists at all.
-        if let lowest = belowOneXMinimum, zoomFactor < lowest, let shortest {
-            return shortest
-        }
-        if let wide = lenses.first(where: { $0 == .wide }) {
-            // Up to the first switch point is still the wide lens; at or above it, a longer
-            // lens takes over.
-            let points = (bound?.switchOverZoomFactors ?? []).filter { $0 > 1.0 }.sorted()
-            guard let firstSwitch = points.first else { return wide }
-            return zoomFactor < firstSwitch ? wide : longest
-        }
-        // No wide lens named — a single telephoto, say. Then the only anchor is 1.0.
-        return zoomFactor < 1.0 ? shortest : longest
-    }
 
     /// The lowest zoom factor the bound device will accept, or `nil` when it reports none
     /// below 1.0.
@@ -378,8 +323,7 @@ struct ZoomStop: Hashable, Sendable, Identifiable {
     /// wrong: iOS never reports which constituent is active, and the user of an iPhone 11
     /// Pro observed a chip reading "Wide" while the ultra wide was demonstrably in use. A
     /// name the app cannot verify, printed next to the control that changes the sensor, is
-    /// worse than a number that is certainly true. `plan.activeLens(atZoomFactor:)` is kept
-    /// for the log, where a wrong inference costs a log line rather than the user's trust.
+    /// worse than a number that is certainly true. Nothing infers a sensor any more.
     var label: String {
         if abs(factor - factor.rounded()) < 0.001 {
             return "\(Int(factor.rounded()))x"
@@ -448,7 +392,7 @@ struct CameraCapabilities: Equatable, Sendable {
     /// Pro, so this computes `1.0` for all three — which is the "1 1 1" the user saw.
     ///
     /// If a future caller reaches for this, it will produce meaningless labels. Use
-    /// `zoomStops` or `plan.activeLens(atZoomFactor:)` instead.
+    /// `zoomStops` instead.
     func zoomLabel(for camera: BackCameraCapabilities) -> String? {
         guard let reference = referenceCamera, reference.relativeScale > 0 else { return nil }
         let ratio = camera.relativeScale / reference.relativeScale

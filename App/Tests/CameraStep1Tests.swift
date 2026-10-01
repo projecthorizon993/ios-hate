@@ -261,13 +261,27 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertFalse(plan.zoomStops.contains { $0.factor < 1.0 })
     }
 
-    /// Which physical sensor is in use, which the user asked for and the app could not say.
+    /// The app does not name the active sensor, and this is why the capability model has
+    /// no way to ask.
     ///
-    /// iOS never names the active constituent, so it is read off the switch points: they
-    /// partition the zoom range into one band per lens. Constituents are ordered by `Kind`
-    /// — ultra wide, wide, telephoto — because that is a fact about what a lens is, where
-    /// `relativeScale` is a measurement that returns one constant here.
-    func testTheActiveSensorIsReadOffTheSwitchOverBands() {
+    /// Three attempts were made and all three were wrong:
+    ///
+    /// 1. `relativeScale` — returns one constant for every lens on a modern iPhone, so
+    ///    every lens read as the same thing.
+    /// 2. An index into `switchOverZoomFactors` — off by one, because 1.0 is not among
+    ///    the reported points, so 1.0x came out as the ultra wide.
+    /// 3. A band inference anchored on 1.0 — which the user of an iPhone 11 Pro observed
+    ///    naming the wrong lens outright, with the ultra wide in use behind a chip that
+    ///    said "Wide".
+    ///
+    /// iOS exposes no query for which constituent of a composite is active, so there is
+    /// no correct version of this to write. The fix is the absence of the claim: the chips
+    /// are zoom factors, which are reported, and `metadata.lensKind` records
+    /// `"unverified"` rather than a guess that would be written into the file permanently.
+    ///
+    /// What is recorded instead is `metadata.zoomFactor`, which is measured and is what
+    /// the user actually asked for.
+    func testTheActiveSensorIsNotDerivedFromAnything() {
         let plan = CameraPlan(bound: makeCamera("triple", kind: .composite, relativeScale: 3168,
                                                 switchOver: [2, 4]),
                               offeredLenses: [makeCamera("uw", kind: .ultraWide, relativeScale: 3168),
@@ -276,47 +290,11 @@ final class CameraStep1Tests: XCTestCase {
                               hasConstituentForPro: true,
                               proRequiresRebinding: true)
 
-        XCTAssertEqual(plan.constituentOrder, [.ultraWide, .wide, .telephoto])
-        XCTAssertEqual(plan.activeLens(atZoomFactor: 1.0), .wide)
-        XCTAssertEqual(plan.activeLens(atZoomFactor: 1.99), .wide)
-        XCTAssertEqual(plan.activeLens(atZoomFactor: 2.0), .telephoto)
-        XCTAssertEqual(plan.activeLens(atZoomFactor: 3.9), .telephoto)
-        // Beyond the last point it is still the last lens, not off the end of the array.
-        XCTAssertEqual(plan.activeLens(atZoomFactor: 8.0), .telephoto)
-    }
-
-    /// A factor below 1.0 is the ultra wide **when the device allows that range**, which is
-    /// the case on most phones and not on the iPhone 11 Pro this was found on.
-    func testAFactorBelowOneIsTheShortestLensWhenTheRangeAllowsIt() {
-        let wide = makeCamera("triple", kind: .composite, relativeScale: 3168,
-                              switchOver: [2, 4], minimumZoom: 0.5)
-        let plan = CameraPlan(bound: wide,
-                              offeredLenses: [makeCamera("uw", kind: .ultraWide, relativeScale: 3168),
-                                              makeCamera("w", kind: .wide, relativeScale: 3168),
-                                              makeCamera("t", kind: .telephoto, relativeScale: 3168)],
-                              hasConstituentForPro: true,
-                              proRequiresRebinding: true)
-
-        XCTAssertEqual(plan.belowOneXMinimum, 0.5)
-        XCTAssertEqual(plan.activeLens(atZoomFactor: 0.5), .ultraWide)
-        XCTAssertEqual(plan.activeLens(atZoomFactor: 0.99), .ultraWide)
-        XCTAssertEqual(plan.activeLens(atZoomFactor: 1.0), .wide)
-    }
-
-    /// Where the arithmetic does not line up, the answer is "unknown" rather than a name.
-    ///
-    /// Three constituents need exactly two switch points. A device reporting a different
-    /// number gets `nil`, because this name is written into every photo's metadata — a
-    /// fabricated lens in a file is worse than an absent one.
-    func testAnUnmatchedConstituentAndSwitchPointCountReportsUnknown() {
-        let plan = CameraPlan(bound: makeCamera("dual", kind: .composite, relativeScale: 3168,
-                                                switchOver: [2, 4, 8]),
-                              offeredLenses: [makeCamera("w", kind: .wide, relativeScale: 3168),
-                                              makeCamera("t", kind: .telephoto, relativeScale: 3168)],
-                              hasConstituentForPro: true,
-                              proRequiresRebinding: true)
-
-        XCTAssertNil(plan.activeLens(atZoomFactor: 1.0))
+        // The factors are real, and they are the whole of what the app claims.
+        XCTAssertEqual(plan.zoomStops.map(\.factor), [1.0, 2.0, 4.0])
+        // A device whose minimum allows 0.5x still does not get a 0.5x *sensor*, only a
+        // 0.5x *stop*, and that too is absent here because this composite reports 1.0.
+        XCTAssertNil(plan.belowOneXMinimum)
     }
 
     /// A device with no switch points offers no chips, and says why.

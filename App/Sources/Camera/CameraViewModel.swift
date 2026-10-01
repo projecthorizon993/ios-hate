@@ -452,23 +452,12 @@ final class CameraViewModel: ObservableObject {
         value.exposureTargetOffset = device.exposureTargetOffset
         value.zoomFactor = device.videoZoomFactor
         value.relativeScale = BackCameraCapabilities.describe(device).relativeScale
-        // The lens comes from the **switch points**, not from the device's relative scale.
-        // The scale is a property of the hardware and is identical for every lens on a
-        // modern iPhone, so matching on it made the label constant — the readout was stuck
-        // on whatever the composite happened to report, whatever the user had zoomed to.
-        let active = activeLens(zoomFactor: Double(value.zoomFactor))
-        value.lensLabel = active.map(\.zoomLabel)
+        // No sensor name. iOS never reports which constituent of a composite is active, and
+        // an inference from the switch-over bands was observed to be wrong — a chip read
+        // "Wide" while the ultra wide was in use. So the readout shows the zoom factor,
+        // which is measured, and the status row shows no lens name at all.
+        value.lensLabel = nil
         readout = value
-    }
-
-    /// The physical lens in use, from the switch-over bands.
-    ///
-    /// `nil` when the device's constituents and switch points do not line up, which is
-    /// reported as unknown rather than guessed. The previous implementation returned a
-    /// plausible-looking name built from the broken scale, and that name was written into
-    /// every photo's metadata — so saved photos claimed a lens the app had not measured.
-    private func activeLens(zoomFactor: Double) -> BackCameraCapabilities.Kind? {
-        capabilities.plan.activeLens(atZoomFactor: zoomFactor)
     }
 
     // MARK: - Actions
@@ -600,10 +589,16 @@ final class CameraViewModel: ObservableObject {
         metadata.shutterSeconds = readout.shutterSeconds > 0 ? readout.shutterSeconds : nil
         metadata.exposureTargetOffset = Double(readout.exposureTargetOffset)
         metadata.lensRelativeScale = readout.relativeScale
-        // The lens actually in use, or explicitly unknown. This travels in the file, so a
-        // guess here would be a claim the photo carries permanently about the sensor that
-        // took it — which is exactly what the old `activeCamera` was doing.
-        metadata.lensKind = activeLens(zoomFactor: Double(readout.zoomFactor))?.rawValue ?? "unknown"
+        // No lens name, and it is not left blank either: `lensKind` is a required field of
+        // the recipe, and a file that claims a sensor is worse than a file that admits it
+        // does not know. `zoomFactor` on the next line is the measured fact that replaces
+        // it — it is what the user asked for and what the device was set to.
+        //
+        // This has been wrong three times over: first it came from `relativeScale`, which
+        // returns one constant for every lens on a modern iPhone; then from an index into
+        // the switch-over points, which is off by one because 1.0 is not among them; then
+        // from a band inference, which the user observed naming the wrong lens outright.
+        metadata.lensKind = "unverified"
         metadata.zoomFactor = Double(readout.zoomFactor)
         metadata.frontCamera = facing == .front
         metadata.colorSpace = capabilities.wideGamut ? "display-p3" : "srgb"
