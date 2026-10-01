@@ -249,7 +249,9 @@ struct CameraPlan: Equatable, Sendable {
         factors.append(contentsOf: (bound?.switchOverZoomFactors ?? []).filter { $0 > 1.0 })
         // De-duplicated because a device can report the same point twice, and sorted so the
         // chips read shortest-reach first.
-        return Array(Set(factors.map { ZoomStop(factor: $0) })).sorted { $0.factor < $1.factor }
+        return Array(Set(factors))
+            .sorted { $0 < $1 }
+            .map { ZoomStop(factor: $0, kind: activeLens(atZoomFactor: $0)) }
     }
 
     /// The physical lenses behind the bound composite, shortest reach first.
@@ -346,24 +348,36 @@ struct CameraPlan: Equatable, Sendable {
     }
 }
 
-/// One selectable zoom position, and the label it gets.
+/// One selectable sensor, and the label it gets.
 ///
-/// A stop is a **zoom factor the device reported**, not a focal length the app guessed.
-/// The label is the factor itself, formatted the way every phone writes it — "1x", "2x",
-/// "4x" — because that is what the factor means to a user and inventing a different
-/// number from it would be the same mistake in a new place.
+/// A stop is a **zoom factor the device reported**, not a focal length the app guessed. On a
+/// multi-lens phone the physical lenses sit behind one `AVCaptureDevice` and iOS hands over
+/// between them at the reported switch points, so setting the factor *is* selecting a
+/// sensor — the two are the same mechanism.
+///
+/// That is why the chip reads as a sensor name and the factor is secondary. "Telephoto" is
+/// what the user is choosing; "2x" is the number that achieves it. Presenting it the other
+/// way round makes the user do arithmetic, and it hides the thing they actually care about.
 struct ZoomStop: Hashable, Sendable, Identifiable {
     var factor: Double
+    /// The sensor this factor selects, when the switch points can be resolved to one.
+    /// `nil` rather than a name when the bands do not line up — see `activeLens`.
+    var kind: BackCameraCapabilities.Kind?
     var id: Double { factor }
 
-    /// `1x` rather than `1.0x`, and a whole number rather than `1.5x`, because that is how
-    /// every phone writes it.
+    /// The chip text: the sensor name.
+    ///
+    /// Falls back to the factor when the sensor is unknown, because a chip that says
+    /// something is better than a blank one, and the factor is at least true.
     var label: String {
+        kind?.zoomLabel ?? factorLabel
+    }
+
+    /// The factor on its own, for the readout and accessibility.
+    var factorLabel: String {
         if abs(factor - factor.rounded()) < 0.001 {
             return "\(Int(factor.rounded()))x"
         }
-        // A half-stop is the one fraction worth showing; anything else is noise the user
-        // cannot act on.
         return String(format: "%.1fx", factor)
     }
 }

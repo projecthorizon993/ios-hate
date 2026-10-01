@@ -322,34 +322,43 @@ struct CameraScreen: View {
         }
     }
 
-    /// A zoom chip, labelled with the factor the device itself reported.
+    /// A sensor chip: the lens **name** is the primary label, the factor secondary.
     ///
     /// Drawn from `zoomStops` rather than from the discovered lens list, because the lens
     /// list carries no usable measurement: on an iPhone 11 Pro all three physical lenses
     /// report the same still dimensions, so the old labels were all "1x" and every tap
-    /// computed a destination of 1.0. The switch-over factors are the real thing.
+    /// computed a destination of 1.0. The switch-over factors are the real thing, and each
+    /// one *is* a sensor — iOS hands over to the next physical lens at exactly those points.
+    ///
+    /// The transition is a ramp rather than a jump, so the frame rate and the sensor change
+    /// happen together and the user can follow it; see `CameraViewModel.selectZoom`.
     private func lensButton(_ stop: ZoomStop) -> some View {
         let isCurrent = abs(Double(model.readout.zoomFactor) - stop.factor) < 0.01
 
         return Button {
             model.selectZoom(stop)
         } label: {
-            Text(stop.label)
-                .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
-                .foregroundStyle(isCurrent
-                                 ? Theme.ColorToken.surfaceBase
-                                 : Theme.ColorToken.textSecondary)
-                .padding(.horizontal, Theme.Space.s)
-                .frame(minHeight: Theme.Space.minTouch)
-                .background(isCurrent
-                            ? Theme.ColorToken.accentActive
-                            : Theme.ColorToken.surfaceRaised)
-                .clipShape(Capsule())
+            VStack(spacing: 0) {
+                Text(stop.label)
+                    .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                Text(stop.factorLabel)
+                    .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                    .opacity(isCurrent ? 0.9 : 0.6)
+            }
+            .foregroundStyle(isCurrent
+                             ? Theme.ColorToken.surfaceBase
+                             : Theme.ColorToken.textSecondary)
+            .padding(.horizontal, Theme.Space.s)
+            .frame(minHeight: Theme.Space.minTouch)
+            .background(isCurrent
+                        ? Theme.ColorToken.accentActive
+                        : Theme.ColorToken.surfaceRaised)
+            .clipShape(Capsule())
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(stop.label) zoom")
-        .accessibilityValue(isCurrent ? "Selected" : "")
-        .accessibilityHint("Switches to \(stop.label). Select it again to return to one times.")
+        .accessibilityLabel(stop.label)
+        .accessibilityValue(stop.factorLabel)
+        .accessibilityHint("Switches to the \(stop.label) sensor. Select it again to return to the wide sensor.")
         .accessibilityAddTraits(isCurrent ? [.isSelected, .isButton] : .isButton)
     }
 

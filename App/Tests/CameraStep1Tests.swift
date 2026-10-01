@@ -188,10 +188,42 @@ final class CameraStep1Tests: XCTestCase {
 
         // 1x is always present, plus each reported switch point, in reach order.
         XCTAssertEqual(plan.zoomStops.map(\.factor), [1.0, 2.0, 4.0])
-        XCTAssertEqual(plan.zoomStops.map(\.label), ["1x", "2x", "4x"])
         // And every one of them is a distinct factor despite the identical still resolution,
         // which is the whole point: the measurement that failed is not consulted.
         XCTAssertEqual(Set(plan.zoomStops.map(\.factor)).count, 3)
+    }
+
+    /// The chip is named for the **sensor**, with the factor secondary.
+    ///
+    /// On a multi-lens iPhone the physical lenses sit behind one `AVCaptureDevice` and iOS
+    /// hands over between them at exactly the reported switch points, so a switch point *is*
+    /// a sensor. "Telephoto" is what the user is choosing; "2x" is only how it is reached,
+    /// and leading with the number makes the user do arithmetic about the thing they care
+    /// about.
+    func testEachChipIsNamedForTheSensorItSelects() {
+        let plan = CameraPlan(bound: makeCamera("triple", kind: .composite, relativeScale: 3168,
+                                                switchOver: [2, 4]),
+                              offeredLenses: [makeCamera("uw", kind: .ultraWide, relativeScale: 3168),
+                                              makeCamera("w", kind: .wide, relativeScale: 3168),
+                                              makeCamera("t", kind: .telephoto, relativeScale: 3168)],
+                              hasConstituentForPro: true,
+                              proRequiresRebinding: true)
+
+        XCTAssertEqual(plan.zoomStops.map(\.label), ["Wide", "Telephoto", "Telephoto"])
+        // The factor is still available, because the readout shows it.
+        XCTAssertEqual(plan.zoomStops.map(\.factorLabel), ["1x", "2x", "4x"])
+    }
+
+    /// A chip falls back to its factor when the sensor cannot be resolved, rather than
+    /// showing a blank. The factor is at least true.
+    func testAChipFallsBackToTheFactorWhenTheSensorIsUnknown() {
+        let plan = CameraPlan(bound: nil, offeredLenses: [],
+                              hasConstituentForPro: false, proRequiresRebinding: false)
+        let stop = ZoomStop(factor: 2, kind: nil)
+
+        XCTAssertEqual(stop.label, "2x")
+        XCTAssertEqual(stop.factorLabel, "2x")
+        XCTAssertTrue(plan.zoomStops.isEmpty)
     }
 
     /// The device reported `minAvailableVideoZoomFactor == 1.0` on every format, so the
