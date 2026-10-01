@@ -29,15 +29,25 @@ final class CameraStep1Tests: XCTestCase {
                                minAvailableVideoZoomFactor: minimumZoom)
     }
 
-    /// Relative scales chosen so the ratios are the same numbers a real phone would
-    /// produce: an ultra wide at about half the wide, and a tele at about 3x.
+    /// A three-lens phone as the device reports it: a bound composite carrying the switch
+    /// points, and the three physical lenses behind it.
+    ///
+    /// `plan` is set as well as `backCameras`, and it has to be — the lens selector and the
+    /// zoom chips are derived from the plan, because the plan is what the session actually
+    /// bound. A fixture that only sets `backCameras` is a phone with lenses and no camera.
     private func makeTripleLens() -> CameraCapabilities {
         var capabilities = CameraCapabilities()
-        capabilities.backCameras = [
+        let lenses = [
             makeCamera("uw", kind: .ultraWide, relativeScale: 13),
             makeCamera("w", kind: .wide, relativeScale: 24, hasOpticalZoomSteps: true, flash: true),
             makeCamera("t", kind: .telephoto, relativeScale: 77)
         ]
+        capabilities.backCameras = lenses
+        capabilities.plan = CameraPlan(
+            bound: makeCamera("triple", kind: .composite, relativeScale: 24, switchOver: [2, 3]),
+            offeredLenses: lenses,
+            hasConstituentForPro: true,
+            proRequiresRebinding: true)
         capabilities.rawPixelTypes = [0x31324241]
         capabilities.proRawSupported = true
         capabilities.photoQualitySupported = true
@@ -50,7 +60,10 @@ final class CameraStep1Tests: XCTestCase {
 
     func testSingleBackCameraHasNoLensSelector() {
         var capabilities = CameraCapabilities()
-        capabilities.backCameras = [makeCamera("w", kind: .wide, relativeScale: 24)]
+        let single = [makeCamera("w", kind: .wide, relativeScale: 24)]
+        capabilities.backCameras = single
+        capabilities.plan = CameraPlan(bound: single[0], offeredLenses: single,
+                                       hasConstituentForPro: true, proRequiresRebinding: false)
 
         XCTAssertFalse(capabilities.lensSelector.isAvailable)
         XCTAssertEqual(capabilities.lensSelector.reason, "Single camera — no lens switching")
@@ -323,6 +336,7 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertTrue(capabilities.zoomStops.isEmpty)
         XCTAssertEqual(capabilities.lensSelector.reason ?? "", "Single camera — no lens switching")
     }
+
     /// The grainy-preview fix, expressed as the numbers that caused it.
     ///
     /// On an iPhone 11 Pro the device offers a `4032x3024 still | 4032x3024 video` format —

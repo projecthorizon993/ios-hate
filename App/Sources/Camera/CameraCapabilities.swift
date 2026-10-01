@@ -245,6 +245,9 @@ struct CameraPlan: Equatable, Sendable {
     /// ultra wide is not reachable by zoom at all on this hardware. A 0.5x chip would be a
     /// control that cannot do anything.
     var zoomStops: [ZoomStop] {
+        // No bound device means no chips. Without this a device that reported nothing still
+        // produced a single "1x" chip, which is a control with nowhere to go.
+        guard bound != nil else { return [] }
         var factors: [Double] = [1.0]
         factors.append(contentsOf: (bound?.switchOverZoomFactors ?? []).filter { $0 > 1.0 })
         // De-duplicated because a device can report the same point twice, and sorted so the
@@ -273,33 +276,41 @@ struct CameraPlan: Equatable, Sendable {
 
     /// Which physical lens the bound device is using at `zoomFactor`.
     ///
-    /// iOS never says this directly, so it is read off the switch points: they partition
-    /// the zoom range into one band per lens, and the band the current factor falls in is
-    /// the lens in use. On an iPhone 11 Pro — constituents ultra wide, wide, telephoto, and
-    /// switch points 2.0 and 4.0 — the bands are 1.0–2.0 wide, 2.0–4.0 telephoto, and 4.0
-    /// and above still telephoto, with anything below 1.0 the ultra wide.
+    /// iOS never names the active constituent, so it is read off the switch points. The
+    /// first attempt at this treated the points as one boundary per lens gap and indexed
+    /// straight into them, which is wrong: an iPhone 11 Pro reports `[2.0, 4.0]` and
+    /// **1.0 is not among them**, so the points are not the lens boundaries and the mapping
+    /// came out shifted by one — 1.0x reported as the ultra wide.
     ///
-    /// **`nil` when the arithmetic does not line up**, rather than a guess. Three
-    /// constituents need exactly two switch points; if the device reports a different
-    /// number, this returns `nil` and the UI says it does not know, because a name in a
-    /// photo's metadata that is a plausible fabrication is worse than no name. That is the
-    /// same reason `relativeScale` is not used to label anything.
+    /// So the rule is anchored on the two things that are certain instead of on the count:
+    ///
+    /// - **1.0 is the wide lens.** It is the reference every camera app measures from, and
+    ///   it is the wide lens by definition of the zoom scale.
+    /// - **below 1.0 is the shortest lens**, when the device's minimum allows that range.
+    /// - **at or above the first reported switch point is a longer lens** — the telephoto,
+    ///   which is the longest named lens behind this composite.
+    ///
+    /// `nil` when the device has no named constituents at all, because then there is no name
+    /// to give. The name goes into every photo's metadata, and a fabricated lens in a file
+    /// is worse than an absent one.
     func activeLens(atZoomFactor zoomFactor: Double) -> BackCameraCapabilities.Kind? {
         let lenses = constituentOrder
-        let points = (bound?.switchOverZoomFactors ?? []).filter { $0 > 0 }.sorted()
-        guard lenses.count >= 2, points.count == lenses.count - 1 else { return nil }
-        // Below the first point is the shortest lens, when the range extends that far.
-        if let lowest = belowOneXMinimum, zoomFactor < lowest, let first = lenses.first {
-            return first
+        guard !lenses.isEmpty else { return nil }
+        let shortest = lenses.first
+        let longest = lenses.last
+        // Below 1.0 is the shortest lens, but only where that range exists at all.
+        if let lowest = belowOneXMinimum, zoomFactor < lowest, let shortest {
+            return shortest
         }
-        // Otherwise find the last switch point the factor is at or above; that index is the
-        // lens in use. Clamped to the last lens so a factor beyond the final point does not
-        // run off the end.
-        var index = 0
-        for (offset, point) in points.enumerated() where zoomFactor >= point {
-            index = offset + 1
+        if let wide = lenses.first(where: { $0 == .wide }) {
+            // Up to the first switch point is still the wide lens; at or above it, a longer
+            // lens takes over.
+            let points = (bound?.switchOverZoomFactors ?? []).filter { $0 > 1.0 }.sorted()
+            guard let firstSwitch = points.first else { return wide }
+            return zoomFactor < firstSwitch ? wide : longest
         }
-        return index < lenses.count ? lenses[index] : lenses.last
+        // No wide lens named — a single telephoto, say. Then the only anchor is 1.0.
+        return zoomFactor < 1.0 ? shortest : longest
     }
 
     /// The lowest zoom factor the bound device will accept, or `nil` when it reports none
@@ -470,12 +481,13 @@ struct CameraCapabilities: Equatable, Sendable {
     /// Fewer than two stops means there is nothing to switch between, which is the honest
     /// reason to hide it — a single lens, or a device that reports no switch points.
     var lensSelector: FeatureAvailability {
-        let stops = plan.zoomStops
-        if physicalLenses.isEmpty && stops.count < 2 {
-            return .unavailable(reason: "No back camera reported")
-        }
+        let stops = zoomStops
+        // Derived from the plan, not from `backCameras`: the plan is what the session bound
+        // and what the switch points belong to, and mixing the two is how a capability
+        // model and a session end up disagreeing.
         if stops.count > 1 { return .available }
-        if physicalLenses.count == 1 {
+        if plan.bound == nil { return .unavailable(reason: "No back camera reported") }
+        if plan.offeredLenses.count == 1 {
             return .unavailable(reason: "Single camera — no lens switching")
         }
         // Constituents were found but the bound device reported no switch points, so there
