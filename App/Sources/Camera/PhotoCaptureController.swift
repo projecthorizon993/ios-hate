@@ -120,6 +120,20 @@ final class PhotoCaptureController: NSObject {
         AppLog.note(AppLog.camera, "photo codecs available: \(codecText)")
         AppLog.note(AppLog.camera, "photo codec will be: \(Self.preferredCodec(for: output)?.rawValue ?? "output default")")
 
+        // RAW and ProRAW availability, next to the flag it depends on.
+        //
+        // `isAppleProRAWSupported` and `availableRawPhotoPixelFormatTypes` are properties of
+        // the **output in its current configuration**, and that configuration includes the
+        // active *format*. An iPhone 11 Pro reported `raw=0 proRAW=false` until the format
+        // changed — not because the hardware lacks RAW, which it does not, but because the
+        // bound format did not report `isHighPhotoQualitySupported`. So the hardware answer
+        // and the reason it disagrees are logged together; without the second half, a
+        // `proRAW=false` line is indistinguishable from a device that has no RAW at all.
+        AppLog.note(AppLog.camera,
+                    "raw types: \(output.availableRawPhotoPixelFormatTypes.count), "
+                    + "proRAW: \(output.isAppleProRAWSupported), "
+                    + "format high photo quality: \(capabilities.photoQualitySupported)")
+
         guard capabilities.proRawSupported else {
             if output.isAppleProRAWEnabled {
                 _ = LumaFrameSafety.perform({ self.output.isAppleProRAWEnabled = false })
@@ -133,20 +147,21 @@ final class PhotoCaptureController: NSObject {
         }
     }
 
-    /// HEVC when offered, because it is the only still codec here that carries
-    /// Display P3 and an HDR gain map, and this is a low-light app that cares about
-    /// both. JPEG is the fallback.
-    ///
-    /// Only `.hevc` and `.jpeg` are tested. `AVVideoCodecType` has no `.heif` case —
-    /// naming one silently resolves it against `UTType` instead and produces a type
-    /// error that points nowhere near the real mistake.
     /// The codec to ask for, and **JPEG first**.
     ///
-    /// It used to prefer `.hevc`, so on a device offering both — an iPhone 11 Pro offers
-    /// `jpeg, hvc1` — every photo was captured as HEVC. Nothing was broken: the log shows
-    /// `photo stored: heic 4032x3024` and the file is a valid HEIC. But HEIC is a container
-    /// that many things outside this app do not handle, so a photo the user cannot open
-    /// anywhere is a poor default for a camera whose whole job is producing pictures.
+    /// It used to prefer `.hevc`, on the grounds that HEVC is the only still codec here
+    /// that carries Display P3 and an HDR gain map, and this is a low-light app that cares
+    /// about both. That reasoning was sound and the priority was backwards: on a device
+    /// offering both — an iPhone 11 Pro offers `jpeg, hvc1` — every photo was captured as
+    /// HEVC. Nothing was broken; the log shows `photo stored: heic 4032x3024` and the file
+    /// is a valid HEIC. But HEIC is a container plenty of things outside this app do not
+    /// handle, so a photo the user cannot open anywhere is a poor default for a camera
+    /// whose whole job is producing pictures. Wide gamut is carried by the recipe and the
+    /// working colour space, not by the container.
+    ///
+    /// Only `.jpeg` and `.hevc` are tested. `AVVideoCodecType` has no `.heif` case —
+    /// naming one silently resolves it against `UTType` instead and produces a type error
+    /// that points nowhere near the real mistake.
     ///
     /// This is `preferredCodec`, not `PhotoContainer.detect` — detection stays general,
     /// because a photo can still arrive as HEIC from a RAW pipeline or a future codec
