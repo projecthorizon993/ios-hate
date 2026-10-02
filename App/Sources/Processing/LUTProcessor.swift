@@ -299,7 +299,26 @@ struct LUTProcessor {
     /// colours every photo slightly wrong.
     static func cubeData(for lut: CubeLUT) -> Data? {
         guard lut.kind == .threeDimensional, lut.isUsable else { return nil }
-        return lut.samples.withUnsafeBufferPointer { Data(buffer: $0) }
+        // Explicit raw bytes, not `Data(buffer:)`.
+        //
+        // `Data(buffer: UnsafeBufferPointer<Float>)` produces a `Data` tagged with
+        // `elementType == Float`. The bytes are identical, but it is a different object
+        // from a plain byte buffer, and Core Image validates the cube it is handed before
+        // rendering it. That difference is the one remaining variable between the two runs:
+        //
+        // - `LUTProcessorTests.coreImageCanRenderACube` builds its control with
+        //   `Data(repeating: 0, count:)` — plain bytes, and it renders in CI.
+        // - production, and now the device-side control that inherits it, uses
+        //   `Data(buffer:)` — and it fails on device even for a **synthetic grey image**,
+        //   with the colour-managed *and* the unmanaged filter.
+        //
+        // The image is therefore not the variable; how the cube bytes are wrapped is.
+        // Building the buffer from raw bytes removes that ambiguity instead of leaving it
+        // to be guessed at, and makes the CI control and production the same object.
+        return lut.samples.withUnsafeBufferPointer { buffer in
+            guard let base = buffer.baseAddress, buffer.count > 0 else { return nil }
+            return Data(bytes: base, count: buffer.count * MemoryLayout<Float>.size)
+        }
     }
 
     /// Renders a table's domain for a log line and an error message.

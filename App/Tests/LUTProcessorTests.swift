@@ -346,8 +346,14 @@ final class LUTProcessorTests: XCTestCase {
         cube.colorSpace = ColorSpace.sRGB.cgColorSpace
         cube.inputImage = flat
         cube.cubeDimension = 2
-        // A 2-cubed table of black, which is the smallest buffer the filter accepts.
-        cube.cubeData = Data(repeating: 0, count: 2 * 2 * 2 * 3 * 4)
+        // The buffer now comes from **production**, not from `Data(repeating: 0, count:)`.
+        //
+        // That is the point. The old control hand-built its own bytes, so it was never
+        // testing `cubeData(for:)` — and on device that function's `Data(buffer:)`
+        // wrapper was the one remaining difference between a cube that rendered in CI and
+        // one that returned `nil` everywhere, including for a synthetic grey image. A
+        // control that does not share the suspect code cannot rule the suspect out.
+        cube.cubeData = LUTProcessor.cubeData(for: makeTable(size: 2)) ?? Data()
         cube.extrapolate = false
         return cube.outputImage != nil
     }

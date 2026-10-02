@@ -386,26 +386,37 @@ final class CaptureSessionController: NSObject {
     /// `CameraViewModel.reportCameraSource` records `fallback=` and `minFocus=` so the next
     /// device run confirms or refutes that reading rather than relying on it.
     ///
-    /// `setPrimaryConstituentDeviceSwitchingBehavior(.restricted, …)` with an **empty**
-    /// condition set is the documented way to disallow fallback selection. Per Apple, a
-    /// zoom change still re-selects the primary constituent on its own — omitting
-    /// `videoZoomChanged` "still allows camera selection when a change in video zoom factor
-    /// makes a camera eligible" — so Apple keeps choosing the *longest* lens that fits the
-    /// requested zoom. Only the downgrade to a shorter lens is refused.
+    /// `setPrimaryConstituentDeviceSwitchingBehavior(.restricted, …)` with **no** conditions
+    /// is the documented way to disallow fallback selection. It was previously applied with
+    /// an empty condition set, on the reasoning — asserted only in this comment, never
+    /// verified — that "a zoom change still re-selects the primary constituent on its own".
     ///
-    /// The tradeoff, stated plainly rather than hidden: a subject closer than the
-    /// telephoto's minimum focus distance now stays on the telephoto and can come out soft,
-    /// where before iOS silently protected the shot by going wide. That is the correct
-    /// default for a camera app with explicit lens chips, because the alternative is a lens
-    /// the user did not choose — but it is a real behaviour change and it is logged so a
-    /// soft frame can be traced to this decision.
+    /// ## That reasoning was wrong, and the log now proves it
+    ///
+    /// With an empty condition set the device accepted `.restricted` (the read-back
+    /// reported `restricted`, so no warning fired) and then refused to move off the wide at
+    /// 4x. The settled report separates the two things that had been conflated:
+    ///
+    ///     zoom -> 4.080x asked 4.0x, switch points [2.0, 4.0]
+    ///     settled: lens=Wide zoom=4.080x asked=4.080x target=4.0x landed
+    ///
+    /// The factor reached 4.080 — past the 4.0 switch-over point — and `landed`. So the
+    /// 2% overshoot did its job and the zoom code is not at fault. The constituent stayed
+    /// `Wide` anyway. An empty restricted set stops *every* re-selection the app did not
+    /// explicitly ask for, zoom changes included, which is the opposite of what the comment
+    /// claimed and the opposite of what a user tapping a 4x chip expects.
+    ///
+    /// `.videoZoomChanged` is Apple's condition for "the zoom factor changed", so passing it
+    /// restores zoom-driven re-selection while still refusing the silent downgrade to a
+    /// shorter lens that the empty set was there to prevent. The intent of the original
+    /// change is kept; only the over-broad part is removed.
     ///
     /// Not applicable to a physical device, which has no constituents to switch between.
     private func restrictPrimaryConstituentFallback(on device: AVCaptureDevice) {
         guard device.isVirtualDevice else { return }
         if let failure = LumaFrameSafety.perform({
             device.setPrimaryConstituentDeviceSwitchingBehavior(
-                .restricted, restrictedSwitchingBehaviorConditions: [])
+                .restricted, restrictedSwitchingBehaviorConditions: [.videoZoomChanged])
         }) {
             AppLog.warn(AppLog.camera,
                         "lens fallback could not be restricted: \(failure)")
@@ -417,7 +428,7 @@ final class CaptureSessionController: NSObject {
         let conditions = device.primaryConstituentDeviceRestrictedSwitchingBehaviorConditions
         AppLog.note(AppLog.camera,
                     "lens fallback restricted: behavior=\(applied.rawValue) "
-                    + "conditions=\(conditions.rawValue)")
+                    + "conditions=\(conditions.rawValue) zoomChangedAllowed=true")
         if applied != .restricted {
             AppLog.warn(AppLog.camera,
                         "lens fallback still \(applied.rawValue) after being set to restricted")
