@@ -782,6 +782,36 @@ final class CaptureSessionController: NSObject {
         default: return "another app"
         }
     }
+
+    /// Logs every hand-over between the physical lenses of a virtual device.
+    ///
+    /// `activePrimaryConstituent` is documented as key-value observable and as changing
+    /// "when zoom, exposure, or focus changes", so this catches the composite switching
+    /// sensors underneath a zoom ramp — the thing the user could see happening and the log
+    /// could previously only misreport.
+    ///
+    /// The handler is called on whatever thread KVO delivers on, so it only logs; nothing
+    /// is published from here, because the readout is refreshed from the same property on
+    /// its own timer.
+    private func observeActiveConstituent(_ device: AVCaptureDevice) {
+        // Only virtual devices have one, and Apple documents `nil` for everything else, so
+        // there is nothing to watch and nothing to say.
+        guard device.isVirtualDevice else {
+            constituentObservation = nil
+            return
+        }
+        constituentObservation = device.observe(\.activePrimaryConstituent) { device, change in
+            let name = change.newValue?.lensName ?? "single"
+            AppLog.note(AppLog.camera,
+                        "sensor hand-over: now \(name) "
+                        + "(bound \(device.deviceType.rawValue), "
+                        + "zoom \(String(format: "%.3f", device.videoZoomFactor))x)")
+        }
+        let initial = device.activePrimaryConstituent?.lensName ?? "single"
+        AppLog.note(AppLog.camera,
+                    "sensor initial: \(initial) on \(device.deviceType.rawValue)")
+    }
+
 }
 
 // MARK: - Errors
@@ -816,39 +846,9 @@ enum CameraError: LocalizedError, Equatable {
             return "The capture session would not start: \(reason)"
         }
     }
-
-/// Logs every hand-over between the physical lenses of a virtual device.
-    ///
-    /// `activePrimaryConstituent` is documented as key-value observable and as changing
-    /// "when zoom, exposure, or focus changes", so this catches the composite switching
-    /// sensors underneath a zoom ramp — the thing the user could see happening and the log
-    /// could previously only misreport.
-    ///
-    /// The handler is called on whatever thread KVO delivers on, so it only logs; nothing
-    /// is published from here, because the readout is refreshed from the same property on
-    /// its own timer.
-    private func observeActiveConstituent(_ device: AVCaptureDevice) {
-        // Only virtual devices have one, and Apple documents `nil` for everything else, so
-        // there is nothing to watch and nothing to say.
-        guard device.isVirtualDevice else {
-            constituentObservation = nil
-            return
-        }
-        constituentObservation = device.observe(\.activePrimaryConstituent) { device, change in
-            let name = change.newValue?.lensName ?? "single"
-            AppLog.note(AppLog.camera,
-                        "sensor hand-over: now \(name) "
-                        + "(bound \(device.deviceType.rawValue), "
-                        + "zoom \(String(format: "%.3f", device.videoZoomFactor))x)")
-        }
-        let initial = device.activePrimaryConstituent?.lensName ?? "single"
-        AppLog.note(AppLog.camera,
-                    "sensor initial: \(initial) on \(device.deviceType.rawValue)")
-    }
-
 }
 
-    // MARK: - Discovery
+// MARK: - Discovery
 
 /// Discovery shared by the session, the capability model and the report, so none of them
 /// can enumerate a different device set or a different order.
