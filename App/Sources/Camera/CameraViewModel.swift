@@ -611,6 +611,23 @@ final class CameraViewModel: ObservableObject {
         // `nil` for a nonvirtual device is the documented, correct value — not an absence
         // of information — so it is reported as `single` rather than as unknown.
         let lens = device.activePrimaryConstituent?.deviceType.rawValue ?? "single"
+        // Why this lens, and not a longer one. Apple documents that the composite chooses
+        // the primary constituent itself: "primarily using a camera's focal length…
+        // Secondary conditions are focus and exposure", and a camera that cannot focus or
+        // expose well becomes a *fallback* primary constituent instead.
+        //
+        // The user reported 1x on the ultra wide, 2x on the wide, and the telephoto never
+        // reached even at 4x. The most likely reason is the documented fallback: this device
+        // reports a telephoto minimum focus distance of 400 — Apple's own worked example is
+        // 40 cm — so a close subject keeps iOS on the wide. That is a hypothesis, and these
+        // three values are what confirm or kill it rather than a comment asserting it.
+        let fallback = device.fallbackPrimaryConstituentDevices
+            .map { BackCameraCapabilities.kind(of: $0.deviceType).rawValue }
+            .joined(separator: "/")
+        let minimumFocus = device.constituentDevices
+            .map { BackCameraCapabilities.kind(of: $0.deviceType).rawValue
+                 + ":" + String(format: "%.0f", Double($0.minimumFocusDistance)) }
+            .joined(separator: " ")
         AppLog.note(AppLog.camera,
                     "camera source: lens=\(lens) "
                     + "bound=\(device.deviceType.rawValue) "
@@ -619,7 +636,10 @@ final class CameraViewModel: ObservableObject {
                     + "zoom=\(String(format: "%.3f", device.videoZoomFactor))x "
                     + "range=\(String(format: "%.2g", device.minAvailableVideoZoomFactor))"
                     + "…\(String(format: "%.2g", device.maxAvailableVideoZoomFactor)) "
-                    + "switchOver=\(points.isEmpty ? "none" : points)")
+                    + "switchOver=\(points.isEmpty ? "none" : points) "
+                    + "switching=\(device.activePrimaryConstituentDeviceSwitchingBehavior.rawValue) "
+                    + "fallback=\(fallback.isEmpty ? "none" : fallback) "
+                    + "minFocus(\(minimumFocus.isEmpty ? "none" : minimumFocus))")
     }
 
     /// The request is derived from capabilities, never from a stored preference, so a

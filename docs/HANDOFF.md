@@ -104,7 +104,7 @@ all four construction sites state the space.
 
 ---
 
-## 4. PHASE 1 — put it on a phone — **NOT STARTED**
+## 4. PHASE 1 — put it on a phone — **IN PROGRESS**
 
 **This phase has never happened. It is the most valuable thing you can do and it needs no
 new code.** Produce a written record; that artefact does not exist and is worth more than
@@ -210,6 +210,8 @@ Carried from a review. Do not treat these as done.
 | --- | --- |
 | **`docs/HANDOFF.md`** | **this file — the entry point** |
 | `docs/PHASES.md` | phase rationale and the history of why the parallel model was dropped |
+| `docs/device-record-01.md` | first device run: the capture blocker, the empty photo codec list |
+| `docs/device-record-02.md` | second run: why 1x is the ultra wide and 4x never reaches the telephoto |
 | `docs/IOS_PLAN.md` | the three live defects, the wide device matrix, the open-source survey |
 | `docs/ARCHITECTURE.md` | platform contract: Step-1 decisions, Android rules, repository topology |
 | `docs/DESIGN_SPEC.md` | visual tokens; unchanged and authoritative for the UI |
@@ -250,6 +252,29 @@ and `supportedFallbackPrimaryConstituentDevices`.
 Because it is key-value observable, a lens hand-over can be logged **when it happens**,
 which is what caught the user's report that the viewfinder was on the ultra wide while the
 app said otherwise.
+
+### Correction 3: the composite chooses the lens, and can silently refuse to
+
+`activePrimaryConstituent` answers *which* lens is active. These answer *why that one*:
+
+```swift
+var activePrimaryConstituentDeviceSwitchingBehavior: PrimaryConstituentDeviceSwitchingBehavior
+var primaryConstituentDeviceRestrictedSwitchingBehaviorConditions:
+    PrimaryConstituentDeviceRestrictedSwitchingBehaviorConditions
+var fallbackPrimaryConstituentDevices: [AVCaptureDevice]
+var constituentDevices: [AVCaptureDevice]
+```
+
+> "when the scene requires focus or exposure to go beyond the limits of the active primary
+> constituent device, a camera with a shorter focal length may be able to deliver a better
+> quality image. The system considers such a device a **fallback** primary constituent
+> device."
+
+This is why "4x still shows the wide" is not a zoom bug — see `docs/device-record-02.md`. The
+telephoto becomes eligible and iOS declines it on focus or exposure grounds, with
+`minAvailableVideoZoomFactor` and the switch points both reporting correctly throughout.
+Reading `activePrimaryConstituent` alone would have shown a *correct* `wide` at 4x and left the
+behaviour unexplained; the fallback properties are what make it explicable.
 
 ### The pattern, which is the point
 

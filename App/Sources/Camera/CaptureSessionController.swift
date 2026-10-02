@@ -361,7 +361,67 @@ final class CaptureSessionController: NSObject {
         // is captured. Writing it here would make the badge claim something it cannot
         // deliver. See docs/ARCHITECTURE.md section 2.4.
 
+        restrictPrimaryConstituentFallback(on: device)
+
         return device.activeFormat
+    }
+
+    /// Stops iOS quietly abandoning the lens the user asked for.
+    ///
+    /// Observed on an iPhone 11 Pro: 1x showed the **ultra wide**, 2x the **wide**, and 4x
+    /// was *still* the wide — the telephoto was never reached. That is not a zoom-range
+    /// problem, because the device reported switch points at 2.0 and 4.0.
+    ///
+    /// Apple documents the actual cause: "when the scene requires focus or exposure to go
+    /// beyond the limits of the active primary constituent device, a camera with a shorter
+    /// focal length may be able to deliver a better quality image. The system considers
+    /// such a device a fallback primary constituent device… a telephoto camera with a
+    /// minimum focus distance of 40 cm isn't able to deliver a sharp image when the subject
+    /// in the scene is closer than 40 cm. For such a scene, the virtual device switches to
+    /// the wide-angle camera."
+    ///
+    /// This device reports a telephoto minimum focus distance of 400 — Apple's own worked
+    /// example, in tenths of a millimetre. So on a close subject iOS keeps dropping to the
+    /// wide, and a photo taken at "4x" is really a wide-lens photo. The log line in
+    /// `CameraViewModel.reportCameraSource` records `fallback=` and `minFocus=` so the next
+    /// device run confirms or refutes that reading rather than relying on it.
+    ///
+    /// `setPrimaryConstituentDeviceSwitchingBehavior(.restricted, …)` with an **empty**
+    /// condition set is the documented way to disallow fallback selection. Per Apple, a
+    /// zoom change still re-selects the primary constituent on its own — omitting
+    /// `videoZoomChanged` "still allows camera selection when a change in video zoom factor
+    /// makes a camera eligible" — so Apple keeps choosing the *longest* lens that fits the
+    /// requested zoom. Only the downgrade to a shorter lens is refused.
+    ///
+    /// The tradeoff, stated plainly rather than hidden: a subject closer than the
+    /// telephoto's minimum focus distance now stays on the telephoto and can come out soft,
+    /// where before iOS silently protected the shot by going wide. That is the correct
+    /// default for a camera app with explicit lens chips, because the alternative is a lens
+    /// the user did not choose — but it is a real behaviour change and it is logged so a
+    /// soft frame can be traced to this decision.
+    ///
+    /// Not applicable to a physical device, which has no constituents to switch between.
+    private func restrictPrimaryConstituentFallback(on device: AVCaptureDevice) {
+        guard device.isVirtualDevice else { return }
+        if let failure = LumaFrameSafety.perform({
+            device.setPrimaryConstituentDeviceSwitchingBehavior(
+                .restricted, restrictedSwitchingBehaviorConditions: [])
+        }) {
+            AppLog.warn(AppLog.camera,
+                        "lens fallback could not be restricted: \(failure)")
+            return
+        }
+        // Read back rather than assume: a device that accepted the call but stayed on
+        // `.auto` would silently reintroduce the fallback this is meant to prevent.
+        let applied = device.primaryConstituentDeviceSwitchingBehavior
+        let conditions = device.primaryConstituentDeviceRestrictedSwitchingBehaviorConditions
+        AppLog.note(AppLog.camera,
+                    "lens fallback restricted: behavior=\(applied.rawValue) "
+                    + "conditions=\(conditions.rawValue)")
+        if applied != .restricted {
+            AppLog.warn(AppLog.camera,
+                        "lens fallback still \(applied.rawValue) after being set to restricted")
+        }
     }
 
     /// The capture-mode setters on `AVCaptureDevice` are plain properties, not throwing
