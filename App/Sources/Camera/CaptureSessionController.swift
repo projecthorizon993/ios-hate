@@ -801,9 +801,14 @@ final class CaptureSessionController: NSObject {
             return
         }
         constituentObservation = device.observe(\.activePrimaryConstituent) { device, change in
-            let name = change.newValue?.lensName ?? "single"
+            // The key path's own type is `AVCaptureDevice?`, so `change.newValue` arrives
+            // as `Any?` wrapping a *double* optional — `.some(nil)` when the device is not
+            // virtual or has no active constituent, which is not the same as no change at
+            // all. Casting through flattens it and both cases read as "single", which is
+            // what a nil constituent means.
+            let active = change.newValue as? AVCaptureDevice
             AppLog.note(AppLog.camera,
-                        "sensor hand-over: now \(name) "
+                        "sensor hand-over: now \(active?.lensName ?? "single") "
                         + "(bound \(device.deviceType.rawValue), "
                         + "zoom \(String(format: "%.3f", device.videoZoomFactor))x)")
         }
