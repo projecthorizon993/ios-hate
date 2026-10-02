@@ -623,8 +623,32 @@ struct PreviewView: UIViewRepresentable {
         private var lastAppliedAngle: CGFloat?
         private var lastMirrored: Bool?
 
+        /// Hands over the layer, and forgets anything previously applied.
+        ///
+        /// ## Why the caches are cleared here
+        ///
+        /// `lastAppliedAngle` and `lastMirrored` record what was written to **a
+        /// connection**, not to a layer. They exist so `apply` does not rewrite the
+        /// connection on every SwiftUI update, and they were doing that job — but the
+        /// Coordinator outlives a lens flip, so after `back -> front -> back` they still
+        /// described the connection from two flips ago.
+        ///
+        /// A freshly connected `AVCaptureConnection` starts at
+        /// `videoRotationAngle == 0` and unmirrored. So whenever the incoming angle happened
+        /// to equal the cached one, the `if rotationAngle != lastAppliedAngle` guard below
+        /// skipped the write and left the new connection at 0 — the raw sensor orientation,
+        /// which for the front camera in portrait is exactly upside down. Same for mirroring:
+        /// returning to the front camera with `lastMirrored` already `true` meant the mirror
+        /// was never written to the new connection.
+        ///
+        /// That is the whole defect: a cache that outlives the thing it caches. Comparing by
+        /// identity keeps the optimisation for the common case (same layer, many updates) and
+        /// resets only when the layer genuinely changes.
         func attach(_ layer: AVCaptureVideoPreviewLayer) {
+            guard self.layer !== layer else { return }
             self.layer = layer
+            lastAppliedAngle = nil
+            lastMirrored = nil
         }
 
         /// Rotation and mirroring are applied together and never drift apart: the front

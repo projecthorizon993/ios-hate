@@ -447,4 +447,32 @@ final class LUTProcessorTests: XCTestCase {
             )
         }
     }
+
+    /// The one test in this file that needs **no Core Image at all**, so it cannot be skipped
+    /// and cannot be skipped *accidentally*.
+    ///
+    /// `testEveryShippedLookActuallyApplies` is guarded by `coreImageCanRenderACube()`. If
+    /// that guard ever reads false, the only test that would notice a broken shipped table
+    /// quietly stops running and the suite stays green — which is precisely the blind spot
+    /// that hid the missing-`extrapolate` bug in the first place. `GeneratedLooks.clamp01`
+    /// does not survive `NaN`, so a single non-finite sample is a plausible way to reach it.
+    ///
+    /// This asserts the precondition directly: every float of every shipped table is finite
+    /// and inside 0…1. Cheap, unconditional, and it fails loudly rather than vanishing.
+    func testEveryShippedTableIsFiniteAndInRangeWithoutCoreImage() throws {
+        for which in Look.Generated.allCases {
+            let table = try XCTUnwrap(GeneratedLooks.table(for: which),
+                                      "\(which) should generate a usable table")
+
+            XCTAssertFalse(
+                table.samples.contains { !$0.isFinite },
+                "\(which) contains a non-finite sample; clamp01 propagates NaN, "
+                + "and one bad sample can make the whole cube unusable"
+            )
+            XCTAssertFalse(
+                table.samples.contains { $0 < 0 || $0 > 1 },
+                "\(which) has a sample outside 0…1, which CIColorCube does not clamp"
+            )
+        }
+    }
 }

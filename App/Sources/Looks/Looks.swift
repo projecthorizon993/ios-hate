@@ -400,8 +400,22 @@ enum GeneratedLooks {
 
     /// Samples must land inside 0…1. `CIColorCube` does not clamp, and an out-of-range
     /// table produces a black or blown frame rather than an error.
+    ///
+    /// ## Why `isFinite` and not just the two comparisons
+    ///
+    /// `max(x, 0)` is defined as `0 >= x ? 0 : x`. Every comparison against `NaN` is
+    /// `false`, so both halves hand `NaN` straight back and `min(max(NaN, 0), 1)` is `NaN`.
+    /// A single non-finite sample therefore poisons all 14739 floats in a 17-cubed table and
+    /// Core Image is entitled to refuse the whole thing — which is one of the few ways a
+    /// generated look can produce `nil` from `outputImage` without anything being
+    /// misconfigured.
+    ///
+    /// Non-finite input can reach here from arithmetic in a generator (`pow` of a negative
+    /// base, a division that can hit zero), so it is treated as an out-of-range value and
+    /// pulled to the nearest bound rather than passed through.
     private static func clamp01(_ value: Float) -> Float {
-        min(max(value, 0), 1)
+        guard value.isFinite else { return value.isNaN ? 0 : (value > 0 ? 1 : 0) }
+        return min(max(value, 0), 1)
     }
 }
 

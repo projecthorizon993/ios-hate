@@ -592,8 +592,61 @@ final class CameraViewModel: ObservableObject {
                     "zoom -> \(String(format: "%.3f", honoured))x asked "
                     + "\(String(format: "%.1f", destination))x, switch points "
                     + "\(capabilities.plan.bound?.switchOverZoomFactors ?? [])")
+        reportSettledLens(afterAsking: honoured, for: destination, device: device)
         refreshReadout()
     }
+
+    /// Reports which physical lens the device **settled on**, once the ramp is over.
+    ///
+    /// ## Why this had to be added
+    ///
+    /// Every lens line in the log came from the KVO on `activePrimaryConstituent`, which
+    /// reports *transitions*. Apple documents that constituent as `nil` for the duration of a
+    /// switch, so the log's own hand-over lines read:
+    ///
+    ///     zoom -> 4.080x asked 4.0x, switch points [2.0, 4.0]
+    ///     sensor hand-over: now single (bound …TripleCamera, zoom 4.080x)
+    ///
+    /// `now single` there means "constituent is mid-transition", not "stuck on the wide".
+    /// Nothing in the log ever said what the device came to rest on, so "4x reached the
+    /// telephoto" and "4x stayed wide" produced near-identical logs and every attempt to
+    /// read them back was guesswork.
+    ///
+    /// The settled value is read after the ramp plus a settling delay, and it reports the
+    /// factor the device is *actually* at rather than the one that was requested — because
+    /// those differing is itself the answer.
+    ///
+    /// The delay is a heuristic: nothing notifies "the ramp finished". It is long enough for
+    /// the slowest observed hand-over in the device log (~0.6 s after the request) and short
+    /// enough not to overlap the next tap. If a run ever reports a stale factor, this delay
+    /// is the first thing to raise, not the ramp.
+    private func reportSettledLens(afterAsking asked: CGFloat,
+                                   for destination: CGFloat,
+                                   device: AVCaptureDevice) {
+        let settled = Self.settleDelay
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(settled))
+            guard let self else { return }
+            let lens = device.activePrimaryConstituent?.lensName ?? "single"
+            let actual = device.videoZoomFactor
+            // The requested factor is what the user asked for; `actual` is what the hardware
+            // did. They differ when a ramp is clamped or refused, which is exactly when a
+            // chip reads as selected but the frame does not change.
+            let agrees = abs(actual - asked) < 0.01
+            AppLog.note(AppLog.camera,
+                        "settled: lens=\(lens) "
+                        + "zoom=\(String(format: "%.3f", actual))x "
+                        + "asked=\(String(format: "%.3f", asked))x "
+                        + "target=\(String(format: "%.1f", destination))x "
+                        + "\(agrees ? "landed" : "DID NOT LAND on request")")
+        }
+    }
+
+    /// How long after a zoom request the settled lens is reported.
+    ///
+    /// `nonisolated` because this type is `@MainActor` and the value is a constant with no
+    /// actor state, matching `switchOverMargin`.
+    nonisolated static let settleDelay: Double = 0.9
 
     /// How far past a reported switch-over point to ask for.
     ///

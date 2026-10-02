@@ -183,7 +183,7 @@ struct LUTProcessor {
 
         guard let graded = cube.outputImage else {
             AppLog.fail(AppLog.processing, Self.describeNilOutput(
-                image: image, space: lutSpace, dimension: lut.size, bytes: cubeData.count))
+                image: image, space: lutSpace, dimension: lut.size, cubeData: cubeData))
             throw LUTApplicationError.notUsable(reason: "CIColorCubeWithColorSpace produced no output")
         }
 
@@ -229,26 +229,65 @@ struct LUTProcessor {
     private static func describeNilOutput(image: CIImage,
                                           space: ColorSpace,
                                           dimension: Int,
-                                          bytes: Int) -> String {
-        // `CIImage(color:)` is what the passing CI test uses, so it is the control that is
-        // already known to work headless — not an arbitrary second guess.
+                                          cubeData: Data) -> String {
+        // ## The bug in the first version of this diagnostic
+        //
+        // The original control set `colorSpace`, `inputImage`, `cubeDimension` and
+        // `extrapolate` — but **not** `cubeData`. A `CIColorCubeWithColorSpace` with no cube
+        // is not a smaller or degraded render, it is a filter that fails its own validation,
+        // so `outputImage` was guaranteed to be `nil`:
+        //
+        //     controlSynthesisedImage=also produced none
+        //
+        // That line was read as "the filter itself is broken on device". It was not evidence
+        // of anything. It is the same mistake this file already records twice: a diagnostic
+        // that was never itself checked, whose conclusion was written down as fact.
+        //
+        // The control is now the *only* thing here that is trustworthy, so it is built to be
+        // identical to the filter that just failed: same cube, same dimension, same colour
+        // space, same `extrapolate`, with the **real** image swapped for a synthetic one.
         let control = CIFilter.colorCubeWithColorSpace()
         control.colorSpace = space.cgColorSpace
         control.inputImage = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
-            .cropped(to: image.extent.isInfinite
+            .cropped(to: image.extent.isInfinite || image.extent.isEmpty
                      ? CGRect(x: 0, y: 0, width: 4, height: 4)
                      : image.extent)
         control.cubeDimension = Float(dimension)
+        control.cubeData = cubeData
         control.extrapolate = false
         let controlProducedOutput = control.outputImage != nil
+
+        // ## The second discriminator: colour management, not the cube
+        //
+        // If the control above produces output while the real image does not, the cube is
+        // fine and the *image* is at fault. The leading candidate is that a `CIImage` built
+        // from a camera `CVPixelBuffer` carries no colour space, and a colour-managed cube
+        // has nothing to convert *from*.
+        //
+        // `CIColorCube` is the same lookup with no `colorSpace` input at all, so it isolates
+        // that question in one run instead of two:
+        //
+        // - both fail → neither the cube nor colour management explains it; the cube data or
+        //   the platform is at fault.
+        // - colour-managed works, plain works, real image fails → the image.
+        // - colour-managed fails, plain works → **colour management is the cause**, and the
+        //   fix is an explicit, logged sRGB conversion applied *before* the cube, not a
+        //   filter swap.
+        let unmanaged = CIFilter.colorCube()
+        unmanaged.inputImage = image
+        unmanaged.cubeDimension = Float(dimension)
+        unmanaged.cubeData = cubeData
+        unmanaged.extrapolate = false
+        let unmanagedProducedOutput = unmanaged.outputImage != nil
 
         let extent = image.extent
         return """
         cube produced no output; LUT not applied
-        inputs: space=\(space.name) dimension=\(dimension) bytes=\(bytes)
+        inputs: space=\(space.name) dimension=\(dimension) bytes=\(cubeData.count)
         image: extent=\(extent) infinite=\(extent.isInfinite) \
-        empty=\(extent.isEmpty) \
-        controlSynthesisedImage=\(controlProducedOutput ? "produced output" : "also produced none")
+        empty=\(extent.isEmpty)
+        controlSynthesisedImage=\(controlProducedOutput ? "produced output" : "also produced none") \
+        plainCubeSameImage=\(unmanagedProducedOutput ? "produced output" : "also produced none")
         """
     }
 
