@@ -182,17 +182,18 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
         default: return .unknown
         }
     }
+}
 
-    /// The lens name for a **constituent** device of a virtual device.
-    ///
-    /// Read from `activePrimaryConstituent`, so this is a reported fact. `Kind` maps all
-    /// three composite types to one value, which is why the constituent's own
-    /// `deviceType` is what gets shown — the composite is the container, not the lens.
-    ///
-    /// A nonvirtual device has no constituent and so never reaches here; the readout shows
-    /// nothing in that case rather than claiming a lens that does not exist as a separate
-    /// object.
-    var lensName: String { kind(of: deviceType).zoomLabel }
+/// The display name for a device's own lens.
+///
+/// Used on `AVCaptureDevice.activePrimaryConstituent`, which is an `AVCaptureDevice` and not
+/// a `BackCameraCapabilities`, so this is on the device rather than on the snapshot type.
+///
+/// A **reported** fact, not an inference. Three inferences were tried before this and all
+/// three were wrong; see `docs/HANDOFF.md`. The composite itself maps to `Kind.composite`,
+/// which is the container rather than a lens, so it never appears here.
+extension AVCaptureDevice {
+    var lensName: String { BackCameraCapabilities.kind(of: deviceType).zoomLabel }
 }
 
 /// The one place that decides which back camera the session binds and which lenses the

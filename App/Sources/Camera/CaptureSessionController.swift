@@ -816,7 +816,6 @@ enum CameraError: LocalizedError, Equatable {
             return "The capture session would not start: \(reason)"
         }
     }
-}
 
 /// Logs every hand-over between the physical lenses of a virtual device.
     ///
@@ -846,6 +845,8 @@ enum CameraError: LocalizedError, Equatable {
         AppLog.note(AppLog.camera,
                     "sensor initial: \(initial) on \(device.deviceType.rawValue)")
     }
+
+}
 
     // MARK: - Discovery
 

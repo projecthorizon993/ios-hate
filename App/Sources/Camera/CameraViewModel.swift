@@ -655,9 +655,14 @@ final class CameraViewModel: ObservableObject {
         // `single` rather than a blank, because a file that cannot say is better than one
         // that guesses. On a nonvirtual device `activePrimaryConstituent` is documented as
         // `nil`, and the only lens is the bound device's own type.
-        metadata.lensKind = sessionController.configuration?.device.map { bound in
-            bound.activePrimaryConstituent?.deviceType.rawValue ?? bound.deviceType.rawValue
-        } ?? "unknown"
+        if let bound = sessionController.configuration?.device {
+            // `nil` from `activePrimaryConstituent` is documented for a nonvirtual device,
+            // and there the bound device's own type *is* the lens — one lens, no composite.
+            metadata.lensKind = bound.activePrimaryConstituent?.deviceType.rawValue
+                ?? bound.deviceType.rawValue
+        } else {
+            metadata.lensKind = "unknown"
+        }
         metadata.zoomFactor = Double(readout.zoomFactor)
         metadata.frontCamera = facing == .front
         metadata.colorSpace = capabilities.wideGamut ? "display-p3" : "srgb"
