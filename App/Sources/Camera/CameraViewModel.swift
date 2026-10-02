@@ -500,7 +500,11 @@ final class CameraViewModel: ObservableObject {
         // clamps. So the clamp happens here rather than being left to raise.
         let lower = max(1, device.minAvailableVideoZoomFactor)
         let upper = max(lower, device.maxAvailableVideoZoomFactor)
-        let switchOver = device.virtualDeviceSwitchOverVideoZoomFactors
+        // Read from the plan rather than from `device.virtualDeviceSwitchOverVideoZoomFactors`
+        // directly. Same numbers — the plan captured them at discovery — but already
+        // de-duplicated, sorted and typed `[Double]`, so this call site does not depend on
+        // how the Objective-C array bridges into Swift.
+        let switchOver = capabilities.plan.bound?.switchOverZoomFactors ?? []
 
         // "Is this the chip I am already on" has to be a **band** question, not an equality
         // one, because the camera now settles just past a switch-over point. Comparing the
