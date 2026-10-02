@@ -1,15 +1,26 @@
 import CoreImage
+// `CIFilterBuiltins`, for `CIFilter.colorCubeWithColorSpace()` in the helper below. It is
+// needed in the test for the same reason it is needed in `LUTProcessor`: without the import
+// the typed accessor does not resolve.
+import CoreImage.CIFilterBuiltins
 import XCTest
 @testable import LumaFrame
 
 /// Step 2's apply stage.
 ///
 /// What is asserted here is the decisions: what is refused, what is a no-op, and the
-/// cube byte order. Rendering is not — Core Image returns no output in the headless CI
-/// simulator even for a filter it accepts, so the tests that need a rendered result skip
-/// there and are carried by the on-device checklist in `docs/ARCHITECTURE.md`
-/// section 4. That is the same line this file has always drawn: pixels are a device
-/// claim, decisions are a CI claim.
+/// cube byte order. Rendering is not, in the sense that no pixel value is compared — but
+/// whether the filter **produces an output at all** is asserted, and that assertion used to
+/// be disabled by a skip that was measuring this app's own wiring rather than the platform.
+///
+/// **The skip that hid a release bug.** `coreImageCanRenderACube()` built the cube filter
+/// with four of its five required inputs, got `nil`, concluded that "headless Core Image
+/// returns no output for CIColorCubeWithColorSpace", and skipped the only two tests that
+/// would have caught the missing input. Meanwhile the app shipped with that same missing
+/// input, so on a device every look silently did nothing and the intensity slider changed
+/// nothing. The skip reason was quoted as evidence in `docs/ARCHITECTURE.md` section 4.
+/// The helper is now built with the same typed accessor production uses, so the skip can
+/// only fire for a real platform limitation.
 ///
 /// **Filter availability is a CI claim, and is asserted here.** Whether
 /// `CIColorCubeWithColorSpace` resolves is a fact about the platform, it holds in a
@@ -317,14 +328,27 @@ final class LUTProcessorTests: XCTestCase {
     /// `LUTProcessor` look credible in the first place — **the filter resolving and the
     /// filter rendering are separate questions, and only the first is answerable here.**
     private func coreImageCanRenderACube() -> Bool {
-        guard let cube = CIFilter(name: Self.filterName) else { return false }
+        // This helper used to build the filter with the same four inputs `LUTProcessor`
+        // used and no `extrapolate`, get `nil` back for exactly the reason production did,
+        // and then conclude that headless Core Image cannot render this filter. That
+        // conclusion became `XCTSkipUnless` guards on the only two tests that would have
+        // caught the real bug, and was cited in `docs/ARCHITECTURE.md` section 4 as though
+        // it were a platform fact.
+        //
+        // So this now asks the question honestly: can a **fully configured** filter —
+        // every one of its five required properties set, which is what the typed accessor
+        // guarantees in production — produce an output? If it can, the tests below run for
+        // real in CI. If it genuinely cannot, the skip stands, but it is now measuring the
+        // platform instead of measuring this app's own wiring.
+        let cube = CIFilter.colorCubeWithColorSpace()
         let flat = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
-        cube.setValue(ColorSpace.sRGB.cgColorSpace, forKey: "inputColorSpace")
-        cube.setValue(flat.cropped(to: CGRect(x: 0, y: 0, width: 4, height: 4)),
-                      forKey: kCIInputImageKey)
-        cube.setValue(Float(2), forKey: "inputCubeDimension")
+            .cropped(to: CGRect(x: 0, y: 0, width: 4, height: 4))
+        cube.colorSpace = ColorSpace.sRGB.cgColorSpace
+        cube.inputImage = flat
+        cube.cubeDimension = 2
         // A 2-cubed table of black, which is the smallest buffer the filter accepts.
-        cube.setValue(Data(repeating: 0, count: 2 * 2 * 2 * 3 * 4), forKey: "inputCubeData")
+        cube.cubeData = Data(repeating: 0, count: 2 * 2 * 2 * 3 * 4)
+        cube.extrapolate = false
         return cube.outputImage != nil
     }
 
@@ -334,8 +358,8 @@ final class LUTProcessorTests: XCTestCase {
     /// then, because GPU float rounding is not something to assert to the last bit.
     func testAppliesAUnitDomainTableToAnSRGBImage() throws {
         try XCTSkipUnless(coreImageCanRenderACube(),
-                          "headless Core Image returns no output for CIColorCubeWithColorSpace; "
-                          + "verified on device per docs/ARCHITECTURE.md section 4")
+                          "a fully configured CIColorCubeWithColorSpace produces no output here, "
+                          + "which would be a real platform limitation rather than this app's wiring")
         let table = makeTable(size: 2)
 
         let result = try processor.apply(table,
@@ -368,8 +392,8 @@ final class LUTProcessorTests: XCTestCase {
     /// above; this is the other half of the contract, that nothing *valid* is turned away.
     func testEveryIntensityInRangeIsAccepted() throws {
         try XCTSkipUnless(coreImageCanRenderACube(),
-                          "headless Core Image returns no output for CIColorCubeWithColorSpace; "
-                          + "verified on device per docs/ARCHITECTURE.md section 4")
+                          "a fully configured CIColorCubeWithColorSpace produces no output here, "
+                          + "which would be a real platform limitation rather than this app's wiring")
         let table = makeTable(size: 2)
         let image = makeTestImage()
 
@@ -394,5 +418,33 @@ final class LUTProcessorTests: XCTestCase {
         XCTAssertEqual(data.count,
                        CubeLUTParser.maximumSize * CubeLUTParser.maximumSize
                        * CubeLUTParser.maximumSize * 3 * 4)
+    }
+
+    /// The regression test for the bug that shipped: **every look the app actually offers**
+    /// must apply without throwing.
+    ///
+    /// The other tests here use a synthetic 2-cubed identity table. That was not enough,
+    /// because the shipped tables are a different size (17) built by `GeneratedLooks`, and
+    /// the failure only ever showed up as `outputImage == nil` — a throw — which the
+    /// synthetic path would have caught too had it not been sitting behind a skip.
+    ///
+    /// This deliberately does not compare pixels: it asserts the thing that was actually
+    /// broken, that a configured filter yields an image at all. A `nil` here means every
+    /// look is silently a no-op on device and the strength slider is inert.
+    func testEveryShippedLookActuallyApplies() throws {
+        try XCTSkipUnless(coreImageCanRenderACube(),
+                          "a fully configured CIColorCubeWithColorSpace produces no output here, "
+                          + "which would be a real platform limitation rather than this app's wiring")
+
+        let image = makeTestImage()
+
+        for which in Look.Generated.allCases {
+            let table = try XCTUnwrap(GeneratedLooks.table(for: which),
+                                      "\(which) should generate a usable table")
+            XCTAssertNoThrow(
+                try processor.apply(table, to: image, intensity: 1, imageSpace: .sRGB),
+                "\(which.displayName) must apply; a throw here means the look is a silent no-op"
+            )
+        }
     }
 }

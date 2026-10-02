@@ -1,4 +1,8 @@
 import CoreImage
+// Required for the typed accessors below — `CIFilterBuiltins`. Without it the accessor
+// does not resolve, which reads exactly like "the API does not exist". That misreading
+// is recorded in this file's history and cost CI runs.
+import CoreImage.CIFilterBuiltins
 import Foundation
 
 /// Applies a parsed lookup table to a `CIImage`.
@@ -21,12 +25,17 @@ struct LUTProcessor {
     /// The intensity range a caller may request.
     static let intensityRange: ClosedRange<Float> = 0...1
 
-    /// The filter the cube path uses. Named once, in the file that uses it.
+    /// The filter the cube path uses, by name. Named once, in the file that uses it.
     ///
     /// It was a bare literal at the `CIFilter(name:)` call site, and the test asserting the
     /// filter is available declared its own copy of the same string. A test that asserts a
     /// string it also owns cannot fail when the string changes, so reverting to the
-    /// invariant `CIColorCube` would have left CI green. Both now read this.
+    /// invariant `CIColorCube` would have left CI green.
+    ///
+    /// The filter is now **constructed** through the typed accessor, so the name is not a
+    /// construction key any more. It is still used for the availability check below, which
+    /// keeps the constant load-bearing in production and keeps the test guarding something
+    /// real — a constant that only the test reads is a constant nothing checks.
     static let colorManagedCubeFilterName = "CIColorCubeWithColorSpace"
 
     /// Applies `lut` to `image` in `imageSpace`.
@@ -107,47 +116,77 @@ struct LUTProcessor {
         // `Float` is not `UInt8`. The filter wants the raw 32-bit float bit patterns, so
         // the sample buffer is copied verbatim rather than converted.
         //
-        // Parameters are set one key at a time rather than handed over as a dictionary.
-        // `CIFilter(name:parameters:)` returns **nil** — with no error and no log — when
-        // any value has the wrong type, so a single wrong value is indistinguishable
-        // from a filter that does not exist. `setValue(_:forKey:)` instead raises
-        // NSInvalidArgumentException, which `LumaFrameSafety` converts to a string, and
-        // recording the key before each call means the message names the parameter that
-        // was refused. Four runs went into this filter being silently wrong; the point
-        // of setting them individually is that the next one is self-diagnosing.
-        var graded: CIImage?
-        var currentKey = "creating the filter"
-        let raised = LumaFrameSafety.perform {
-            guard let cube = CIFilter(name: Self.colorManagedCubeFilterName) else { return }
-
-            // Set before the image, so that a filter validating its arguments sees the
-            // space first. It is the one key `CIColorCube` does not have, which is exactly
-            // why passing it to that filter raised an uncatchable Objective-C exception.
-            currentKey = "inputColorSpace"
-            cube.setValue(lutSpace.cgColorSpace, forKey: "inputColorSpace")
-
-            currentKey = kCIInputImageKey
-            cube.setValue(image, forKey: kCIInputImageKey)
-
-            currentKey = "inputCubeDimension"
-            cube.setValue(Float(lut.size), forKey: "inputCubeDimension")
-
-            currentKey = "inputCubeData"
-            cube.setValue(cubeData, forKey: "inputCubeData")
-
-            currentKey = "outputImage"
-            graded = cube.outputImage
+        // Whether this OS has the filter at all, which is a different question from whether
+        // it was configured correctly and is the one the name constant and its test cover.
+        // Kept separate so "no such filter" and "filter produced nothing" stay
+        // distinguishable in the log — they have completely different causes.
+        guard CIFilter(name: Self.colorManagedCubeFilterName) != nil else {
+            AppLog.fail(AppLog.processing,
+                        "this OS has no \(Self.colorManagedCubeFilterName); LUT not applied")
+            throw LUTApplicationError.notUsable(
+                reason: "this OS has no \(Self.colorManagedCubeFilterName) filter")
         }
-        if let raised {
-            AppLog.fail(AppLog.processing, "cube rejected \(currentKey): \(raised); LUT not applied")
-            throw LUTApplicationError.notUsable(reason: "Core Image refused \(currentKey): \(raised)")
-        }
-        guard let graded else {
-            let reason = currentKey == "creating the filter"
-                ? "this OS has no CIColorCubeWithColorSpace filter"
-                : "CIColorCubeWithColorSpace produced no output"
-            AppLog.fail(AppLog.processing, "cube failed at \(currentKey); LUT not applied")
-            throw LUTApplicationError.notUsable(reason: reason)
+
+        // The typed accessor, not `CIFilter(name:)`.
+        //
+        // ## The bug this fixes: a required parameter was never set
+        //
+        // `CIColorCubeWithColorSpace` has **five** properties:
+        //
+        //     var colorSpace: CGColorSpace?
+        //     var cubeData: Data
+        //     var cubeDimension: Float
+        //     var inputImage: CIImage?
+        //     var extrapolate: Bool          <-- never set
+        //
+        // This code set four of them and left `extrapolate` at its default. `CIFilter(name:)`
+        // populates **no** input values — Core Image does not apply a filter's documented
+        // defaults to a programmatically created instance — so `extrapolate` was left unset,
+        // the filter failed its own validation, and `outputImage` came back `nil`:
+        //
+        //     x cube failed at outputImage; LUT not applied
+        //     x CIColorCubeWithColorSpace produced no output
+        //
+        // On a device that meant every look silently did nothing and the saved photo was the
+        // untouched image. The intensity slider moved and changed nothing, because there was
+        // no graded image to dissolve against.
+        //
+        // ## Why CI never saw it
+        //
+        // `coreImageCanRenderACube()` in `LUTProcessorTests` built this same filter the same
+        // incomplete way, got the same `nil`, and concluded that *headless Core Image cannot
+        // render this filter* — then used that conclusion to skip the only two tests that
+        // would have caught it. The bug wrote its own blind spot, and the claim was then
+        // cited in `docs/ARCHITECTURE.md` section 4 as if it were a platform fact.
+        //
+        // ## Why the accessor rather than one more key string
+        //
+        // The four keys that were being set are *not* the property names: the properties are
+        // `colorSpace` / `cubeData` / `cubeDimension` but the keys are `inputColorSpace` /
+        // `inputCubeData` / `inputCubeDimension`. So the key for `extrapolate` cannot be
+        // guessed from the others — `extrapolate` and `inputExtrapolate` are both plausible
+        // and only one exists. Guessing is exactly the mistake this file already records
+        // twice, and it cost four CI runs. The typed accessor has no key strings at all and
+        // the compiler rejects a wrong type or a misspelled property, so the next version of
+        // this bug is a compile error instead of a silent nil.
+        let cube = CIFilter.colorCubeWithColorSpace()
+        cube.colorSpace = lutSpace.cgColorSpace
+        cube.inputImage = image
+        cube.cubeDimension = Float(lut.size)
+        cube.cubeData = cubeData
+
+        // `extrapolate == false` clamps RGB components that fall outside 0…1 to the edge
+        // of the table, which is what this pipeline wants and what `GeneratedLooks.clamp01`
+        // already assumes by never emitting an out-of-range sample. `true` would linearly
+        // extrapolate past the table's corners and invent colours no entry describes.
+        cube.extrapolate = false
+
+        guard let graded = cube.outputImage else {
+            AppLog.fail(AppLog.processing,
+                        "cube produced no output; all inputs set "
+                        + "(space=\(lutSpace.name) dimension=\(lut.size) "
+                        + "bytes=\(cubeData.count)); LUT not applied")
+            throw LUTApplicationError.notUsable(reason: "CIColorCubeWithColorSpace produced no output")
         }
 
         guard intensity < 1 else { return graded }

@@ -313,14 +313,40 @@ must show which space each photo is in.
 
 #### What CI cannot check about the LUT
 
-Headless Core Image in the CI simulator **accepts** `CIColorCube` — the filter is
-created and all three parameters are set without raising — and then returns nil for
-`outputImage`. The apply stage is therefore untestable in CI, and two tests in
-`LUTProcessorTests` skip there with that reason rather than assert something untrue.
-Everything around it *is* covered: the refusals, the no-op at intensity 0, the cube byte
-order and the size ceiling.
+**This subsection was wrong for the lifetime of the app, and its error shipped.** It is kept
+because the pattern is the lesson.
 
-Carried to the device, then:
+It used to say that headless Core Image "**accepts** `CIColorCube` — the filter is created and
+all three parameters are set without raising — and then returns nil for `outputImage`", that
+the apply stage was therefore untestable in CI, and that this was why two tests skipped. It
+went on to conclude that `CIColorCubeWithColorSpace` was "absent from the SDK CI builds
+against".
+
+None of that was true. What was actually true:
+
+- `CIColorCubeWithColorSpace` **does** resolve in the CI simulator. The availability test
+  asserting exactly that has been passing the whole time, in this same file, four lines above
+  the one that skipped.
+- `outputImage` returned nil because **this app never set `extrapolate`**, one of the
+  filter's five required properties. `CIFilter(name:)` populates no defaults, so an unset
+  required input fails the filter's own validation and it yields nothing.
+- The test helper `coreImageCanRenderACube()` built the filter *the same incomplete way*, got
+  the same `nil`, concluded that headless Core Image could not render the filter, and used
+  that conclusion to skip the only two tests that would have caught it. **The bug wrote its
+  own blind spot, and then this document cited the blind spot as evidence.**
+
+So the answer to "what cannot CI check about the LUT" is: **whether the graded pixels are
+correct.** CI *can* and now does check that the filter is constructible and produces an
+output at all, which is the assertion that was missing. Comparing pixel values against a
+reference tool still needs a device.
+
+`LUTProcessor` now builds the filter through the typed accessor `CIFilter.colorCubeWithColorSpace()`,
+which sets all five required properties and makes a wrong type or a misspelled property a
+**compile error** rather than a silent nil. The name `CIColorCubeWithColorSpace` remains a
+constant in that file, used for the availability check, so the test that asserts the filter
+resolves still guards production code rather than a string only the test owns.
+
+Carried to the device, then — unchanged, because none of these are CI-checkable:
 
 - [ ] A 2×2×2 identity table leaves a known flat image unchanged.
 - [ ] A deliberately obvious table (all red, or an inverted ramp) changes it visibly.
@@ -328,12 +354,19 @@ Carried to the device, then:
 - [ ] The result matches what the same `.cube` produces in a reference tool on the same
       file, which is the only real check that byte order and colour space agree.
 
-This is also why the LUT is applied through `CIColorCube` and not
-`CIColorCubeWithColorSpace`: the latter is absent from the SDK CI builds against, so
-there is no colour-space-aware variant available here at all. Since the domain guard
-above has already established the table's space and the image's space are the same one,
-`CIColorCube` applying in the image's own working space is the correct behaviour rather
-than a fallback — there is nothing to override.
+### 3.1a Why the colour-managed filter, and not `CIColorCube`
+
+`CIColorCube` is **invariant**: it applies the table to whatever sample values it is given,
+with no colour management at all — the same as `CIPhotoEffect`. `CIContext`'s working space
+is linear sRGB, and a colourist's `.cube` is gamma-encoded, so an invariant cube is handed a
+table authored in one space and evaluated in the other. That is not a subtle bias, it is the
+wrong transfer function, and it is the washed-out / over-saturated look.
+
+`CIColorCubeWithColorSpace` takes the table's own space as its working space and performs
+the conversion. The "there is nothing to override because the domain guard already proved the
+spaces match" argument that used to justify `CIColorCube` here was wrong on its own terms:
+matching the *name* of a space is not the same as being in it, and the invariant filter
+performs no conversion in either direction.
 
 ### 3.2 The whole pipeline, and what it costs
 
@@ -373,8 +406,10 @@ the reason the user asked for it.
 
 ### 3.3 What has to be checked on a device
 
-None of this is checkable in CI, because Core Image returns no output in the headless
-simulator. Each line is a real question, not a formality:
+CI now covers the things that can silently produce **no image at all** — the filter
+resolves, every required input is set, and every shipped look yields an output. What is left
+is whether the graded *pixels* are right, which needs a reference tool. Each line is a real
+question, not a formality:
 
 - [ ] Original is pixel-identical to the capture. A non-identity pipeline on an identity
       recipe would show up here and nowhere else.
