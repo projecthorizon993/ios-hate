@@ -176,6 +176,13 @@ Carried from a review. Do not treat these as done.
 | MINOR | A1 commit message | Asserts as fact that headless CI returns `nil` for Metal-backed filter lookups, while shipping a test asserting the opposite. One is wrong; it was never run. |
 | MINOR | `RuntimeCapabilities` (now `CapabilityReport.swift`) | Still uses the old focus rule, so the capability report and the Pro panel disagree about focus on a composite. |
 
+### Do not "fix" these — they are correct, and one is deliberate
+
+| Where | Why it looks wrong | Why it is being left alone |
+| --- | --- | --- |
+| Zoom chips are 1x / 2x / 4x and there is no 0.5x | A three-lens iPhone is expected to offer 0.5x, 1x, 2x like Apple does | `minAvailableVideoZoomFactor` is **1.0**, so the composite's zoom range has no 0.5x to give. Each chip doubling lands on the next lens, so all three lenses *are* reachable. The mapping is Apple's shifted up one stop. Getting Apple's semantics means **binding physical constituent devices** (Phase 3.1), which costs a session reconfiguration per lens change instead of a smooth ramp — a UX regression to buy a label. A product decision, not a bug. See `docs/device-record-02.md`. |
+| 1x shows the ultra wide | 1x is conventionally the "standard" wide lens | Same cause. The composite's factor-to-lens mapping is fixed by the platform, so 1.0 *is* the ultra wide's field of view and no relabelling can change it. Worth knowing because it means the app opens on the noisiest, most distorted lens, which is the likely root of the original "grainy at the outside" report. |
+
 **Closed in Phase 0**, and worth keeping a list of because the pattern repeats:
 
 - `CubeLUT.authoredSpace` defaulted to `.sRGB` — a free false claim for any site that

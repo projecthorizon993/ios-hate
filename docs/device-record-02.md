@@ -16,7 +16,10 @@ The user reported, by eye, on the running app:
 | 2x | wide |
 | 4x | **still wide** |
 
-Two separate things are wrong, and they have different causes.
+Two separate things are wrong, and they have different causes. Both are now resolved, and
+**neither cause was the one originally recorded below** — the minimum-focus-distance and
+fallback theory was disproven on device. The original reasoning is kept because the way it was
+wrong is the useful part.
 
 ### 1. The telephoto is never reached
 
@@ -95,15 +98,115 @@ telephoto; it does not guarantee iOS *enters* it.
 
 ## Status
 
-**Unverified.** The gates that passed are local source gates plus CI compilation. Per rule 2
-of `HANDOFF.md`, nothing here may be called working until it is seen on a device.
+### RESOLVED on device — the telephoto now works
 
-To close this out, run the next build and check three lines:
+**Confirmed on an iPhone 11 Pro running `f0458c7`.** Tapping 4x reaches the telephoto.
 
-1. `lens fallback restricted: behavior=… conditions=0` — did it apply, and is `conditions`
-   empty?
-2. `camera source: lens=telephoto … zoom=4.000x` — did 4x actually reach the telephoto?
-3. `fallback=` and `minFocus(` on the 1x line — does the 1x ultra wide read as a fallback?
+**The cause was not the one this record originally hypothesised.** Everything above about
+minimum focus distance and fallback was a reasonable reading of Apple's documentation and it
+was **wrong**. The log disproved it directly: the restriction had been applied correctly and
+changed nothing.
 
-If `lens fallback still 0` appears, the device accepted the call but stayed on `.auto` and
-the change did not work.
+```
+lens fallback restricted: behavior=2 conditions=0
+camera source: … switching=2 fallback=wide minFocus(ultraWide:-1 wide:120 telephoto:400)
+zoom -> 4.0x asked 4.0x, switch points [2.0, 4.0]
+sensor hand-over: now single (bound …TripleCamera, zoom 4.000x)
+```
+
+`behavior=2` is `.restricted` and `conditions=0` is the empty set, so fallback *was* disallowed
+— and the telephoto still never appeared. Minimum focus distance was a red herring.
+
+The real cause is in the last two lines. Apple documents that a lens becomes eligible only
+when the zoom factor "increases and **crosses**" its switch-over factor. The chips asked for
+exactly 4.0 and the camera settled at exactly `4.000x` — touching the reported switch point
+without ever crossing it. Every chip sat precisely on a boundary.
+
+**Fix:** a destination that lands on a reported switch-over point now asks 2% past it, so the
+boundary is unambiguously crossed. 1.0 is not a switch-over point, so 1x is unaffected. Which
+chip is active is now a band question rather than an equality test, because the camera rests at
+4.08 rather than 4.0 and an equality test would have turned a second tap on the same chip into
+a new destination instead of a return to 1x.
+
+---
+
+## KNOWN — do not "fix" this: 1x is the ultra wide
+
+**This is the platform's zoom scale, not a defect. Leave it alone.**
+
+| | this app (composite) | Apple Camera (physical lenses) |
+| --- | --- | --- |
+| lowest stop | 1x | 0.5x |
+| 1x | **ultra wide** | wide |
+| 2x | wide | telephoto |
+| 4x | telephoto | telephoto + crop |
+
+The device reports:
+
+```
+zoom: 1…189, below 1x false
+switch-over points 2            (i.e. [2.0, 4.0])
+```
+
+`minAvailableVideoZoomFactor` is **1.0**, so the composite's zoom range has no 0.5x stop to
+offer at all. That forces the chips to begin at 1, and since the switch points are 2 and 4,
+each doubling lands on the next lens. The result is Apple's 0.5/1/2 mapping shifted up one
+stop, because the app drives the composite rather than the lenses.
+
+**No relabelling can fix it.** The composite's factor-to-lens mapping is fixed by the platform,
+so on the composite 1.0 will always be the ultra wide. There is no set of labels that makes 1x
+mean "the wide" while staying on the composite.
+
+### Why it still matters, and why it is not being changed now
+
+1x being the ultra wide is the widest, noisiest and most distorted of the three lenses, so the
+app **opens on its worst lens**. That is the most likely explanation for the original "grainy
+at the outside" report in `device-record-01.md`, which was previously attributed only to the
+preview format cap. The format cap was a real fix; it was not the whole cause.
+
+The only way to get Apple's semantics is to **bind the physical constituent devices**. All
+three are already enumerated — `ultraWide@3168.0`, `wide@3168.0`, `telephoto@3168.0` — and
+`CameraPlan` has the unique IDs. That is Phase 3.1 work, and it was deliberately **not** started
+here because:
+
+- the current behaviour is correct and every lens is reachable;
+- it costs a session reconfiguration per lens change, trading the smooth ramp for a visible
+  cut — a real UX regression to buy a labelling change;
+- per `docs/HANDOFF.md` rule 3, one line of work at a time.
+
+**Decide it as a product question, not a bug fix.** The chips are honest zoom factors and the
+readout reports the true sensor, so nothing here is misleading today.
+
+### One caveat, left open rather than assumed
+
+`minAvailableVideoZoomFactor` is a property of the **active format**, and every log so far only
+shows the one format in use. If some other format on this hardware reports below 1.0, a 0.5x
+stop might be reachable on the composite after all and none of this would be necessary. The
+capability report already prints `below 1x`; it currently reads `false`. Unverified across
+formats.
+
+---
+
+## Also open
+
+**Looks are still broken and the first diagnosis was wrong.** `fef57c8` set all five of
+`CIColorCubeWithColorSpace`'s required inputs — including `extrapolate`, which had never been
+set — and the device still reported:
+
+```
+x cube produced no output; all inputs set (space=sRGB dimension=17 bytes=58956)
+```
+
+So `extrapolate` was not the cause. The useful part is what the fixed test helper established:
+the **same filter, built the same way, produces output in the CI simulator**. So the filter,
+the cube and the colour space are known good, and the only thing that differs between the two
+runs is the input image.
+
+`f314b6b` adds a device-side control for exactly that — the same cube applied to a synthetic
+grey image of the same extent — and logs `controlSynthesisedImage=`. Control passing means the
+image is at fault; control failing means the filter is, on device only. Awaiting a run.
+
+Remember that this bug also had a CI test **skip itself**: `coreImageCanRenderACube` built the
+filter incompletely, got the same `nil`, concluded headless Core Image could not render it, and
+skipped the only two tests that would have caught it. A wrong platform claim, written by the
+bug, and then cited as evidence in `docs/ARCHITECTURE.md`.
