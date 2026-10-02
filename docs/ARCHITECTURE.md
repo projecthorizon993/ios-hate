@@ -124,8 +124,17 @@ them:
   presence. The conversion out of `virtualDeviceSwitchOverVideoZoomFactors` is a
   boxed integer type whose element type is not part of any public contract, so the
   numbers wait for Step 6 and a real device.
-- **Zoom chips are measured ratios** against the reported wide lens, and are hidden
-  entirely when the ratio cannot be established.
+- **Zoom is a continuous slider**, not a row of chips. The slider runs from the active
+  format's `minAvailableVideoZoomFactor` to `min(maxAvailableVideoZoomFactor, 10)` — the
+  device reports 189x on an iPhone 11 Pro, and a track spanning that packs 1x/2x/4x into
+  its first fifth. The device's reported switch-over factors are drawn underneath as
+  tappable labels, because those are the exact lens positions and a drag is not. Hidden
+  entirely when the device reports no zoom steps at all.
+- **Lens selection is left to iOS.** `primaryConstituentDeviceSwitchingBehavior` is
+  `.automatic`. Restricting it — with an empty condition set, and then with
+  `.videoZoomChanged`, which the device read back as accepted — kept 4x on the wide
+  sensor across every attempt, and once on the ultra wide. See
+  `CaptureSessionController.configureConstituentSwitching`.
 - **`isVideoZoomEnabled` and pinch zoom are not in Step 1**; zoom is a Step 6 concern
   and the current factor is only carried into the recipe.
 - **Captures are written to `Documents/Photos`, never to the photo library.** The

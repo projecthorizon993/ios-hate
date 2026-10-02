@@ -620,6 +620,9 @@ struct PreviewView: UIViewRepresentable {
     final class Coordinator: PreviewBridge {
 
         private weak var layer: AVCaptureVideoPreviewLayer?
+        /// The connection the two caches below describe. A layer can hand out a different
+        /// connection without the layer itself changing, so the caches are keyed on this.
+        private weak var appliedConnection: AVCaptureConnection?
         private var lastAppliedAngle: CGFloat?
         private var lastMirrored: Bool?
 
@@ -647,6 +650,12 @@ struct PreviewView: UIViewRepresentable {
         func attach(_ layer: AVCaptureVideoPreviewLayer) {
             guard self.layer !== layer else { return }
             self.layer = layer
+            forgetAppliedState()
+        }
+
+        /// Drops everything that was written to a connection we are no longer talking to.
+        private func forgetAppliedState() {
+            appliedConnection = nil
             lastAppliedAngle = nil
             lastMirrored = nil
         }
@@ -656,6 +665,17 @@ struct PreviewView: UIViewRepresentable {
         /// rotated-but-mirrored or unmirrored-but-rotated preview.
         func apply(rotationAngle: CGFloat, isFrontFacing: Bool) {
             guard let layer, let connection = layer.connection else { return }
+            // The layer survives a lens flip but its connection does not always, and a new
+            // connection starts at angle 0 and unmirrored. The caches are about the
+            // connection, so they are compared against it — otherwise a flip that keeps the
+            // same angle (portrait is the same angle for both cameras) skips every write and
+            // leaves the fresh connection showing raw, unrotated sensor frames.
+            if connection !== appliedConnection {
+                forgetAppliedState()
+                appliedConnection = connection
+                AppLog.note(AppLog.camera,
+                            "preview connection: angle=\(Int(rotationAngle)) mirrored=\(isFrontFacing)")
+            }
             if rotationAngle != lastAppliedAngle {
                 guard connection.isVideoRotationAngleSupported(rotationAngle) else {
                     AppLog.warn(AppLog.camera, "preview rotation \(Int(rotationAngle))deg unsupported")

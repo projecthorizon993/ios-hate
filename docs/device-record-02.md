@@ -84,12 +84,36 @@ restricted conditions means zoom still re-selects the primary constituent on its
 So Apple keeps choosing the longest lens that fits the requested zoom. Only the *downgrade* to
 a shorter lens when focus or exposure is poor is refused.
 
-**The tradeoff, stated plainly.** A subject closer than the telephoto's minimum focus
-distance will now stay on the telephoto and **can come out soft**, where before iOS silently
-protected the shot by dropping to the wide. For a camera app with explicit lens chips that is
-the right default — a lens the user did not pick is a worse surprise than a soft frame — but
-it is a real behaviour change, it is logged so a soft frame can be traced to this decision,
-and it is worth a second opinion if it turns out to be objectionable in use.
+## What actually fixed it: not restricting lens selection at all
+
+The reasoning above was right about Apple's fallback rules and wrong about what `.restricted`
+buys. Two builds later the log showed the device accepting the restriction every time —
+`conditions=1 zoomChangedAllowed=true` — and still refusing to move off the wide:
+
+```
+zoom -> 4.080x asked 4.0x, switch points [2.0, 4.0]
+settled: lens=Wide      zoom=4.080x asked=4.080x target=4.0x landed
+settled: lens=Wide      zoom=4.080x asked=4.080x target=4.0x landed
+settled: lens=Ultra wide zoom=1.000x asked=1.000x target=1.0x landed
+```
+
+The zoom factor arrived every time. The constituent did not, and on one request it ended on the
+**ultra wide** at 1.0x — a 4x chip with a visibly worse frame, which is what the user reported.
+Only the fourth request, from a state the device had already been left in, reported
+`settled: lens=Telephoto zoom=4.080x`.
+
+`primaryConstituentDeviceSwitchingBehavior` is now left at `.automatic`. The composite device
+publishes `virtualDeviceSwitchOverVideoZoomFactors == [2.0, 4.0]`, which are precisely the
+optical transitions 1x / 2x / 4x ask for, and under `.automatic` iOS performs those hand-overs
+itself from a zoom change. Restricting it was disabling the mechanism that worked.
+
+The 2% overshoot past a switch-over point stays, because Apple's condition for a lens becoming
+*eligible* is that the zoom factor "increases and crosses" the point — but crossing only makes it
+eligible, and the device run above proved eligibility alone was not enough.
+
+The close-subject downside described below still exists in the opposite direction: iOS may now
+choose a shorter lens when focus or exposure demand it, which is a sharper frame, not a worse
+one, and is not what the 4x complaint was about.
 
 Note also that Apple documents entry is still gated: "**If exposure and focus allow**, this
 camera then becomes the new active primary constituent device… Otherwise the

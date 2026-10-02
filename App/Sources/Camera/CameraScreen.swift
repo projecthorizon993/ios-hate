@@ -22,6 +22,12 @@ struct CameraScreen: View {
     @State private var isShowingLooks = false
     @State private var isShowingPro = false
     @State private var isShowingTone = false
+    /// The zoom slider's position while it is being dragged, or `nil` when it is not.
+    ///
+    /// `nil` means "follow the camera". The readout only refreshes twice a second, so a drag
+    /// that read from it would drag the knob backwards under the user's finger. Held only for
+    /// the length of the gesture and dropped on release, when the device is the truth again.
+    @State private var draggedZoom: Double?
     /// Which Pro parameter's dial is docked, or nil when collapsed.
     @State private var openProParameter: ProParameter?
 
@@ -267,6 +273,7 @@ struct CameraScreen: View {
 
     private var bottomStack: some View {
         VStack(spacing: Theme.Space.l) {
+            zoomSlider
             contextualRow
             modeSwitcher
             shutterRow
@@ -302,61 +309,116 @@ struct CameraScreen: View {
         }
     }
 
-    /// Lens buttons, in every mode.
+    /// The zoom control: a continuous slider, with the device's own optical stops as tappable
+    /// labels underneath it.
     ///
-    /// They live in the contextual row rather than the status row because they are
-    /// controls, and `DESIGN_SPEC.md` is explicit that the top row is status only, so
-    /// nothing is ever under the user's finger at the top while composing.
+    /// It sits in its own row directly under the viewfinder, above the contextual row,
+    /// because it is the one control the thumb reaches for while composing — and because a
+    /// slider needs the whole width. The flash button and the Pro and Looks chips keep the
+    /// contextual row to themselves.
     ///
-    /// **A device with one lens gets no buttons at all**, not a disabled one. The spec:
+    /// **A device with one lens gets no slider at all**, not a disabled one. The spec:
     /// "a single-lens device has no zoom steps and no lens buttons at all."
+    ///
+    /// ## Why a slider rather than the chips it replaces
+    ///
+    /// The chips could only land on the reported stops — 1x, 2x, 4x — so everything between
+    /// them was unreachable. 1.5x is a position people use, and on this hardware it is a plain
+    /// crop of the wide with no hand-over, which is a perfectly good thing for a slider to do
+    /// and a pointless thing for a chip to do.
+    ///
+    /// The stops stay as labels because they are the *precise* positions. A slider alone makes
+    /// 2x a drag to within a few percent, and these labels are tappable, so the exact optical
+    /// positions are one tap away as well as reachable by dragging near them. They are drawn
+    /// from `zoomStops` rather than from the discovered lens list, for the reason below.
     @ViewBuilder
-    private var lensButtons: some View {
-        let stops = model.capabilities.zoomStops
-        if !stops.isEmpty {
-            HStack(spacing: Theme.Space.xxs) {
-                ForEach(stops) { stop in
-                    lensButton(stop)
-                }
+    private var zoomSlider: some View {
+        if !model.capabilities.zoomStops.isEmpty {
+            VStack(spacing: Theme.Space.xs) {
+                Slider(value: zoomBinding,
+                       in: model.zoomSliderRange,
+                       onEditingChanged: zoomEditingChanged)
+                    .tint(Theme.ColorToken.accentActive)
+                    .accessibilityLabel("Zoom")
+                    .accessibilityValue(zoomAccessibilityValue)
+                    .accessibilityHint("Drag to zoom. The labels below jump straight to a lens.")
+
+                zoomStopLabels
             }
         }
     }
 
-    /// A sensor chip: the lens **name** is the primary label, the factor secondary.
-    ///
-    /// Drawn from `zoomStops` rather than from the discovered lens list, because the lens
-    /// list carries no usable measurement: on an iPhone 11 Pro all three physical lenses
-    /// report the same still dimensions, so the old labels were all "1x" and every tap
-    /// computed a destination of 1.0. The switch-over factors are the real thing, and each
-    /// one *is* a sensor — iOS hands over to the next physical lens at exactly those points.
-    ///
-    /// The transition is a ramp rather than a jump, so the frame rate and the sensor change
-    /// happen together and the user can follow it; see `CameraViewModel.selectZoom`.
-    private func lensButton(_ stop: ZoomStop) -> some View {
-        let isCurrent = abs(Double(model.readout.zoomFactor) - stop.factor) < 0.01
-
-        return Button {
-            model.selectZoom(stop)
-        } label: {
-            VStack(spacing: 0) {
-                Text(stop.label)
-                    .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+    /// The slider's value: the drag while there is one, the camera's own factor otherwise.
+    private var zoomBinding: Binding<Double> {
+        let range = model.zoomSliderRange
+        return Binding(
+            get: {
+                let value = draggedZoom ?? Double(model.readout.zoomFactor)
+                return min(max(value, range.lowerBound), range.upperBound)
+            },
+            set: { value in
+                let clamped = min(max(value, range.lowerBound), range.upperBound)
+                draggedZoom = clamped
+                model.setZoom(to: CGFloat(clamped))
             }
-            .foregroundStyle(isCurrent
-                             ? Theme.ColorToken.surfaceBase
-                             : Theme.ColorToken.textSecondary)
-            .padding(.horizontal, Theme.Space.s)
-            .frame(minHeight: Theme.Space.minTouch)
-            .background(isCurrent
-                        ? Theme.ColorToken.accentActive
-                        : Theme.ColorToken.surfaceRaised)
-            .clipShape(Capsule())
+        )
+    }
+
+    /// Ends the drag: the last value is ramped to, so the frame settles rather than stopping
+    /// where the finger left it mid-ramp.
+    private func zoomEditingChanged(_ isEditing: Bool) {
+        guard !isEditing, let draggedZoom else { return }
+        model.setZoom(to: CGFloat(draggedZoom), isFinal: true)
+        self.draggedZoom = nil
+    }
+
+    /// What VoiceOver reads while the slider is focused.
+    private var zoomAccessibilityValue: String {
+        let zoom = draggedZoom ?? Double(model.readout.zoomFactor)
+        return "\(String(format: "%.1f", zoom))x"
+    }
+
+    /// The reported switch-over factors, evenly spread under the slider.
+    ///
+    /// Evenly spread rather than positioned at their true place on the track: a track that runs
+    /// to 10x puts 2x at a tenth of the width and 4x at a third, and cramming four labels into
+    /// the left third of the slider makes them smaller than the target they need to be. This is
+    /// also how the platform's own camera control is laid out.
+    private var zoomStopLabels: some View {
+        let stops = model.capabilities.zoomStops
+        let switchOver = model.capabilities.plan.bound?.switchOverZoomFactors ?? []
+        // The zoom settles just *past* a switch-over point, so "which chip is lit" has to be a
+        // band question. `band(containing:switchOver:)` is the tested version of that.
+        let current = CameraViewModel.band(containing: Double(model.readout.zoomFactor),
+                                           switchOver: switchOver)
+
+        return HStack(spacing: 0) {
+            ForEach(Array(stops.enumerated()), id: \.offset) { index, stop in
+                Button {
+                    draggedZoom = nil
+                    model.selectZoom(stop)
+                } label: {
+                    Text(stop.label)
+                        .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                        .foregroundStyle(abs(current - stop.factor) < 0.005
+                                         ? Theme.ColorToken.accentActive
+                                         : Theme.ColorToken.textSecondary)
+                        .frame(minWidth: Theme.Space.minTouch, minHeight: Theme.Space.xl)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(stop.label)
+                .accessibilityValue(stop.label)
+                .accessibilityHint("Jumps straight to the \(stop.label) lens")
+                .accessibilityAddTraits(abs(current - stop.factor) < 0.005
+                                        ? [.isSelected, .isButton]
+                                        : .isButton)
+
+                if index < stops.count - 1 {
+                    Spacer(minLength: Theme.Space.xs)
+                }
+            }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(stop.label)
-        .accessibilityValue(stop.label)
-        .accessibilityHint("Switches to the \(stop.label) sensor. Select it again to return to the wide sensor.")
-        .accessibilityAddTraits(isCurrent ? [.isSelected, .isButton] : .isButton)
     }
 
     /// Opens the tone panel in the same docked slot the carousel uses, so only one of the
@@ -401,8 +463,6 @@ struct CameraScreen: View {
             }
 
             Spacer(minLength: 0)
-
-            lensButtons
 
             if model.isCapturing {
                 Text("processing")

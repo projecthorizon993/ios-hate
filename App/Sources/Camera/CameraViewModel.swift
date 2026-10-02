@@ -525,19 +525,22 @@ final class CameraViewModel: ObservableObject {
 
         // Land **past** a reported switch-over point, never on it.
         //
-        // Observed on an iPhone 11 Pro: the user reported 1x on the ultra wide, 2x on the
-        // wide, and 4x *still* on the wide — the telephoto was never reached, even with
-        // lens fallback disallowed. The log shows why:
-        //
-        //     zoom -> 4.0x asked 4.0x, switch points [2.0, 4.0]
-        //     sensor hand-over: now single (bound …TripleCamera, zoom 4.000x)
-        //
         // Apple documents the condition precisely: "When the video zoom factor increases
         // **and crosses** a camera's switch-over zoom factor, this camera becomes eligible
         // to set as the activePrimaryConstituent." Asking for exactly 4.0 *touches* the
         // reported switch point 4.0 and never crosses it, so the telephoto is never
         // eligible and the composite stays on the wide. Same at 2.0, which is why 2x is
         // also short of the next lens rather than sitting on a boundary.
+        //
+        // ## What crossing the point was *not* enough to fix
+        //
+        // Overshooting to 4.080 was tried while the device was held at
+        // `setPrimaryConstituentDeviceSwitchingBehavior(.restricted, …)` and the telephoto still
+        // did not arrive — three requests in a row, all reported `settled: lens=Wide`. The
+        // restriction was switching the hand-over off; the overshoot only decides whether the
+        // hand-over is *eligible*. Both are kept, but only because crossing is genuinely part
+        // of Apple's condition, not because it was ever shown to be the fault.
+        // See `CaptureSessionController.configureConstituentSwitching`.
         //
         // This also explains the 1x reading: the composite's 1.0 is the **ultra wide's**
         // native field of view, not the wide's, so `activePrimaryConstituent` reporting
@@ -548,9 +551,8 @@ final class CameraViewModel: ObservableObject {
         // stays proportionally tiny on a device with many switch points, and it is applied
         // only to an actual reported switch-over point — 1.0 is not one, so tapping 1x still
         // lands on exactly 1.0.
-        var honoured = clamped
-        if switchOver.contains(where: { abs($0 - clamped) < 0.005 }) {
-            honoured = min(clamped * Self.switchOverMargin, upper)
+        let honoured = Self.factorToAsk(for: clamped, switchOver: switchOver, upper: upper)
+        if honoured != clamped {
             AppLog.note(AppLog.camera,
                         "zoom \(clamped)x sits on a reported switch-over point; asking "
                         + "\(String(format: "%.3f", honoured))x so the lens is actually crossed")
@@ -593,6 +595,90 @@ final class CameraViewModel: ObservableObject {
                     + "\(String(format: "%.1f", destination))x, switch points "
                     + "\(capabilities.plan.bound?.switchOverZoomFactors ?? [])")
         reportSettledLens(afterAsking: honoured, for: destination, device: device)
+        refreshReadout()
+    }
+
+    /// The factor to actually ask for, which is the clamped destination unless it sits
+    /// exactly on a reported switch-over point. See `switchOverMargin`.
+    ///
+    /// `nonisolated` for the same reason as `band(containing:switchOver:)`: pure arithmetic on
+    /// its arguments, and the unit tests assert it from a nonisolated context.
+    nonisolated static func factorToAsk(for clamped: Double,
+                                        switchOver: [Double],
+                                        upper: Double) -> Double {
+        guard switchOver.contains(where: { abs($0 - clamped) < 0.005 }) else { return clamped }
+        return min(clamped * switchOverMargin, upper)
+    }
+
+    /// The range the zoom slider spans.
+    ///
+    /// The device's own maximum is not the top of it. An iPhone 11 Pro reports 189x, and a
+    /// slider that runs from 1 to 189 packs 1x, 2x and 4x into the first fifth of the track
+    /// and makes the optical stops unusable. Ten is where the frame stops being a lens choice
+    /// and becomes a crop of a crop, which is still worth having, just not worth half a screen.
+    ///
+    /// Never below the device's minimum, so the slider cannot offer a factor the active format
+    /// would raise on — setting `videoZoomFactor` above `videoMaxZoomFactor` always raises.
+    var zoomSliderRange: ClosedRange<Double> {
+        guard let device = sessionController.configuration?.device else { return 1...1 }
+        let lower = max(1, device.minAvailableVideoZoomFactor)
+        let deviceUpper = max(lower, device.maxAvailableVideoZoomFactor)
+        // Never degenerate. A `1...1` range while the session is being torn down would be a
+        // zero-width track, and `Slider` divides by the span.
+        return lower...max(lower, min(deviceUpper, Self.zoomSliderCeiling))
+    }
+
+    /// The top of the zoom slider. See `zoomSliderRange`.
+    nonisolated static let zoomSliderCeiling: Double = 10
+
+    /// Zooms to a **factor**, not to a stop, because the slider is continuous: the user drags
+    /// to somewhere between 1x and 2x as often as not, and a control that can only land on the
+    /// stops it already had would be a step backwards.
+    ///
+    /// A drag is a stream of deltas, so this assigns `videoZoomFactor` directly rather than
+    /// calling `ramp`. `ramp` takes exclusive ownership of the device, which is the right trade
+    /// for one destination and the wrong one for sixty of them a second. The value a drag ends
+    /// on is ramped to, so the frame settles instead of stopping dead, and that is also the
+    /// only point where the settled lens is reported — one line per drag, not one per pixel.
+    ///
+    /// The 2% switch-over overshoot applies here exactly as it does for a stop tap: a drag that
+    /// stops on a reported switch-over point has not crossed it.
+    func setZoom(to factor: CGFloat, isFinal: Bool = false) {
+        guard let device = sessionController.configuration?.device else { return }
+        let range = zoomSliderRange
+        let clamped = min(max(Double(factor), range.lowerBound), range.upperBound)
+        let switchOver = capabilities.plan.bound?.switchOverZoomFactors ?? []
+        let honoured = Self.factorToAsk(for: clamped,
+                                         switchOver: switchOver,
+                                         upper: range.upperBound)
+        guard abs(Double(device.videoZoomFactor) - honoured) > 0.005 else { return }
+
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            AppLog.warn(AppLog.camera, "zoom: lock failed \(error.localizedDescription)")
+            return
+        }
+        defer { device.unlockForConfiguration() }
+
+        let failure = LumaFrameSafety.perform {
+            if isFinal {
+                device.ramp(toVideoZoomFactor: honoured, withRate: 4)
+            } else {
+                device.videoZoomFactor = honoured
+            }
+        }
+        if let failure {
+            AppLog.warn(AppLog.camera, "zoom to \(honoured)x raised \(failure)")
+            return
+        }
+        if isFinal {
+            Haptics.selection()
+            AppLog.note(AppLog.camera,
+                        "zoom -> \(String(format: "%.3f", honoured))x dragged, switch points "
+                        + "\(switchOver)")
+            reportSettledLens(afterAsking: CGFloat(honoured), for: CGFloat(honoured), device: device)
+        }
         refreshReadout()
     }
 

@@ -361,77 +361,72 @@ final class CaptureSessionController: NSObject {
         // is captured. Writing it here would make the badge claim something it cannot
         // deliver. See docs/ARCHITECTURE.md section 2.4.
 
-        restrictPrimaryConstituentFallback(on: device)
+        configureConstituentSwitching(on: device)
 
         return device.activeFormat
     }
 
-    /// Stops iOS quietly abandoning the lens the user asked for.
+    /// Hands lens selection back to iOS.
     ///
-    /// Observed on an iPhone 11 Pro: 1x showed the **ultra wide**, 2x the **wide**, and 4x
-    /// was *still* the wide — the telephoto was never reached. That is not a zoom-range
-    /// problem, because the device reported switch points at 2.0 and 4.0.
+    /// This started as the opposite: `setPrimaryConstituentDeviceSwitchingBehavior(.restricted, …)`
+    /// was applied with an empty condition set to stop iOS quietly abandoning the telephoto. A
+    /// telephoto with a 40 cm minimum focus distance cannot deliver a sharp image on a closer
+    /// subject, so Apple documents that the virtual device switches to the wide in that case —
+    /// and a photo taken at "4x" would really be a wide-lens photo.
     ///
-    /// Apple documents the actual cause: "when the scene requires focus or exposure to go
-    /// beyond the limits of the active primary constituent device, a camera with a shorter
-    /// focal length may be able to deliver a better quality image. The system considers
-    /// such a device a fallback primary constituent device… a telephoto camera with a
-    /// minimum focus distance of 40 cm isn't able to deliver a sharp image when the subject
-    /// in the scene is closer than 40 cm. For such a scene, the virtual device switches to
-    /// the wide-angle camera."
+    /// ## Restricting it made things worse, twice
     ///
-    /// This device reports a telephoto minimum focus distance of 400 — Apple's own worked
-    /// example, in tenths of a millimetre. So on a close subject iOS keeps dropping to the
-    /// wide, and a photo taken at "4x" is really a wide-lens photo. The log line in
-    /// `CameraViewModel.reportCameraSource` records `fallback=` and `minFocus=` so the next
-    /// device run confirms or refutes that reading rather than relying on it.
+    /// With an empty condition set the device accepted `.restricted` (the read-back reported
+    /// `restricted`, so nothing warned) and then refused to move off the wide at 4x.
     ///
-    /// `setPrimaryConstituentDeviceSwitchingBehavior(.restricted, …)` with **no** conditions
-    /// is the documented way to disallow fallback selection. It was previously applied with
-    /// an empty condition set, on the reasoning — asserted only in this comment, never
-    /// verified — that "a zoom change still re-selects the primary constituent on its own".
-    ///
-    /// ## That reasoning was wrong, and the log now proves it
-    ///
-    /// With an empty condition set the device accepted `.restricted` (the read-back
-    /// reported `restricted`, so no warning fired) and then refused to move off the wide at
-    /// 4x. The settled report separates the two things that had been conflated:
+    /// `.videoZoomChanged` was the documented condition for "the zoom factor changed", and the
+    /// device accepted that too — `conditions=1 zoomChangedAllowed=true` — and still did not
+    /// move. Three 4x requests in a row, each overshooting to 4.080x, past the 4.0 switch-over
+    /// point the app is aiming at:
     ///
     ///     zoom -> 4.080x asked 4.0x, switch points [2.0, 4.0]
     ///     settled: lens=Wide zoom=4.080x asked=4.080x target=4.0x landed
+    ///     settled: lens=Wide zoom=4.080x asked=4.080x target=4.0x landed
+    ///     settled: lens=Ultra wide zoom=1.000x asked=1.000x target=1.0x landed
     ///
-    /// The factor reached 4.080 — past the 4.0 switch-over point — and `landed`. So the
-    /// 2% overshoot did its job and the zoom code is not at fault. The constituent stayed
-    /// `Wide` anyway. An empty restricted set stops *every* re-selection the app did not
-    /// explicitly ask for, zoom changes included, which is the opposite of what the comment
-    /// claimed and the opposite of what a user tapping a 4x chip expects.
+    /// The factor arrived every time. The constituent did not, and on one request it ended up
+    /// on the **ultra wide** — the user reported a 4x chip with a visibly worse image, which is
+    /// exactly a 4x crop of the wrong sensor. Only the fourth request, from a state the device
+    /// had already been left in, reported `settled: lens=Telephoto zoom=4.080x`.
     ///
-    /// `.videoZoomChanged` is Apple's condition for "the zoom factor changed", so passing it
-    /// restores zoom-driven re-selection while still refusing the silent downgrade to a
-    /// shorter lens that the empty set was there to prevent. The intent of the original
-    /// change is kept; only the over-broad part is removed.
+    /// ## Why `.automatic` is the fix
+    ///
+    /// The composite device already publishes the answer: `virtualDeviceSwitchOverVideoZoomFactors`
+    /// is `[2.0, 4.0]` on an iPhone 11 Pro, which are precisely the optical transitions the app's
+    /// 1x / 2x / 4x chips are asking for. Under `.automatic` iOS performs those hand-overs itself,
+    /// from a zoom change, on the device's own schedule — which is the mechanism that actually
+    /// worked in the one run that reached the telephoto. The app restricting that mechanism is the
+    /// whole defect; the chip labels and the ramp are not at fault.
+    ///
+    /// The close-subject downgrade this was written to prevent is iOS choosing a sharper image
+    /// over a blurrier one, and it only applies to the *fallback* constituent — it does not
+    /// decide the hand-over at 4x, which is what the restriction was aimed at and what it broke.
     ///
     /// Not applicable to a physical device, which has no constituents to switch between.
-    private func restrictPrimaryConstituentFallback(on device: AVCaptureDevice) {
+    private func configureConstituentSwitching(on device: AVCaptureDevice) {
         guard device.isVirtualDevice else { return }
         if let failure = LumaFrameSafety.perform({
             device.setPrimaryConstituentDeviceSwitchingBehavior(
-                .restricted, restrictedSwitchingBehaviorConditions: [.videoZoomChanged])
+                .automatic, restrictedSwitchingBehaviorConditions: [])
         }) {
             AppLog.warn(AppLog.camera,
-                        "lens fallback could not be restricted: \(failure)")
+                        "lens switching could not be handed to iOS: \(failure)")
             return
         }
-        // Read back rather than assume: a device that accepted the call but stayed on
-        // `.auto` would silently reintroduce the fallback this is meant to prevent.
+        // Read back rather than assume. `.automatic` is the default, so this also records
+        // whether anything else had already moved the device off it.
         let applied = device.primaryConstituentDeviceSwitchingBehavior
-        let conditions = device.primaryConstituentDeviceRestrictedSwitchingBehaviorConditions
         AppLog.note(AppLog.camera,
-                    "lens fallback restricted: behavior=\(applied.rawValue) "
-                    + "conditions=\(conditions.rawValue) zoomChangedAllowed=true")
-        if applied != .restricted {
+                    "lens switching: behavior=\(applied.rawValue) "
+                    + "points=\(device.virtualDeviceSwitchOverVideoZoomFactors)")
+        if applied != .automatic {
             AppLog.warn(AppLog.camera,
-                        "lens fallback still \(applied.rawValue) after being set to restricted")
+                        "lens switching is \(applied.rawValue) after being set to automatic")
         }
     }
 

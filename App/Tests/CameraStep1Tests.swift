@@ -566,15 +566,19 @@ final class CameraStep1Tests: XCTestCase {
 
     // MARK: - Orientation
 
-    func testPreviewRotationMatchesTheCameraSide() {
+    /// Both cameras get the same angle, and mirroring is what makes the front camera a
+    /// selfie preview. A mirror composed with a 180° rotation is a vertical flip, so an
+    /// angle 180° from the back camera's is exactly the upside down front preview seen on
+    /// device.
+    func testPreviewRotationIsIdenticalForBothCameras() {
         XCTAssertEqual(PreviewRotation.angle(for: .portrait, facing: .back), 90)
-        XCTAssertEqual(PreviewRotation.angle(for: .portrait, facing: .front), 270)
+        XCTAssertEqual(PreviewRotation.angle(for: .portrait, facing: .front), 90)
         XCTAssertEqual(PreviewRotation.angle(for: .portraitUpsideDown, facing: .back), 270)
-        XCTAssertEqual(PreviewRotation.angle(for: .portraitUpsideDown, facing: .front), 90)
+        XCTAssertEqual(PreviewRotation.angle(for: .portraitUpsideDown, facing: .front), 270)
         XCTAssertEqual(PreviewRotation.angle(for: .landscapeLeft, facing: .back), 0)
         XCTAssertEqual(PreviewRotation.angle(for: .landscapeRight, facing: .back), 180)
-        XCTAssertEqual(PreviewRotation.angle(for: .landscapeLeft, facing: .front), 180)
-        XCTAssertEqual(PreviewRotation.angle(for: .landscapeRight, facing: .front), 0)
+        XCTAssertEqual(PreviewRotation.angle(for: .landscapeLeft, facing: .front), 0)
+        XCTAssertEqual(PreviewRotation.angle(for: .landscapeRight, facing: .front), 180)
     }
 
     /// `UIDevice` reports face-up, face-down and unknown while the phone is flat on a
@@ -582,7 +586,7 @@ final class CameraStep1Tests: XCTestCase {
     func testAmbiguousDeviceOrientationsFallBackToPortrait() {
         for orientation in [UIDeviceOrientation.unknown, .faceUp, .faceDown] {
             XCTAssertEqual(PreviewRotation.angle(for: orientation, facing: .back), 90)
-            XCTAssertEqual(PreviewRotation.angle(for: orientation, facing: .front), 270)
+            XCTAssertEqual(PreviewRotation.angle(for: orientation, facing: .front), 90)
         }
     }
 

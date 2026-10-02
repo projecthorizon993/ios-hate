@@ -665,16 +665,24 @@ enum PreviewRotation {
 
     /// Degrees clockwise, matching `AVCaptureConnection.videoRotationAngle`.
     ///
-    /// The front camera is mirrored, so the landscape angles swap. Getting this wrong
-    /// shows up as a preview that is upright in portrait and sideways in landscape,
-    /// which is exactly the bug the Step 0 crash log was tracked for.
+    /// ## Both cameras use the same angle
+    ///
+    /// The front camera is distinguished by `isVideoMirrored`, not by a different angle,
+    /// and the two must not be mixed. A horizontal mirror composed with a 180° rotation is
+    /// a *vertical* flip, so giving the front camera an angle 180° away from the back
+    /// camera does not give an upside down but mirrored preview — it gives one flipped top
+    /// to bottom. That is what the front camera looked like in portrait on device.
+    ///
+    /// `facing` is part of the signature so the call site reads as one question, but the
+    /// mapping is deliberately facing-independent: the sensors sit at the same angle to
+    /// the body and the mirroring is applied to the same connection.
     static func angle(for orientation: UIDeviceOrientation, facing: CameraFacing) -> CGFloat {
         switch orientation {
-        case .portrait: return facing == .front ? 270 : 90
-        case .portraitUpsideDown: return facing == .front ? 90 : 270
-        case .landscapeLeft: return facing == .front ? 180 : 0
-        case .landscapeRight: return facing == .front ? 0 : 180
-        default: return facing == .front ? 270 : 90
+        case .portrait: return 90
+        case .portraitUpsideDown: return 270
+        case .landscapeLeft: return 0
+        case .landscapeRight: return 180
+        default: return 90
         }
     }
 }

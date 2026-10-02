@@ -132,7 +132,7 @@ Rules:
   compare state is `accent.compare`, and it is a hold, not a toggle.
 - **Tap to focus** shows a reticle in `accent.active` plus a vertical exposure
   slider. Pinch zooms. Both operate on the capability set, so a single-lens device
-  has no zoom steps and no lens buttons at all.
+  has no zoom steps and no zoom control at all.
 
 ## Accessibility
 
