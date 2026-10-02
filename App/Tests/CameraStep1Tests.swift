@@ -242,6 +242,41 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertEqual(ZoomStop(factor: 1.5).label, "1.5x")
     }
 
+    /// A zoom factor belongs to the band whose **lower edge** it has reached.
+    ///
+    /// This is what lets a second tap on the same chip return to 1x once the camera settles
+    /// just past a switch-over point instead of exactly on it. Observed on an iPhone 11 Pro:
+    /// the camera was asked for exactly 4.0, the reported switch point, and settled at
+    /// `zoom 4.000x` — which Apple documents as "touches" the point rather than crossing it,
+    /// so the telephoto was never selected. An equality test would call 4.08 a different zoom
+    /// from the 4x chip and send the user somewhere new instead of home.
+    func testBandIsTheSwitchOverPointTheZoomHasReached() {
+        let points = [2.0, 4.0]
+        // Below every reported point.
+        XCTAssertEqual(CameraViewModel.band(containing: 1.0, switchOver: points), 1.0)
+        XCTAssertEqual(CameraViewModel.band(containing: 1.99, switchOver: points), 1.0)
+        // Exactly on a point counts as having reached it.
+        XCTAssertEqual(CameraViewModel.band(containing: 2.0, switchOver: points), 2.0)
+        // And just past it, which is where the camera now rests.
+        XCTAssertEqual(CameraViewModel.band(containing: 2.04, switchOver: points), 2.0)
+        XCTAssertEqual(CameraViewModel.band(containing: 4.08, switchOver: points), 4.0)
+        // Above every reported point.
+        XCTAssertEqual(CameraViewModel.band(containing: 4.0 * 4, switchOver: points), 4.0)
+        // A device reporting no points at all is simply always at 1x, rather than crashing
+        // or inventing a boundary.
+        XCTAssertEqual(CameraViewModel.band(containing: 7.0, switchOver: []), 1.0)
+    }
+
+    /// The margin has to clear the boundary and stay visually negligible.
+    ///
+    /// If it were 1.0 the camera would rest exactly on the switch point and the lens would
+    /// still never be selected, which is the bug. The upper bound is here so "make it
+    /// clearly past the point" cannot quietly turn into "noticeably overshoot the chip".
+    func testSwitchOverMarginClearsThePointWithoutOvershootingVisibly() {
+        XCTAssertGreaterThan(CameraViewModel.switchOverMargin, 1.0)
+        XCTAssertLessThanOrEqual(CameraViewModel.switchOverMargin, 1.10)
+    }
+
     /// The device reported `minAvailableVideoZoomFactor == 1.0` on every format, so the
     /// ultra wide is **not reachable** and there is deliberately no 0.5x chip.
     ///

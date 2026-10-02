@@ -492,8 +492,6 @@ final class CameraViewModel: ObservableObject {
     /// switch points as 2.0 and 4.0 all along.
     func selectZoom(_ stop: ZoomStop) {
         guard let device = sessionController.configuration?.device else { return }
-        let isCurrent = abs(Double(readout.zoomFactor) - stop.factor) < 0.01
-        let destination = CGFloat(isCurrent ? 1 : stop.factor)
 
         // `minAvailableVideoZoomFactor` and `maxAvailableVideoZoomFactor` are the range the
         // *current configuration* allows. Apple documents that setting `videoZoomFactor`
@@ -502,6 +500,16 @@ final class CameraViewModel: ObservableObject {
         // clamps. So the clamp happens here rather than being left to raise.
         let lower = max(1, device.minAvailableVideoZoomFactor)
         let upper = max(lower, device.maxAvailableVideoZoomFactor)
+        let switchOver = device.virtualDeviceSwitchOverVideoZoomFactors
+
+        // "Is this the chip I am already on" has to be a **band** question, not an equality
+        // one, because the camera now settles just past a switch-over point. Comparing the
+        // raw factor would make a second tap on the same chip look like a different zoom and
+        // send the user somewhere new instead of back to 1x.
+        let band = Self.band(containing: Double(readout.zoomFactor), switchOver: switchOver)
+        let isCurrent = abs(band - Double(stop.factor)) < 0.005
+
+        let destination = CGFloat(isCurrent ? 1 : stop.factor)
         let clamped = min(max(destination, lower), upper)
 
         // A clamp that moves the destination is a real failure and is logged as one.
@@ -509,6 +517,39 @@ final class CameraViewModel: ObservableObject {
             AppLog.warn(AppLog.camera,
                         "zoom stop \(stop.factor)x is outside the active format's "
                         + "\(lower)x...\(upper)x range; it will not be honoured")
+        }
+
+        // Land **past** a reported switch-over point, never on it.
+        //
+        // Observed on an iPhone 11 Pro: the user reported 1x on the ultra wide, 2x on the
+        // wide, and 4x *still* on the wide — the telephoto was never reached, even with
+        // lens fallback disallowed. The log shows why:
+        //
+        //     zoom -> 4.0x asked 4.0x, switch points [2.0, 4.0]
+        //     sensor hand-over: now single (bound …TripleCamera, zoom 4.000x)
+        //
+        // Apple documents the condition precisely: "When the video zoom factor increases
+        // **and crosses** a camera's switch-over zoom factor, this camera becomes eligible
+        // to set as the activePrimaryConstituent." Asking for exactly 4.0 *touches* the
+        // reported switch point 4.0 and never crosses it, so the telephoto is never
+        // eligible and the composite stays on the wide. Same at 2.0, which is why 2x is
+        // also short of the next lens rather than sitting on a boundary.
+        //
+        // This also explains the 1x reading: the composite's 1.0 is the **ultra wide's**
+        // native field of view, not the wide's, so `activePrimaryConstituent` reporting
+        // `BuiltInUltraWideCamera` at zoom 1.000x is the device's own answer and is
+        // correct. It was previously read as the app being stuck on the ultra wide.
+        //
+        // The margin is a small percentage of the factor rather than a fixed epsilon, so it
+        // stays proportionally tiny on a device with many switch points, and it is applied
+        // only to an actual reported switch-over point — 1.0 is not one, so tapping 1x still
+        // lands on exactly 1.0.
+        var honoured = clamped
+        if switchOver.contains(where: { abs($0 - clamped) < 0.005 }) {
+            honoured = min(clamped * Self.switchOverMargin, upper)
+            AppLog.note(AppLog.camera,
+                        "zoom \(clamped)x sits on a reported switch-over point; asking "
+                        + "\(String(format: "%.3f", honoured))x so the lens is actually crossed")
         }
 
         // **The device must be locked before the ramp.** Observed on an iPhone 11 Pro:
@@ -535,18 +576,41 @@ final class CameraViewModel: ObservableObject {
         // snaps is one the user cannot follow. The rate is roughly how fast a real lens
         // ring moves.
         let failure = LumaFrameSafety.perform {
-            device.ramp(toVideoZoomFactor: clamped, withRate: 4)
+            device.ramp(toVideoZoomFactor: honoured, withRate: 4)
         }
         if let failure {
-            AppLog.warn(AppLog.camera, "zoom to \(clamped)x raised \(failure)")
+            AppLog.warn(AppLog.camera, "zoom to \(honoured)x raised \(failure)")
             present("This camera would not change zoom", isError: true)
             return
         }
         Haptics.selection()
         AppLog.note(AppLog.camera,
-                    "zoom -> \(clamped)x asked \(destination)x, switch points "
+                    "zoom -> \(String(format: "%.3f", honoured))x asked "
+                    + "\(String(format: "%.1f", destination))x, switch points "
                     + "\(capabilities.plan.bound?.switchOverZoomFactors ?? [])")
         refreshReadout()
+    }
+
+    /// How far past a reported switch-over point to ask for.
+    ///
+    /// Apple makes a lens eligible only when the zoom factor "increases and **crosses**" its
+    /// switch-over factor, so a destination that lands exactly on the point never crosses it
+    /// and the lens is never chosen. See `selectZoom`.
+    ///
+    /// Small on purpose. 2% of a switch point is far below the smallest visual difference
+    /// between one lens and the next, so the chip still reads as the factor it is labelled
+    /// with, while being unambiguously past the boundary.
+    static let switchOverMargin = 1.02
+
+    /// The switch-over factor whose band a zoom factor falls in.
+    ///
+    /// The reported factors are the **lower** edges of the bands, so the answer is the
+    /// largest reported factor that is `<=` the zoom, and 1.0 when the zoom is below them
+    /// all. A zoom of 4.08 — just past a reported 4.0 — is therefore still "the 4x stop",
+    /// which is what keeps a second tap on the same chip returning to 1x.
+    static func band(containing zoom: Double, switchOver: [Double]) -> Double {
+        let crossed = switchOver.filter { $0 <= zoom + 0.0005 }
+        return crossed.max() ?? 1.0
     }
 
     func capture() {
