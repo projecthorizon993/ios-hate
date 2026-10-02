@@ -182,12 +182,11 @@ struct LUTProcessor {
         cube.extrapolate = false
 
         guard let graded = cube.outputImage else {
-            AppLog.fail(AppLog.processing,
-                        "cube produced no output; all inputs set "
-                        + "(space=\(lutSpace.name) dimension=\(lut.size) "
-                        + "bytes=\(cubeData.count)); LUT not applied")
+            AppLog.fail(AppLog.processing, Self.describeNilOutput(
+                image: image, space: lutSpace, dimension: lut.size, bytes: cubeData.count))
             throw LUTApplicationError.notUsable(reason: "CIColorCubeWithColorSpace produced no output")
         }
+
 
         guard intensity < 1 else { return graded }
 
@@ -197,6 +196,60 @@ struct LUTProcessor {
                                             kCIInputTimeKey: intensity
                                           ])
         return mixed ?? graded
+    }
+
+    /// Describes a `nil` `outputImage`, and settles filter-versus-image while it is at it.
+    ///
+    /// ## Why this is an experiment and not a fix
+    ///
+    /// The filter now has all five of its required inputs set and still returns `nil` on a
+    /// device, while the *identical* filter built the *identical* way produces output in the
+    /// CI simulator — see `LUTProcessorTests.coreImageCanRenderACube`, which asserts exactly
+    /// that and passes. So the filter, the cube and the colour space are all known good;
+    /// the one thing that differs between the two runs is the **image**.
+    ///
+    /// Two hypotheses remain and they need different fixes, so the log distinguishes them
+    /// rather than the code guessing:
+    ///
+    /// - the real camera image carries **no colour space** (a `CIImage` made from a
+    ///   `CVPixelBuffer` inherits one only if the buffer has the attachment), and a
+    ///   colour-managed cube has nothing to convert *from*; or
+    /// - its **extent** is infinite or empty, which a cube lookup cannot evaluate.
+    ///
+    /// The control is the discriminator. It builds a synthetic grey image of the same extent
+    /// — which is what the passing CI test feeds the filter — and applies the same cube to
+    /// it:
+    ///
+    /// - control produces output, real image does not → the image is at fault, and
+    ///   `controlSynthesisedImage` says which of the two properties is suspect.
+    /// - control also fails → the filter is at fault after all, on device only.
+    ///
+    /// This is deliberately diagnostic-only: it changes nothing the user sees, and it is
+    /// replaced by a real fix once the run says which case this is.
+    private static func describeNilOutput(image: CIImage,
+                                          space: ColorSpace,
+                                          dimension: Int,
+                                          bytes: Int) -> String {
+        // `CIImage(color:)` is what the passing CI test uses, so it is the control that is
+        // already known to work headless — not an arbitrary second guess.
+        let control = CIFilter.colorCubeWithColorSpace()
+        control.colorSpace = space.cgColorSpace
+        control.inputImage = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+            .cropped(to: image.extent.isInfinite
+                     ? CGRect(x: 0, y: 0, width: 4, height: 4)
+                     : image.extent)
+        control.cubeDimension = Float(dimension)
+        control.extrapolate = false
+        let controlProducedOutput = control.outputImage != nil
+
+        let extent = image.extent
+        return """
+        cube produced no output; LUT not applied
+        inputs: space=\(space.name) dimension=\(dimension) bytes=\(bytes)
+        image: extent=\(extent) infinite=\(extent.isInfinite) \
+        empty=\(extent.isEmpty) \
+        controlSynthesisedImage=\(controlProducedOutput ? "produced output" : "also produced none")
+        """
     }
 
     /// Builds the cube data exactly as Core Image expects it: RGB floats, red varying
