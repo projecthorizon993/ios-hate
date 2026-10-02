@@ -393,7 +393,7 @@ struct CameraScreen: View {
                                            switchOver: switchOver)
 
         return HStack(spacing: 0) {
-            ForEach(Array(stops.enumerated()), id: \.offset) { index, stop in
+            ForEach(stops) { stop in
                 Button {
                     draggedZoom = nil
                     model.selectZoom(stop)
@@ -403,7 +403,8 @@ struct CameraScreen: View {
                         .foregroundStyle(abs(current - stop.factor) < 0.005
                                          ? Theme.ColorToken.accentActive
                                          : Theme.ColorToken.textSecondary)
-                        .frame(minWidth: Theme.Space.minTouch, minHeight: Theme.Space.xl)
+                        .frame(minHeight: Theme.Space.xl)
+                        .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
                 }
                 .accessibilityElement(children: .ignore)
@@ -413,10 +414,6 @@ struct CameraScreen: View {
                 .accessibilityAddTraits(abs(current - stop.factor) < 0.005
                                         ? [.isSelected, .isButton]
                                         : .isButton)
-
-                if index < stops.count - 1 {
-                    Spacer(minLength: Theme.Space.xs)
-                }
             }
         }
     }

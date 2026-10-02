@@ -394,39 +394,46 @@ final class CaptureSessionController: NSObject {
     /// exactly a 4x crop of the wrong sensor. Only the fourth request, from a state the device
     /// had already been left in, reported `settled: lens=Telephoto zoom=4.080x`.
     ///
-    /// ## Why `.automatic` is the fix
+    /// ## Why `.auto` is the fix
     ///
-    /// The composite device already publishes the answer: `virtualDeviceSwitchOverVideoZoomFactors`
-    /// is `[2.0, 4.0]` on an iPhone 11 Pro, which are precisely the optical transitions the app's
-    /// 1x / 2x / 4x chips are asking for. Under `.automatic` iOS performs those hand-overs itself,
-    /// from a zoom change, on the device's own schedule — which is the mechanism that actually
-    /// worked in the one run that reached the telephoto. The app restricting that mechanism is the
-    /// whole defect; the chip labels and the ramp are not at fault.
+    /// A device nobody has told otherwise hands over by itself: `primaryConstituentDeviceSwitchingBehavior`
+    /// "is `.auto` for devices that support camera switching". The composite device already
+    /// publishes the answer — `virtualDeviceSwitchOverVideoZoomFactors` is `[2.0, 4.0]` on an
+    /// iPhone 11 Pro, which are precisely the optical transitions the zoom control is asking for.
+    /// Under `.auto`, "the device automatically selects the best camera for the current scene"
+    /// and "places no restrictions on when a camera switch can occur". That is the mechanism
+    /// that actually worked in the one run that reached the telephoto; restricting it switched
+    /// that mechanism off. The zoom labels and the ramp are not at fault.
     ///
-    /// The close-subject downgrade this was written to prevent is iOS choosing a sharper image
-    /// over a blurrier one, and it only applies to the *fallback* constituent — it does not
-    /// decide the hand-over at 4x, which is what the restriction was aimed at and what it broke.
+    /// The enum also has a `.locked` case, which pins switching to the active constituent. That
+    /// is the behaviour the restriction was reaching for and losing, and it is why the behavior
+    /// is now written explicitly rather than left to the default: the read-back below is what
+    /// proves it.
+    ///
+    /// The close-subject downgrade the restriction was written to prevent is iOS choosing a
+    /// sharper image over a blurrier one, and it only applies to the *fallback* constituent —
+    /// it does not decide the hand-over at 4x, which is what the restriction broke.
     ///
     /// Not applicable to a physical device, which has no constituents to switch between.
     private func configureConstituentSwitching(on device: AVCaptureDevice) {
         guard device.isVirtualDevice else { return }
+        // Apple: "Setting the switching behavior to a value other than `.restricted` requires
+        // that you set this argument to an empty option set."
         if let failure = LumaFrameSafety.perform({
             device.setPrimaryConstituentDeviceSwitchingBehavior(
-                .automatic, restrictedSwitchingBehaviorConditions: [])
+                .auto, restrictedSwitchingBehaviorConditions: [])
         }) {
             AppLog.warn(AppLog.camera,
-                        "lens switching could not be handed to iOS: \(failure)")
+                        "lens switching could not be handed back to iOS: \(failure)")
             return
         }
-        // Read back rather than assume. `.automatic` is the default, so this also records
-        // whether anything else had already moved the device off it.
         let applied = device.primaryConstituentDeviceSwitchingBehavior
         AppLog.note(AppLog.camera,
-                    "lens switching: behavior=\(applied.rawValue) "
+                    "lens switching handed to iOS: behavior=\(applied.rawValue) "
                     + "points=\(device.virtualDeviceSwitchOverVideoZoomFactors)")
-        if applied != .automatic {
+        if applied != .auto {
             AppLog.warn(AppLog.camera,
-                        "lens switching is \(applied.rawValue) after being set to automatic")
+                        "lens switching is \(applied.rawValue) after being set to auto")
         }
     }
 
