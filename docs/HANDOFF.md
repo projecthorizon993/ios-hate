@@ -226,28 +226,42 @@ trusting any code that contradicts them:
   `.builtInDualWideCamera`) do **not** support `ExposureMode.custom`, and do not allow
   locking focus to a new lens position or AWB to new gains.
 
-### Correction: the white-balance query this document used to say did not exist
+### Correction 2: the active-lens query this document said did not exist
 
-The old 0.3 said:
+During Phase 1 the app needed to say which physical lens a photo came from. It was
+inferred three times and was wrong every time, and the conclusion drawn from that was
+"iOS exposes no query for which constituent of a composite is active".
 
-> There is no separate "can the gains change" query.
+**That was wrong.** The query is:
 
-**That was wrong, and it cost a CI run.** The query is
-`AVCaptureDevice.isLockingWhiteBalanceWithCustomDeviceGainsSupported`, iOS 10+, and it is
-exactly that question. Apple documents that when it is false,
-`setWhiteBalanceModeLocked(with:)` with any gains other than
-`AVCaptureDevice.currentWhiteBalanceGains` **throws**.
+```swift
+var activePrimaryConstituent: AVCaptureDevice? { get }   // iOS 15+
+```
 
-So the WB gate is a certain answer rather than the `ExposureMode.custom` proxy it was
-briefly written as, and the residual uncertainty the first version documented is gone.
-`ProCapabilities.whiteBalanceLockIsOffered` now takes both facts, and the test asserts all
-three truth-table combinations so neither question can be silently dropped.
+> "A virtual device's active primary constituent device… may change when zoom, exposure, or
+> focus changes. The value is `nil` for nonvirtual devices. **This property is key-value
+> observable.**"
 
-Note the shape of the mistake. It was not a slip; it was a confident negative about a
-platform API, written into the document that exists to stop the next person repeating
-itself. The same document was wrong three times in the other direction, where a case name
-was recalled instead of looked up (`UIDisplayGamut.P3` is capitalised, and
-`AVCapturePhotoOutput.QualityPrioritization` is on the output).
+It has been available since iOS 15, and this project targets iOS 18. Alongside it:
+`constituentDevices`, `isVirtualDevice`,
+`setPrimaryConstituentDeviceSwitchingBehavior(_:restrictedSwitchingBehaviorConditions:)`,
+and `supportedFallbackPrimaryConstituentDevices`.
 
-**The rule that replaces both: look the API up. Every time. A confident claim about a
-platform symbol costs a CI run to check, and CI runs take four minutes each.**
+Because it is key-value observable, a lens hand-over can be logged **when it happens**,
+which is what caught the user's report that the viewfinder was on the ultra wide while the
+app said otherwise.
+
+### The pattern, which is the point
+
+Two claims in this document were confidently wrong about platform APIs, in opposite
+directions, and both cost CI runs or device runs to discover:
+
+| Claim | Reality | Cost |
+| --- | --- | --- |
+| "There is no separate query for can the gains change." | `isLockingWhiteBalanceWithCustomDeviceGainsSupported` exists | one CI run, and 0.3 was briefly built on a proxy |
+| "iOS exposes no query for which constituent is active." | `activePrimaryConstituent` exists, iOS 15+ | three wrong inferences shipped, and the sensor name was removed from the UI and the photo metadata before being restored |
+
+Both were recovered by reading Apple's documentation. **The rule that replaces both: look
+the API up, every time, including when you are confident.** A confident claim about a
+platform symbol is not knowledge; it is a guess that reads like knowledge, and this document
+exists to stop the next person repeating it — so it does not get to be wrong either.
