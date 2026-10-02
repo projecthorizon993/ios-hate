@@ -600,7 +600,10 @@ final class CameraViewModel: ObservableObject {
     /// Small on purpose. 2% of a switch point is far below the smallest visual difference
     /// between one lens and the next, so the chip still reads as the factor it is labelled
     /// with, while being unambiguously past the boundary.
-    static let switchOverMargin = 1.02
+    ///
+    /// `nonisolated` because this type is `@MainActor` and the value is a constant with no
+    /// actor state. Without it the unit tests cannot read it from their nonisolated context.
+    nonisolated static let switchOverMargin = 1.02
 
     /// The switch-over factor whose band a zoom factor falls in.
     ///
@@ -608,7 +611,10 @@ final class CameraViewModel: ObservableObject {
     /// largest reported factor that is `<=` the zoom, and 1.0 when the zoom is below them
     /// all. A zoom of 4.08 — just past a reported 4.0 — is therefore still "the 4x stop",
     /// which is what keeps a second tap on the same chip returning to 1x.
-    static func band(containing zoom: Double, switchOver: [Double]) -> Double {
+    ///
+    /// `nonisolated` for the same reason as `switchOverMargin`: pure arithmetic on its
+    /// arguments, and the unit tests assert it from a nonisolated context.
+    nonisolated static func band(containing zoom: Double, switchOver: [Double]) -> Double {
         let crossed = switchOver.filter { $0 <= zoom + 0.0005 }
         return crossed.max() ?? 1.0
     }
