@@ -802,10 +802,14 @@ final class CameraStep1Tests: XCTestCase {
         let second = savedPhoto("b", capturedAt: 300)
         let third = savedPhoto("c", capturedAt: 200)
         let entries = GalleryView.entries(from: [first, third, second])
-        // `TimeInterval` is spelled out because the literal array is otherwise ambiguous
-        // between the several numeric types it could be inferred as.
-        let stamps: [TimeInterval] = entries.map(\.capturedAt)
-        XCTAssertEqual(stamps, [300, 200, 100])
+        // `capturedAt` is a `Date`, so this compares the dates themselves rather than
+        // mapping to a number and hoping the conversion is the thing under test.
+        let stamps: [Date] = entries.map(\.capturedAt)
+        XCTAssertEqual(stamps, [
+            Date(timeIntervalSince1970: 300),
+            Date(timeIntervalSince1970: 200),
+            Date(timeIntervalSince1970: 100)
+        ])
     }
 
     func testAnEmptyLibraryIsAnEmptyGalleryNotACrash() {
