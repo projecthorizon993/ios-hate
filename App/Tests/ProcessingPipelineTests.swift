@@ -318,11 +318,24 @@ final class ProcessingPipelineTests: XCTestCase {
         XCTAssertTrue(LearnedStage.denoise.applies(to: .ultraWide))
     }
 
-    /// A composite whose constituent could not be resolved falls back to the wide, which is
-    /// the constituent a composite actually falls back to.
-    func testAnUnresolvedCompositeRoutesLikeTheWide() {
+    /// A composite borrows the wide's stage.
+    ///
+    /// Apple documents a composite falling back to its wide constituent, so that is the
+    /// constituent that actually took the shot. Without this the common 1x composite capture
+    /// would match no stage and silently get nothing.
+    func testACompositeRoutesLikeTheWide() {
         let plan = LearnedStagePlan.plan(for: metadata(lens: "AVCaptureDeviceTypeBuiltInTripleCamera"))
         XCTAssertEqual(plan.stages, [.lowLightToneMap])
+        XCTAssertEqual(CaptureLens(kind: .composite).routingLens, .wide)
+    }
+
+    /// Routing through the wide must not make a composite *telephoto*, or an SR model would
+    /// run on every composite shot and invent detail in ordinary 1x photos.
+    func testRoutingACompositeDoesNotGiveItTheTelephotoStage() {
+        let plan = LearnedStagePlan.plan(
+            for: metadata(lens: "AVCaptureDeviceTypeBuiltInTripleCamera", zoom: 6))
+        XCTAssertFalse(plan.stages.contains(.superResolution),
+                       "a composite borrows the wide's stages only")
     }
 
     /// A lens name this app does not recognise runs nothing rather than guessing.

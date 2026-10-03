@@ -45,6 +45,20 @@ enum CaptureLens: String, Equatable, Sendable {
     }
 
     var isFront: Bool { self == .front }
+
+    /// The lens whose stages this one borrows.
+    ///
+    /// A composite is the wide for processing purposes, because Apple documents a composite
+    /// falling back to its wide constituent — so when the active constituent could not be
+    /// resolved, the wide is the constituent that will actually have taken the shot. Without
+    /// this the composite would match no stage at all and silently get nothing, which is the
+    /// wrong answer for the common 1x composite shot.
+    ///
+    /// `unknown` maps to itself, and therefore to nothing: a lens this app does not recognise
+    /// runs no model rather than a guessed one.
+    var routingLens: CaptureLens {
+        self == .composite ? .wide : self
+    }
 }
 
 /// What a learned stage is for, and which lens earns it.
@@ -92,7 +106,7 @@ enum LearnedStage: String, Equatable, Sendable {
     /// The front camera is excluded from every stage: it has no low-light problem to solve
     /// worth solving, and the front sensor is not one these models were trained for.
     func applies(to lens: CaptureLens) -> Bool {
-        lens == self.lens
+        lens.routingLens == self.lens
     }
 }
 
@@ -123,7 +137,10 @@ enum LearnedStagePlan: Equatable, Sendable {
     /// point past which the telephoto begins cropping.
     static func plan(for metadata: CaptureMetadata,
                      minimumSuperResolutionZoom: Double = 4) -> LearnedStagePlan {
-        let lens = CaptureLens(lensKind: metadata.lensKind, frontCamera: metadata.frontCamera)
+        // Routed, not raw: a composite borrows the wide's stages, because that is the
+        // constituent a composite falls back to and so the one that took the shot.
+        let lens = CaptureLens(lensKind: metadata.lensKind,
+                               frontCamera: metadata.frontCamera).routingLens
         guard !lens.isFront else { return .none }
 
         var chosen: [LearnedStage] = []
