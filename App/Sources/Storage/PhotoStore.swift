@@ -325,7 +325,29 @@ enum PhotoStore {
                                container: container,
                                metadata: metadata)
         AppLog.note(AppLog.camera, "photo stored: \(saved.describeForLog)")
+        // A count and a byte total, and deliberately no file name: this is the evidence that
+        // bytes actually reached the disk, without putting the user's file names in a log
+        // that gets shared. When a capture "succeeds" and nothing can be found, this is the
+        // line that separates a write problem from a file-not-where-you-expected problem.
+        if let total = totalBytes() {
+            AppLog.note(AppLog.camera,
+                        "stored total: \(storedFileCount()) files, \(total / 1024) KB")
+        }
         return saved
+    }
+
+    /// How many files are in the store. `nil` rather than `0` when the directory cannot be
+    /// read, so "nothing stored" and "cannot tell" stay different facts.
+    static func storedFileCount(in fileManager: FileManager = .default) -> Int? {
+        guard let folder = try? directory(in: fileManager),
+              let contents = try? fileManager.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles])
+        else { return nil }
+        return contents.filter { url in
+            (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+        }.count
     }
 
     // MARK: - Photo library export

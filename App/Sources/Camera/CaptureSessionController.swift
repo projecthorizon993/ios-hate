@@ -290,14 +290,9 @@ final class CaptureSessionController: NSObject {
         session.addOutput(photoOutput)
         self.photoOutput = photoOutput
 
-        // Recorded, not configured. This is derived from the active format's
-        // `maxPhotoDimensions`, which `applyConfiguration` has already set; writing it here
-        // would be the no-op that hid the real bug. It is logged because it is the number
-        // the capture path actually gets, and it disagreesing with the format is worth
-        // seeing.
-        let outputStill = photoOutput.maxPhotoDimensions
-        AppLog.note(AppLog.camera,
-                    "photo output max dimensions: \(outputStill.width)x\(outputStill.height)")
+// Full-size stills. The output is attached by this point, which is the only reason
+        // this can happen here at all.
+        applyMaxPhotoDimensions(on: photoOutput, format: applied)
 
         observeActiveConstituent(device)
 
@@ -364,12 +359,10 @@ final class CaptureSessionController: NSObject {
 
         configureConstituentSwitching(on: device)
 
-        applyMaxPhotoDimensions(on: device)
-
         return device.activeFormat
     }
 
-    /// Raises the active still resolution to the largest the format advertises.
+    /// Raises the still resolution to the largest the active format advertises.
     ///
     /// ## Why this exists
     ///
@@ -383,27 +376,26 @@ final class CaptureSessionController: NSObject {
     /// 1920x1440 is exactly the format's **video** dimensions, which is the tell: the still
     /// was never raised off the video-linked default.
     ///
-    /// There was code that looked like it addressed this and did nothing:
+    /// There was code here that looked like it addressed this and did nothing:
     ///
     ///     let maxStill = photoOutput.maxPhotoDimensions
     ///     photoOutput.maxPhotoDimensions = maxStill
     ///
-    /// `AVCapturePhotoOutput.maxPhotoDimensions` is *derived from* the active format's
-    /// `maxPhotoDimensions`. Reading it and writing it straight back is a no-op, so it read
-    /// as high-resolution configuration while never changing a thing.
+    /// Reading a property and writing the same value straight back is a no-op, so it read as
+    /// high-resolution configuration while never changing a thing. The value has to come from
+    /// the format's `supportedMaxPhotoDimensions` instead — the property is on
+    /// **`AVCapturePhotoOutput`**, not on `AVCaptureDevice.Format`, which is worth stating
+    /// because writing it on the format does not compile.
     ///
-    /// The property that actually decides the still resolution is
-    /// `AVCaptureDevice.Format.maxPhotoDimensions` (iOS 16+), which is writable and takes
-    /// its value from `supportedMaxPhotoDimensions`. This is the other half of
-    /// `photoQualityPrioritization = .quality`, which the capture path already asks for and
-    /// reserves resources for: without the format being told to deliver at full size there
-    /// is nothing for the quality prioritisation to preserve.
+    /// This is the other half of `photoQualityPrioritization = .quality`, which the capture
+    /// path already asks for and reserves resources for: with the output never told to deliver
+    /// at full size there is nothing for the quality prioritisation to preserve.
     ///
-    /// Must run inside `applyConfiguration`'s existing device lock, and after `activeFormat`
-    /// is set, because the value belongs to whichever format is active.
-    private func applyMaxPhotoDimensions(on device: AVCaptureDevice) {
-        let format = device.activeFormat
-        let before = format.maxPhotoDimensions
+    /// Called after the output is attached, which is why it cannot live in `applyConfiguration`
+    /// — that runs before the output exists.
+    private func applyMaxPhotoDimensions(on photoOutput: AVCapturePhotoOutput,
+                                         format: AVCaptureDevice.Format) {
+        let before = photoOutput.maxPhotoDimensions
         let describe = { (d: CMVideoDimensions) in "\(d.width)x\(d.height)" }
 
         guard format.isHighPhotoQualitySupported else {
@@ -427,16 +419,15 @@ final class CaptureSessionController: NSObject {
             return
         }
         if let failure = LumaFrameSafety.perform({
-            device.activeFormat.maxPhotoDimensions = largest
+            photoOutput.maxPhotoDimensions = largest
         }) {
             AppLog.warn(AppLog.camera,
                         "max photo dimensions: \(describe(largest)) rejected (\(failure)); "
                         + "still at \(describe(before))")
             return
         }
-        let after = device.activeFormat.maxPhotoDimensions
         AppLog.note(AppLog.camera,
-                    "max photo dimensions: \(describe(before)) -> \(describe(after))")
+                    "max photo dimensions: \(describe(before)) -> \(describe(photoOutput.maxPhotoDimensions))")
     }
 
     /// Hands lens selection back to iOS.
