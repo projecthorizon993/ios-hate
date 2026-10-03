@@ -336,7 +336,7 @@ final class PhotoCaptureController: NSObject {
         // becomes a banner and a log line naming the reason. `LumaFrameSafety.perform`
         // returns `nil` on success, which is what "the capture started" looks like.
         if let failure = LumaFrameSafety.perform({
-            output.capturePhoto(with: settings, delegate: self)
+            self.output.capturePhoto(with: settings, delegate: self)
         }) {
             isCapturing = false
             pendingMetadata = nil
