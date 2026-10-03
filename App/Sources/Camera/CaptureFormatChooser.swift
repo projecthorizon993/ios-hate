@@ -110,11 +110,20 @@ enum CaptureFormatChooser {
     static func stillPixelCount(_ format: AVCaptureDevice.Format) -> Int {
         // `CMVideoDimensions` uses Int32, so the product is widened before it is used as
         // an Int sort key.
-        let dimensions = format.supportedMaxPhotoDimensions
-        if let largest = dimensions.max(by: { Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height) }) {
-            return Int(largest.width) * Int(largest.height)
+        guard let largest = largestPhotoDimensions(in: format.supportedMaxPhotoDimensions) else {
+            return videoPixelCount(format)
         }
-        return videoPixelCount(format)
+        return Int(largest.width) * Int(largest.height)
+    }
+
+    /// The biggest entry in a `supportedMaxPhotoDimensions` list, or `nil` when it is empty.
+    ///
+    /// Separated from `stillPixelCount` because this is the value that gets *written* to
+    /// `format.maxPhotoDimensions`, and choosing which resolution to ask for should be
+    /// assertable without a device attached.
+    static func largestPhotoDimensions(in dimensions: [CMVideoDimensions]) -> CMVideoDimensions? {
+        // Widened before multiplying: `CMVideoDimensions` holds `Int32`.
+        dimensions.max { Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height) }
     }
 
     static func videoPixelCount(_ format: AVCaptureDevice.Format) -> Int {

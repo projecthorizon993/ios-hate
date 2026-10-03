@@ -373,6 +373,34 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertLessThanOrEqual(1920 * 1440, CaptureFormatChooser.maximumVideoPixels)
     }
 
+    /// The still resolution comes from the *largest* entry, not the first or the smallest.
+    ///
+    /// Device data: the chosen format advertised `4032x3024 still | 1920x1440 video` and every
+    /// capture came back 1920x1440, because nothing ever raised the format's
+    /// `maxPhotoDimensions` off the video-linked default. This is the value that fixes it,
+    /// so picking the wrong end of the list would reintroduce the same bug.
+    func testTheLargestAdvertisedStillIsTheOneAskedFor() {
+        let advertised = [
+            CMVideoDimensions(width: 1920, height: 1440),
+            CMVideoDimensions(width: 4032, height: 3024),
+            CMVideoDimensions(width: 2016, height: 1512)
+        ]
+        let largest = CaptureFormatChooser.largestPhotoDimensions(in: advertised)
+        XCTAssertEqual(largest?.width, 4032)
+        XCTAssertEqual(largest?.height, 3024)
+        XCTAssertNil(CaptureFormatChooser.largestPhotoDimensions(in: []),
+                     "a format advertising nothing must not invent a still size")
+    }
+
+    /// A full-size still is more pixels than the capped video stream, which is the whole
+    /// reason the two are separate numbers.
+    func testTheAdvertisedStillIsLargerThanTheCappedVideoStream() {
+        let still = CMVideoDimensions(width: 4032, height: 3024)
+        let video = CaptureFormatChooser.maximumVideoPixels
+        XCTAssertGreaterThan(Int(still.width) * Int(still.height), video,
+                             "the still must not be limited by the viewfinder cap")
+    }
+
     /// JPEG is asked for first, even when HEVC is available.
     ///
     /// Observed on device: `codecs: jpeg, hvc1` and the chooser took `hvc1`, so every photo
