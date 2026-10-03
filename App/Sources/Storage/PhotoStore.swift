@@ -87,23 +87,31 @@ struct CaptureMetadata: Equatable, Sendable {
     /// future-version recipe yields defaults rather than failing, because a photo the app
     /// cannot describe is still a photo the user must be able to open. Every field is
     /// optional in the format, so a missing key is an absent measurement rather than a zero.
-    init(recipe: String) {
+    /// Builds from a recipe string read back out of a file.
+    ///
+    /// A **static factory, not an `init`**, on purpose. Writing an initialiser in a struct
+    /// suppresses the memberwise one, and the memberwise `CaptureMetadata(mode:)` is the
+    /// form the rest of the app and every existing test uses. Adding `init(recipe:)` would
+    /// have deleted it and broken the call sites for no gain.
+    static func decoding(recipe: String) -> CaptureMetadata {
+        var metadata = CaptureMetadata(mode: "auto")
         let (_, fields) = CaptureMetadata.parse(recipe: recipe)
-        if let mode = fields["mode"] { self.mode = mode }
-        if let value = fields["iso"], let parsed = Float(value) { self.iso = parsed }
-        if let value = fields["sh"], let parsed = Double(value) { self.shutterSeconds = parsed }
-        if let value = fields["ev"], let parsed = Double(value) { self.exposureTargetOffset = parsed }
-        if let value = fields["rs"], let parsed = Double(value) { self.lensRelativeScale = parsed }
-        if let lensKind = fields["lens"] { self.lensKind = lensKind }
-        if let value = fields["zoom"], let parsed = Double(value) { self.zoomFactor = parsed }
-        if let value = fields["q"] { self.photoQualityPrioritization = value }
-        proRaw = fields["proraw"] == "1"
-        raw = fields["raw"] == "1"
-        frontCamera = fields["front"] == "1"
-        if let space = fields["space"], !space.isEmpty { self.colorSpace = space }
-        if let hdr = fields["hdr"], !hdr.isEmpty { self.hdrStatus = hdr }
-        if let derived = fields["derived"] { self.derivedFrom = UUID(uuidString: derived) }
-        processing = fields["proc"].flatMap(CaptureMetadata.decodeProcessing)
+        if let mode = fields["mode"] { metadata.mode = mode }
+        if let value = fields["iso"], let parsed = Float(value) { metadata.iso = parsed }
+        if let value = fields["sh"], let parsed = Double(value) { metadata.shutterSeconds = parsed }
+        if let value = fields["ev"], let parsed = Double(value) { metadata.exposureTargetOffset = parsed }
+        if let value = fields["rs"], let parsed = Double(value) { metadata.lensRelativeScale = parsed }
+        if let lensKind = fields["lens"] { metadata.lensKind = lensKind }
+        if let value = fields["zoom"], let parsed = Double(value) { metadata.zoomFactor = parsed }
+        if let value = fields["q"] { metadata.photoQualityPrioritization = value }
+        metadata.proRaw = fields["proraw"] == "1"
+        metadata.raw = fields["raw"] == "1"
+        metadata.frontCamera = fields["front"] == "1"
+        if let space = fields["space"], !space.isEmpty { metadata.colorSpace = space }
+        if let hdr = fields["hdr"], !hdr.isEmpty { metadata.hdrStatus = hdr }
+        if let derived = fields["derived"] { metadata.derivedFrom = UUID(uuidString: derived) }
+        metadata.processing = fields["proc"].flatMap(CaptureMetadata.decodeProcessing)
+        return metadata
     }
 
     /// Compact, stable, round-trippable. Unknown keys are ignored by a reader and
@@ -410,7 +418,7 @@ enum PhotoStore {
                                 ?? modified?.contentModificationDate
                                 ?? Date(timeIntervalSince1970: 0),
                               container: container,
-                              metadata: readMetadata(from: url) ?? CaptureMetadata())
+                              metadata: readMetadata(from: url) ?? CaptureMetadata(mode: "auto"))
         }
         return photos.sorted { $0.capturedAt > $1.capturedAt }
     }
@@ -428,7 +436,7 @@ enum PhotoStore {
               let comment = exif[kCGImagePropertyExifUserComment] as? String,
               !comment.isEmpty
         else { return nil }
-        return CaptureMetadata(recipe: comment)
+        return CaptureMetadata.decoding(recipe: comment)
     }
 
     /// Removes one photo. Throws rather than returning a flag: a failed delete that is

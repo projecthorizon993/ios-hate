@@ -261,7 +261,9 @@ private final class GalleryThumbnailCache: @unchecked Sendable {
     func image(for photo: SavedPhoto) async -> UIImage? {
         if let cached = cached(photo.url) { return cached }
         let url = photo.url
-        let decoded = await Task.detached(priority: .utility) { [weak self] in
+        // The return type is written out because the closure returns on two paths, and
+        // without it `return nil` has nothing to infer from.
+        let decoded: UIImage? = await Task.detached(priority: .utility) { () -> UIImage? in
             guard let data = try? Data(contentsOf: url) else { return nil }
             return PhotoStore.thumbnail(from: data, maxPixelSize: 400)
         }.value

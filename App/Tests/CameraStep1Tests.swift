@@ -833,7 +833,7 @@ final class CameraStep1Tests: XCTestCase {
         written.colorSpace = "display-p3"
         written.hdrStatus = "qualityRequested"
 
-        let read = CaptureMetadata(recipe: written.recipeString())
+        let read = CaptureMetadata.decoding(recipe: written.recipeString())
         XCTAssertEqual(read.mode, "looks")
         XCTAssertEqual(read.iso, 400)
         XCTAssertEqual(read.shutterSeconds ?? 0, 1.0 / 120.0, accuracy: 0.000_001)
@@ -850,7 +850,7 @@ final class CameraStep1Tests: XCTestCase {
     func testAnUnreadableRecipeDegradesInsteadOfFailing() {
         // A photo must still open when its recipe is from a future version or is simply
         // garbage. Defaults are the honest answer: nothing recorded is not a measurement.
-        let read = CaptureMetadata(recipe: "v9;iso=notanumber;garbage")
+        let read = CaptureMetadata.decoding(recipe: "v9;iso=notanumber;garbage")
         XCTAssertEqual(read.mode, "auto")
         XCTAssertNil(read.iso)
         XCTAssertFalse(read.frontCamera)
