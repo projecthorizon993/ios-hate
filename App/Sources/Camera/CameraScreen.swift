@@ -339,8 +339,8 @@ struct CameraScreen: View {
     private var zoomSlider: some View {
         if !model.capabilities.zoomStops.isEmpty {
             VStack(spacing: Theme.Space.xs) {
-                Slider(value: zoomBinding,
-                       in: model.zoomSliderRange,
+                Slider(value: zoomPositionBinding,
+                       in: 0...1,
                        onEditingChanged: zoomEditingChanged)
                     .tint(Theme.ColorToken.accentActive)
                     .accessibilityLabel("Zoom")
@@ -352,18 +352,22 @@ struct CameraScreen: View {
         }
     }
 
-    /// The slider's value: the drag while there is one, the camera's own factor otherwise.
-    private var zoomBinding: Binding<Double> {
+    /// Where the knob sits: the drag while there is one, the camera's own factor otherwise.
+    ///
+    /// Converted to and from a 0...1 position because the track is curved. The factor itself
+    /// is what `draggedZoom` holds and what the camera is told, so nothing downstream has to
+    /// know the track bends.
+    private var zoomPositionBinding: Binding<Double> {
         let range = model.zoomSliderRange
         return Binding(
             get: {
                 let value = draggedZoom ?? Double(model.readout.zoomFactor)
-                return min(max(value, range.lowerBound), range.upperBound)
+                return CameraViewModel.zoomPosition(forFactor: value, in: range)
             },
-            set: { value in
-                let clamped = min(max(value, range.lowerBound), range.upperBound)
-                draggedZoom = clamped
-                model.setZoom(to: CGFloat(clamped))
+            set: { position in
+                let factor = CameraViewModel.zoomFactor(forPosition: position, in: range)
+                draggedZoom = factor
+                model.setZoom(to: CGFloat(factor))
             }
         )
     }
@@ -384,10 +388,10 @@ struct CameraScreen: View {
 
     /// The reported switch-over factors, evenly spread under the slider.
     ///
-    /// Evenly spread rather than positioned at their true place on the track: a track that runs
-    /// to 10x puts 2x at a tenth of the width and 4x at a third, and cramming four labels into
-    /// the left third of the slider makes them smaller than the target they need to be. This is
-    /// also how the platform's own camera control is laid out.
+    /// Evenly spread rather than positioned at their true place on the track: even on the
+    /// curved track 2x sits about a fifth of the way along and 4x about a third, and cramming
+    /// four labels into the left third of the slider makes them smaller than the target they
+    /// need to be. This is also how the platform's own camera control is laid out.
     private var zoomStopLabels: some View {
         let stops = model.capabilities.zoomStops
         let switchOver = model.capabilities.plan.bound?.switchOverZoomFactors ?? []

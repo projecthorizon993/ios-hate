@@ -296,7 +296,16 @@ final class CameraViewModel: ObservableObject {
     /// Picks a look. `nil` means Original, which is the identity recipe and therefore gets
     /// the cheap direct preview path back.
     func select(look: Look?) {
-        updateSettings { $0.look = look }
+        updateSettings {
+            $0.look = look
+            // `lookIntensity` starts at 0, and `isIdentity` counts `lookIntensity == 0` as
+            // "no look applied". Selecting a look and leaving it at 0 therefore produced the
+            // identity recipe: the preview did not change, the strength slider read 0, and
+            // the whole control looked broken. Choosing a look means "show me this look", at
+            // the same full strength its thumbnail was generated at. Original resets to 0 so
+            // the next look does not inherit a stale dial position.
+            $0.lookIntensity = look == nil ? 0 : 1
+        }
         if let look {
             AppLog.note(AppLog.processing, "look selected: \(look.name)")
         }
@@ -617,12 +626,17 @@ final class CameraViewModel: ObservableObject {
         return min(clamped * switchOverMargin, upper)
     }
 
-    /// The range the zoom slider spans.
+    /// The zoom factors the slider can reach.
     ///
     /// The device's own maximum is not the top of it. An iPhone 11 Pro reports 189x, and a
-    /// slider that runs from 1 to 189 packs 1x, 2x and 4x into the first fifth of the track
-    /// and makes the optical stops unusable. Ten is where the frame stops being a lens choice
-    /// and becomes a crop of a crop, which is still worth having, just not worth half a screen.
+    /// slider that runs from 1 to 189 packs 1x, 2x and 4x into the first twentieth of the
+    /// track and makes the optical stops unusable.
+    ///
+    /// The long digital tail is worth having, so the ceiling is well past the last lens.
+    /// What keeps that from costing the lens stops is `zoomPosition(forFactor:in:)`: the
+    /// track is curved, not linear, so the range up to the last real lens occupies most of
+    /// the width and the crop-of-a-crop tail is squeezed into the end, where reaching it is
+    /// a deliberate act rather than something you fall into on the way to 2x.
     ///
     /// Never below the device's minimum, so the slider cannot offer a factor the active format
     /// would raise on — setting `videoZoomFactor` above `videoMaxZoomFactor` always raises.
@@ -636,7 +650,33 @@ final class CameraViewModel: ObservableObject {
     }
 
     /// The top of the zoom slider. See `zoomSliderRange`.
-    nonisolated static let zoomSliderCeiling: Double = 10
+    nonisolated static let zoomSliderCeiling: Double = 25
+
+    /// How hard the track bends. Above 1, which pushes the low factors out toward the left
+    /// and compresses everything above them. At 2, with a 25x ceiling, 2x lands about a fifth
+    /// of the way along and 4x about a third — which is where the lens stops want to be.
+    nonisolated static let zoomTrackExponent: Double = 2
+
+    /// Where a zoom factor sits on the 0...1 slider track.
+    ///
+    /// The inverse of `zoomFactor(forPosition:in:)`, and monotonic in both directions, so a
+    /// drag and the reported factor can never disagree about which way is up.
+    nonisolated static func zoomPosition(forFactor factor: Double,
+                                         in range: ClosedRange<Double>) -> Double {
+        let span = range.upperBound - range.lowerBound
+        // A zero-width range while the session is torn down: everything is at the bottom.
+        guard span > 0 else { return 0 }
+        let unit = min(max((factor - range.lowerBound) / span, 0), 1)
+        return pow(unit, 1 / zoomTrackExponent)
+    }
+
+    /// The zoom factor a track position stands for.
+    nonisolated static func zoomFactor(forPosition position: Double,
+                                       in range: ClosedRange<Double>) -> Double {
+        let unit = min(max(position, 0), 1)
+        return range.lowerBound + (range.upperBound - range.lowerBound)
+            * pow(unit, zoomTrackExponent)
+    }
 
     /// Zooms to a **factor**, not to a stop, because the slider is continuous: the user drags
     /// to somewhere between 1x and 2x as often as not, and a control that can only land on the

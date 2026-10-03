@@ -657,6 +657,78 @@ final class CameraStep1Tests: XCTestCase {
         return bytes
     }
 
+    // MARK: - Zoom track
+
+    func testZoomTrackRoundTripsEveryPosition() {
+        // The slider stores a position and the camera stores a factor. If these are not exact
+        // inverses, letting go of the slider lands somewhere the user did not drag to.
+        let range = 1.0...25.0
+        for step in stride(from: 0.0, through: 1.0, by: 0.05) {
+            let factor = CameraViewModel.zoomFactor(forPosition: step, in: range)
+            let back = CameraViewModel.zoomPosition(forFactor: factor, in: range)
+            XCTAssertEqual(back, step, accuracy: 0.0001, "position \(step) did not round trip")
+        }
+    }
+
+    func testZoomTrackIsMonotonic() {
+        // A curve that doubled back would make the same factor reachable from two places and
+        // send a drag the wrong way.
+        let range = 1.0...25.0
+        var previous = -1.0
+        for step in stride(from: 0.0, through: 1.0, by: 0.01) {
+            let factor = CameraViewModel.zoomFactor(forPosition: step, in: range)
+            XCTAssertGreaterThan(factor, previous, "factor fell at position \(step)")
+            previous = factor
+        }
+    }
+
+    func testZoomTrackKeepsTheLensStopsUsable() {
+        // The reason the track is curved at all: 2x and 4x must stay in the left half of the
+        // slider, or reaching them becomes a drag across the whole screen.
+        let range = 1.0...25.0
+        XCTAssertLessThan(CameraViewModel.zoomPosition(forFactor: 2, in: range), 0.35)
+        XCTAssertLessThan(CameraViewModel.zoomPosition(forFactor: 4, in: range), 0.5)
+    }
+
+    func testZoomTrackSpansTheWholeRangeAtItsEnds() {
+        let range = 1.0...25.0
+        XCTAssertEqual(CameraViewModel.zoomFactor(forPosition: 0, in: range), 1, accuracy: 0.0001)
+        XCTAssertEqual(CameraViewModel.zoomFactor(forPosition: 1, in: range), 25, accuracy: 0.0001)
+        XCTAssertEqual(CameraViewModel.zoomPosition(forFactor: 1, in: range), 0, accuracy: 0.0001)
+        XCTAssertEqual(CameraViewModel.zoomPosition(forFactor: 25, in: range), 1, accuracy: 0.0001)
+    }
+
+    func testZoomTrackSurvivesADegenerateRange() {
+        // The session can be torn down mid-drag, and the range collapses to 1...1. Dividing
+        // by that span is how a slider ends up with a NaN knob.
+        let flat = 1.0...1.0
+        XCTAssertEqual(CameraViewModel.zoomPosition(forFactor: 1, in: flat), 0)
+        XCTAssertEqual(CameraViewModel.zoomFactor(forPosition: 0.5, in: flat), 1, accuracy: 0.0001)
+    }
+
+    func testZoomTrackClampsPositionsOutsideTheTrack() {
+        let range = 1.0...25.0
+        XCTAssertEqual(CameraViewModel.zoomFactor(forPosition: -1, in: range), 1, accuracy: 0.0001)
+        XCTAssertEqual(CameraViewModel.zoomFactor(forPosition: 2, in: range), 25, accuracy: 0.0001)
+        XCTAssertEqual(CameraViewModel.zoomPosition(forFactor: 0.2, in: range), 0, accuracy: 0.0001)
+        XCTAssertEqual(CameraViewModel.zoomPosition(forFactor: 99, in: range), 1, accuracy: 0.0001)
+    }
+
+    // MARK: - Look strength
+
+    func testSelectingALookIsNotTheIdentityRecipe() {
+        // A look at zero strength *is* the identity recipe, which is why selecting one used
+        // to change nothing on screen and read as a dead control.
+        var settings = ProcessingSettings.none
+        settings.look = Look.Generated.warmth.look
+        settings.lookIntensity = 0
+        XCTAssertTrue(settings.clamped().isIdentity,
+                      "a look at zero strength must report itself as no look at all")
+        settings.lookIntensity = 1
+        XCTAssertFalse(settings.clamped().isIdentity,
+                       "a look at full strength must not report itself as the identity")
+    }
+
     // MARK: - Library export
 
     private func savedPhoto(_ name: String,
