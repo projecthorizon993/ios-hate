@@ -193,11 +193,37 @@ final class LUTProcessorTests: XCTestCase {
         let data = try XCTUnwrap(LUTProcessor.cubeData(for: lut))
         let values = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
 
-        // 2x2x2 identity: the first two samples are (0,0,0) and (1,0,0). If the parser
-        // or the upload ever transposes a channel, this is the assertion that catches it
-        // — and nothing else will, because the result still looks like a working filter.
-        XCTAssertEqual(Array(values.prefix(6)), [0, 0, 0, 1, 0, 0])
-        XCTAssertEqual(values.count, 8 * 3)
+        // 2x2x2 identity: the first two samples are (0,0,0) and (1,0,0), each widened to
+        // RGBA. If the parser or the upload ever transposes a channel, this is the assertion
+        // that catches it — and nothing else will, because the result still looks like a
+        // working filter.
+        XCTAssertEqual(Array(values.prefix(8)), [0, 0, 0, 1, 1, 0, 0, 1])
+        XCTAssertEqual(values.count, 8 * 4)
+    }
+
+    /// Core Image documents `cubeData` as **premultiplied RGBA** — four floats per sample.
+    ///
+    /// This is the assertion that was missing while every look was a no-op on device. The
+    /// buffer was three floats per sample, which is a valid `.cube` file and 25% too short
+    /// for a 17³ cube texture, so `outputImage` returned `nil` and nothing was ever graded.
+    /// The shipped tables are checked here too, because a 2³ control cannot catch a mistake
+    /// that only shows up at 17³.
+    func testCubeDataIsFourFloatsPerSample() throws {
+        for size in [2, CubeLUTParser.maximumSize, GeneratedLooks.size] {
+            let data = try XCTUnwrap(LUTProcessor.cubeData(for: makeTable(size: size)),
+                                     "no cube data for size \(size)")
+            XCTAssertEqual(data.count,
+                           size * size * size * 4 * MemoryLayout<Float>.size,
+                           "size \(size) must be premultiplied RGBA")
+
+            let values = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+            // Alpha is 1 on every sample: these tables are opaque, so premultiplication is
+            // a no-op, and a zero would premultiply the colour to black.
+            for sample in 0..<(size * size * size) {
+                XCTAssertEqual(values[sample * 4 + 3], 1,
+                               "sample \(sample) of size \(size) is not opaque")
+            }
+        }
     }
 
     func testCubeDataIsNilForAnUnusableTable() {
@@ -346,13 +372,15 @@ final class LUTProcessorTests: XCTestCase {
         cube.colorSpace = ColorSpace.sRGB.cgColorSpace
         cube.inputImage = flat
         cube.cubeDimension = 2
-        // The buffer now comes from **production**, not from `Data(repeating: 0, count:)`.
+        // The buffer comes from **production**, not from a hand-rolled byte count.
         //
-        // That is the point. The old control hand-built its own bytes, so it was never
-        // testing `cubeData(for:)` — and on device that function's `Data(buffer:)`
-        // wrapper was the one remaining difference between a cube that rendered in CI and
-        // one that returned `nil` everywhere, including for a synthetic grey image. A
-        // control that does not share the suspect code cannot rule the suspect out.
+        // That is the point. The old control built its own bytes, so it was never testing
+        // `cubeData(for:)` — and it is exactly the byte count that was wrong. The buffer was
+        // RGB, 3 floats per sample, while Core Image documents `cubeData` as premultiplied
+        // RGBA and wants `dimension³ x 4 x 4` bytes. A control with the right shape passed
+        // while production was 25% short, so the control could not have caught it: it was a
+        // control of the control. `testCubeDataIsFourFloatsPerSample` is the assertion that
+        // makes the shape load-bearing.
         cube.cubeData = LUTProcessor.cubeData(for: makeTable(size: 2)) ?? Data()
         cube.extrapolate = false
         return cube.outputImage != nil

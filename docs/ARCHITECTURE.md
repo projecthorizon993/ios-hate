@@ -344,9 +344,39 @@ None of that was true. What was actually true:
   that conclusion to skip the only two tests that would have caught it. **The bug wrote its
   own blind spot, and then this document cited the blind spot as evidence.**
 
+### 3.1z The second bug: the cube was three floats per sample, not four
+
+Fixing `extrapolate` was necessary and not sufficient. On device the filter still returned
+`nil` for every look — including for a synthetic grey image, and through plain `CIColorCube`
+as well — which is the signature of a bad **buffer**, not a bad image and not colour
+management.
+
+Apple documents `cubeData` as "a 3-dimensional color table of floating-point **premultiplied
+RGBA** values", so the buffer has to be exactly `dimension³ x 4 x sizeof(Float)` bytes. The
+tables themselves are RGB — that is what a `.cube` file is, and what `CubeLUT.samples` holds —
+so the alpha is **added when the upload is built**. It was not being added:
+
+```
+inputs: space=sRGB dimension=17 bytes=58956     <- 17^3 x 3 x 4
+expected:                            78608     <- 17^3 x 4 x 4
+```
+
+A 17³ RGB buffer is 25% short of a 17³ RGBA one, the 3D texture cannot be built from it, and
+`outputImage` is `nil`. `LUTProcessor.cubeData(for:)` now widens every RGB triple to RGBA with
+alpha 1 — opaque tables, so premultiplication is a no-op, and a zero would premultiply the
+colour to black.
+
+This one was catchable in CI and was not, for a specific reason: `coreImageCanRenderACube()`
+built its own buffer with `Data(repeating: 0, count: 8 * 4)` — a hand-rolled 2³ cube of the
+*right* shape — while every other test asked `cubeData(for:)` for the *wrong* shape. A control
+that does not share the code under suspicion cannot rule it out; it was a control of the
+control. The helper now takes its buffer from `cubeData(for:)`, and
+`testCubeDataIsFourFloatsPerSample` asserts `size³ x 4 x 4` bytes and a 1 in every alpha slot,
+at 2³, at the parser's maximum, and at the shipped 17³.
+
 So the answer to "what cannot CI check about the LUT" is: **whether the graded pixels are
-correct.** CI *can* and now does check that the filter is constructible and produces an
-output at all, which is the assertion that was missing. Comparing pixel values against a
+correct.** CI *can* and now does check that the filter is constructible, that the upload is
+the documented shape, and that it produces an output at all. Comparing pixel values against a
 reference tool still needs a device.
 
 `LUTProcessor` now builds the filter through the typed accessor `CIFilter.colorCubeWithColorSpace()`,

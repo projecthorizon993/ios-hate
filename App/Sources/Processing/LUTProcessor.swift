@@ -281,9 +281,11 @@ struct LUTProcessor {
         let unmanagedProducedOutput = unmanaged.outputImage != nil
 
         let extent = image.extent
+        let expectedBytes = dimension * dimension * dimension * 4 * MemoryLayout<Float>.size
         return """
         cube produced no output; LUT not applied
-        inputs: space=\(space.name) dimension=\(dimension) bytes=\(cubeData.count)
+        inputs: space=\(space.name) dimension=\(dimension) bytes=\(cubeData.count) \
+        expected=\(expectedBytes) (RGBA, \(dimension)^3 x 4 x 4)
         image: extent=\(extent) infinite=\(extent.isInfinite) \
         empty=\(extent.isEmpty)
         controlSynthesisedImage=\(controlProducedOutput ? "produced output" : "also produced none") \
@@ -291,31 +293,69 @@ struct LUTProcessor {
         """
     }
 
-    /// Builds the cube data exactly as Core Image expects it: RGB floats, red varying
-    /// fastest, matching the sample order the parser preserved.
+    /// Builds the cube data exactly as Core Image expects it: **premultiplied RGBA** floats,
+    /// red varying fastest, matching the sample order the parser preserved.
     ///
     /// Exposed separately so the ordering is unit tested rather than assumed, since a
     /// transposition here produces a table that loads, reports itself applied, and
     /// colours every photo slightly wrong.
+    ///
+    /// ## Four floats per sample, not three — this is the bug that made every look a no-op
+    ///
+    /// Apple documents `cubeData` as "data containing a 3-dimensional color table of
+    /// floating-point **premultiplied RGBA** values", and the buffer has to be exactly
+    /// `dimension³ x 4 x sizeof(Float)` bytes. The table itself is RGB — `.cube` files are,
+    /// and `CubeLUT.samples` is — so the alpha has to be *added here*, not expected.
+    ///
+    /// What was being handed over was three floats per sample:
+    ///
+    ///     inputs: space=sRGB dimension=17 bytes=58956      <- 17^3 x 3 x 4
+    ///
+    /// Core Image wants 78608 for the same table. A 17³ RGB buffer is 25% short of a 17³
+    /// RGBA one, the 3D texture upload cannot be built from it, and `outputImage` comes back
+    /// `nil` — so every look silently did nothing and the saved photo was the untouched image.
+    ///
+    /// ## Why nothing caught it, twice over
+    ///
+    /// The device-side diagnostic says this is not the image, and it was right: a synthetic
+    /// grey image with the identical cube *also* returned `nil`, through the colour-managed
+    /// filter and through plain `CIColorCube`. A short buffer fails the same way whatever
+    /// image it is handed, which is the signature.
+    ///
+    /// And the CI control could not have caught it either, because it does not assert what it
+    /// claims. `coreImageCanRenderACube()` proves a cube renders; it was fed
+    /// `Data(repeating: 0, count: 8 * 4)` — a *hand-rolled* 2³ buffer of the right shape —
+    /// while every other test in the file asked `LUTProcessor.cubeData(for:)` for the same
+    /// wrong 3-channel shape. The one test that used the shipped 17³ tables
+    /// (`testEveryShippedLookActuallyApplies`) sits behind `XCTSkipUnless(coreImageCanRenderACube())`,
+    /// so the combination that production uses was never rendered anywhere. The control was
+    /// a control of the control.
+    ///
+    /// `LUTProcessorTests` now asserts the byte count against `size³ x 4` and asserts the
+    /// alpha channel, and the skip helper builds its buffer through this same function.
     static func cubeData(for lut: CubeLUT) -> Data? {
         guard lut.kind == .threeDimensional, lut.isUsable else { return nil }
-        // Explicit raw bytes, not `Data(buffer:)`.
-        //
-        // `Data(buffer: UnsafeBufferPointer<Float>)` produces a `Data` tagged with
-        // `elementType == Float`. The bytes are identical, but it is a different object
-        // from a plain byte buffer, and Core Image validates the cube it is handed before
-        // rendering it. That difference is the one remaining variable between the two runs:
-        //
-        // - `LUTProcessorTests.coreImageCanRenderACube` builds its control with
-        //   `Data(repeating: 0, count:)` — plain bytes, and it renders in CI.
-        // - production, and now the device-side control that inherits it, uses
-        //   `Data(buffer:)` — and it fails on device even for a **synthetic grey image**,
-        //   with the colour-managed *and* the unmanaged filter.
-        //
-        // The image is therefore not the variable; how the cube bytes are wrapped is.
-        // Building the buffer from raw bytes removes that ambiguity instead of leaving it
-        // to be guessed at, and makes the CI control and production the same object.
-        return lut.samples.withUnsafeBufferPointer { buffer in
+        let channels = CubeLUT.channelsPerSample
+        let sampleCount = lut.samples.count / channels
+        guard sampleCount > 0 else { return nil }
+
+        // Red varies fastest, already, because that is the order `samples` is in — this loop
+        // only widens each RGB triple to RGBA and leaves the order alone. Written as a copy
+        // rather than `Data(lut.samples)` because `Data` initialises from bytes and `Float`
+        // is not `UInt8`.
+        var rgba = [Float](repeating: 1, count: sampleCount * 4)
+        for sample in 0..<sampleCount {
+            let from = sample * channels
+            let to = sample * 4
+            rgba[to] = lut.samples[from]
+            rgba[to + 1] = lut.samples[from + 1]
+            rgba[to + 2] = lut.samples[from + 2]
+            // Premultiplied: the table's colours are all opaque, so alpha is 1 and
+            // premultiplication is a no-op. It still has to be there — a zero alpha would
+            // premultiply the colour to black.
+            rgba[to + 3] = 1
+        }
+        return rgba.withUnsafeBufferPointer { buffer in
             guard let base = buffer.baseAddress, buffer.count > 0 else { return nil }
             return Data(bytes: base, count: buffer.count * MemoryLayout<Float>.size)
         }
