@@ -195,12 +195,41 @@ final class ProcessingPipelineTests: XCTestCase {
 
     // MARK: - Subject mask
 
-    /// A mask covering the whole frame is a segmentation failure, not a subject. Acting on
-    /// it would apply the look to everything while the UI claimed a subject blend.
-    func testAMaskCoveringTheFrameIsRejected() {
-        let mask = SubjectMask(coverage: 0.95, confidence: 0.9)
+    /// A mask that found no boundary at all is a segmentation failure, not a subject.
+    /// Acting on it would apply the look to everything while the UI claimed a subject blend.
+    func testAMaskWithNoBoundaryIsRejected() {
+        let mask = SubjectMask(coverage: 1, confidence: 0.9)
         XCTAssertFalse(mask.isUsable)
         XCTAssertTrue(mask.decision().contains("covers the frame"))
+    }
+
+    /// The bug the 0.85 threshold caused, named as a test.
+    ///
+    /// Every mask the app computed was being discarded with `covers the frame`. A subject
+    /// filling most of the frame is a close-up, not a segmentation failure, and a close-up is
+    /// exactly when subject-aware processing earns its keep. At 0.85 this was rejected.
+    func testASubjectFillingMostOfTheFrameIsStillASubject() {
+        // What a near portrait produces: high coverage, and a confident mask because the
+        // background is still a distinct region.
+        let mask = SubjectMask(coverage: 0.92, confidence: 0.8)
+        XCTAssertTrue(mask.isUsable,
+                      "a subject filling 92% of the frame must not be rejected as a failure")
+    }
+
+    /// The gate has to still catch the case it was written for, one notch below 1.0.
+    func testTheCoverageCeilingRejectsOnlyNearUniformMasks() {
+        XCTAssertFalse(SubjectMask(coverage: 0.99, confidence: 0.9).isUsable)
+        XCTAssertTrue(SubjectMask(coverage: 0.97, confidence: 0.9).isUsable)
+    }
+
+    /// A high-coverage mask with no bimodality is caught by confidence rather than by
+    /// coverage, which is the division of labour between the two gates.
+    func testAUniformHighCoverageMaskIsCaughtByConfidence() {
+        // Coverage alone cannot tell "fills the frame" from "has no boundary"; the spread
+        // proxy can, because a mask with no boundary has none.
+        let mask = SubjectMask(coverage: 0.97, confidence: 0.1)
+        XCTAssertFalse(mask.isUsable)
+        XCTAssertTrue(mask.decision().contains("low confidence"))
     }
 
     func testAMaskWithNoCoverageIsRejected() {
@@ -220,6 +249,96 @@ final class ProcessingPipelineTests: XCTestCase {
         let mask = SubjectMask(coverage: 0.3, confidence: 0.8)
         XCTAssertTrue(mask.isUsable)
         XCTAssertEqual(mask.decision(), "blend 30%")
+    }
+
+    // MARK: - Learned stage routing
+
+    private func metadata(lens: String?, zoom: Double? = nil, front: Bool = false) -> CaptureMetadata {
+        var metadata = CaptureMetadata(mode: "auto")
+        metadata.lensKind = lens
+        metadata.zoomFactor = zoom
+        metadata.frontCamera = front
+        return metadata
+    }
+
+    /// Each lens gets the stage its optics actually call for, and nothing else.
+    ///
+    /// The f/2.4 ultra wide against the wide's f/1.8 is why denoise is routed there, and the
+    /// crop past the telephoto's optical limit is why super-resolution is. A single "AI
+    /// enhance" toggle across all three would apply the wrong one to two of them.
+    func testEachLensRoutesToItsOwnStage() {
+        XCTAssertEqual(
+            LearnedStagePlan.plan(for: metadata(lens: "AVCaptureDeviceTypeBuiltInUltraWideCamera")).stages,
+            [.denoise])
+        XCTAssertEqual(
+            LearnedStagePlan.plan(for: metadata(lens: "AVCaptureDeviceTypeBuiltInWideAngleCamera")).stages,
+            [.lowLightToneMap])
+    }
+
+    /// A telephoto inside its optical range needs nothing. It is sharp already, and an SR
+    /// model here would smooth real detail to add invented detail.
+    func testTheTelephotoGetsNothingInsideItsOpticalRange() {
+        let plan = LearnedStagePlan.plan(
+            for: metadata(lens: "AVCaptureDeviceTypeBuiltInTelephotoCamera", zoom: 2))
+        XCTAssertEqual(plan, .none)
+    }
+
+    /// Past the optical limit the frame is a crop, and that is the only case worth SR.
+    func testTheTelephotoGetsSuperResolutionOnceItIsCropping() {
+        let plan = LearnedStagePlan.plan(
+            for: metadata(lens: "AVCaptureDeviceTypeBuiltInTelephotoCamera", zoom: 4.08))
+        XCTAssertEqual(plan.stages, [.superResolution])
+    }
+
+    /// No zoom factor recorded means the crop cannot be established, so no SR. Guessing
+    /// "probably cropped" would put invented detail in ordinary shots.
+    func testSuperResolutionIsSkippedWhenTheZoomIsUnknown() {
+        let plan = LearnedStagePlan.plan(
+            for: metadata(lens: "AVCaptureDeviceTypeBuiltInTelephotoCamera", zoom: nil))
+        XCTAssertEqual(plan, .none)
+    }
+
+    /// The front camera gets nothing from any stage.
+    ///
+    /// It has no low-light problem worth solving here, and it is not a sensor these models
+    /// were trained for. Worth its own test because a front shot still carries a `lensKind`.
+    func testTheFrontCameraIsExcludedFromEveryStage() {
+        XCTAssertEqual(
+            LearnedStagePlan.plan(for: metadata(lens: "AVCaptureDeviceTypeBuiltInWideAngleCamera",
+                                               zoom: 4,
+                                               front: true)),
+            .none)
+    }
+
+    /// A stage never runs on a lens that is not its own.
+    func testAStageNeverRunsOnAnotherLens() {
+        XCTAssertFalse(LearnedStage.denoise.applies(to: .telephoto))
+        XCTAssertFalse(LearnedStage.superResolution.applies(to: .ultraWide))
+        XCTAssertFalse(LearnedStage.lowLightToneMap.applies(to: .front))
+        XCTAssertTrue(LearnedStage.denoise.applies(to: .ultraWide))
+    }
+
+    /// A composite whose constituent could not be resolved falls back to the wide, which is
+    /// the constituent a composite actually falls back to.
+    func testAnUnresolvedCompositeRoutesLikeTheWide() {
+        let plan = LearnedStagePlan.plan(for: metadata(lens: "AVCaptureDeviceTypeBuiltInTripleCamera"))
+        XCTAssertEqual(plan.stages, [.lowLightToneMap])
+    }
+
+    /// A lens name this app does not recognise runs nothing rather than guessing.
+    ///
+    /// A model running because a string looked plausible is worse than no model: it costs
+    /// time and invents detail with nothing to justify it.
+    func testAnUnknownLensRunsNothing() {
+        XCTAssertEqual(LearnedStagePlan.plan(for: metadata(lens: "something-new")), .none)
+        XCTAssertEqual(LearnedStagePlan.plan(for: metadata(lens: nil)), .none)
+    }
+
+    /// Order is fixed, so the same capture always produces the same plan and therefore the
+    /// same file. A set would make the sequence depend on hashing.
+    func testTheStageOrderIsDeterministic() {
+        let plan = LearnedStagePlan.plan(for: metadata(lens: "AVCaptureDeviceTypeBuiltInUltraWideCamera"))
+        XCTAssertEqual(plan.stages, plan.stages, "the same shot must plan identically twice")
     }
 
     // MARK: - Colour space

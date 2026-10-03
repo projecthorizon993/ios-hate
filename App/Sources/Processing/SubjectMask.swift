@@ -23,7 +23,26 @@ struct SubjectMask: Equatable, Codable, Sendable {
 
     /// A mask covering more than this is treated as "no subject found" rather than as a
     /// segmentation that happened to fill the frame.
-    static let maximumCoverage: Float = 0.85
+    ///
+    /// ## Why this is 0.98 and not 0.85
+    ///
+    /// This gate rejected nearly every mask the app computed. The log said so on frame after
+    /// frame:
+    ///
+    ///     subject mask not used: mask rejected: covers the frame
+    ///
+    /// `coverage` is the **mean** of Vision's mask buffer, so it is the fraction of the frame
+    /// the person occupies. At 0.85 that discards any shot where the subject fills more than
+    /// about six sevenths of the frame — which is most close-ups, and is precisely the
+    /// photograph where a subject mask is worth having. The gate was rejecting good
+    /// segmentation as though it were a failure.
+    ///
+    /// The value that actually indicates failure is 1.0: a mask that is uniformly foreground
+    /// has found no boundary at all, which is a different fault and is caught properly by the
+    /// confidence proxy below, since a uniform mask has no bimodality and so scores near 0.
+    /// Keeping a separate coverage gate at 0.98 catches the literal no-boundary case without
+    /// rejecting a close-up.
+    static let maximumCoverage: Float = 0.98
 
     /// Below this the mask is too weak to act on, and the look goes on globally instead.
     static let minimumConfidence: Float = 0.25
