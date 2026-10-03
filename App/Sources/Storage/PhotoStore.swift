@@ -370,7 +370,12 @@ enum PhotoStore {
             throw PhotoStoreError.libraryAccessDenied
         }
         try await PHPhotoLibrary.shared().performChanges {
-            PHAssetCreationRequest.addResource(with: .photo, fileURL: photo.url)
+            // The options object is required rather than optional in this SDK, and leaving
+            // it empty means Photos picks its own filename instead of inheriting the
+            // timestamp-and-UUID one the container uses.
+            PHAssetCreationRequest.addResource(with: .photo,
+                                               fileURL: photo.url,
+                                               options: PHAssetResourceCreationOptions())
         }
     }
 
