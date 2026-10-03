@@ -448,10 +448,12 @@ final class LUTProcessorTests: XCTestCase {
 
         XCTAssertTrue(lut.isUsable)
         let data = try XCTUnwrap(LUTProcessor.cubeData(for: lut))
-        // Three floats per sample, four bytes per float.
+        // Premultiplied RGBA — four floats per sample, four bytes per float. This said
+        // three while the shipped tables said three too, so it agreed with the bug instead
+        // of catching it. See `testCubeDataIsFourFloatsPerSample`.
         XCTAssertEqual(data.count,
                        CubeLUTParser.maximumSize * CubeLUTParser.maximumSize
-                       * CubeLUTParser.maximumSize * 3 * 4)
+                       * CubeLUTParser.maximumSize * 4 * 4)
     }
 
     /// The regression test for the bug that shipped: **every look the app actually offers**
