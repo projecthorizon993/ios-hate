@@ -68,6 +68,9 @@ jobs:
         run: |
           set -uo pipefail
           DERIVED_DATA="$RUNNER_TEMP/DerivedData"
+          # Stamped into Info.plist as LumaFrameBuild, so the log file the user sends back
+          # names the commit that produced it instead of "1.0 (1)".
+          SHORT_SHA="${GITHUB_SHA::8}"
           set +e
           xcodebuild test \
             -project LumaFrame.xcodeproj \
@@ -76,6 +79,7 @@ jobs:
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath "$DERIVED_DATA" \
             CODE_SIGNING_ALLOWED=NO \
+            LUMAFRAME_BUILD="$SHORT_SHA" \
             2>&1 | tee "$RUNNER_TEMP/xcodebuild-test.log"
           STATUS=${PIPESTATUS[0]}
           set -e
@@ -164,6 +168,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            LUMAFRAME_BUILD="${GITHUB_SHA::8}" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
           BUILD_STATUS=${PIPESTATUS[0]}
           set -e

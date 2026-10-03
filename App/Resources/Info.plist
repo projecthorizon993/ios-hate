@@ -18,6 +18,13 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<!-- Which build produced this binary. `CFBundleVersion` cannot carry it: Apple
+	     requires that key to be a dotted number, and a commit hash there can make an
+	     install fail. A custom key is unconstrained, and the app prints it at launch so a
+	     log file names the commit it came from. Defaults to `local` in the project and is
+	     overridden by CI. -->
+	<key>LumaFrameBuild</key>
+	<string>$(LUMAFRAME_BUILD)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- Without these two, Documents is invisible in the Files app: the app does not

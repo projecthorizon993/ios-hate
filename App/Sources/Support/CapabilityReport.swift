@@ -719,11 +719,11 @@ struct DeveloperPanel: View {
     }
 
     /// Version and build, so two logs from two different builds are never confused.
-    private var buildTag: String {
-        let info = Bundle.main.infoDictionary
-        let short = (info?["CFBundleVersion"] as? String) ?? "0"
-        return short.replacingOccurrences(of: ".", with: "-")
-    }
+    ///
+    /// Was `CFBundleVersion` on its own, which is `1` in this project and therefore named
+    /// every export `LumaFrame-1.txt`. The commit is what actually distinguishes two runs,
+    /// and the user attached two files with the same name in one report because of it.
+    private var buildTag: String { AppVersion.fileNameSafeBuild }
 
     /// Says where the log is, because a developer looking for the file will not guess that
     /// Documents is exposed through Files.app by two Info.plist keys.

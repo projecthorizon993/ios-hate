@@ -316,6 +316,10 @@ function generate() {
     p('\t\t\t\t\t"$(inherited)",');
     p('\t\t\t\t\t"@executable_path/Frameworks"');
     p("\t\t\t\t);");
+    // Stamped into Info.plist so a log file says which commit produced it. `local` is the
+    // default so a build that is not going through CI still gets a defined value rather than
+    // an empty key, and CI overrides it on the xcodebuild command line.
+    p('\t\t\t\tLUMAFRAME_BUILD = local;');
     p("\t\t\t\tMARKETING_VERSION = 1.0;");
     p(`\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = ${BUNDLE_ID};`);
     p('\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";');

@@ -1,5 +1,55 @@
 import Foundation
 
+/// Which build this binary is, read once from the bundle.
+///
+/// ## Why this exists
+///
+/// The log file accumulates every session and is read by attaching it to a message, so
+/// "which run was this?" has to be answerable from the file alone. It was not: one log file
+/// holds a week of sessions and nothing in it named the app version, let alone the commit.
+/// Two exported copies were then both called `LumaFrame-1.txt`, because `CFBundleVersion` is
+/// hardcoded to `1`, and which one was newer was decided by looking at the timestamps.
+///
+/// `LumaFrameBuild` is a custom Info.plist key holding the commit, because `CFBundleVersion`
+/// cannot carry it — Apple requires that key to be a dotted number and a hash there makes an
+/// install fail. It reads `local` for a build that did not go through CI, which is honest
+/// rather than blank: "not stamped" should look different from a real hash.
+enum AppVersion {
+
+    /// `1.0 (1) 977f590` — version, bundle version, commit.
+    static var description: String {
+        let info = Bundle.main.infoDictionary
+        let short = (info?["CFBundleShortVersionString"] as? String) ?? "?"
+        let bundle = (info?["CFBundleVersion"] as? String) ?? "?"
+        let commit = build
+        return "\(short) (\(bundle)) \(commit)"
+    }
+
+    /// The commit this binary was built from, or `local` / `unknown`.
+    static var build: String {
+        let trimmed = (Bundle.main.infoDictionary?["LumaFrameBuild"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty, !Self.isUnsubstituted(trimmed) else { return "unknown" }
+        return trimmed
+    }
+
+    /// Whether a bundle value is a build setting nobody expanded.
+    ///
+    /// An unsubstituted value would otherwise be reported as a build name, which is the one
+    /// thing this type exists to make impossible. A build setting is always a dollar sign
+    /// followed by a bracketed name — Info.plist leaves it verbatim — so the prefix is the
+    /// whole test, and spelling the marker out literally here would be the same defect.
+    static func isUnsubstituted(_ value: String) -> Bool {
+        value.hasPrefix("$")
+    }
+
+    /// `build` reduced to something safe for a file name: no dots, no slashes.
+    static var fileNameSafeBuild: String {
+        build.replacingOccurrences(of: ".", with: "-")
+            .replacingOccurrences(of: "/", with: "-")
+    }
+}
+
 /// One plain-text log file on the device that outlives the process.
 ///
 /// The unified system log already receives everything `AppLog` writes, but it is only
@@ -67,9 +117,13 @@ enum LumaFrameLogFile {
 
     /// Marks the start of a run, so a log containing several sessions is readable.
     ///
-    /// Cheap, and the alternative is inferring run boundaries from timestamps.
+    /// The banner names the build, because the whole point of the file is being read later
+    /// than the run that wrote it: "the front camera was upside down" means something only
+    /// once you know which build had the bug. Cheap, and the alternative is inferring both
+    /// the run boundary and the version from timestamps.
     static func markRun(_ note: String) {
         append("")
+        append("==== \(AppVersion.description) ====")
         append("---- run: \(note) ----")
     }
 

@@ -590,6 +590,37 @@ final class CameraStep1Tests: XCTestCase {
         }
     }
 
+    // MARK: - Build identity
+
+    /// The log file is read long after the run that wrote it, often attached to a report
+    /// about which build had the bug. It has to name the build from the inside, and the one
+    /// thing it must never do is print an unsubstituted Info.plist key — that reads exactly
+    /// like a real build name and is the failure this is here to prevent.
+    func testBuildIdentityNamesTheBinaryAndNeverAnUnsubstitutedKey() {
+        XCTAssertFalse(AppVersion.build.isEmpty)
+        XCTAssertFalse(AppVersion.isUnsubstituted(AppVersion.build))
+        XCTAssertFalse(AppVersion.description.isEmpty)
+        XCTAssertTrue(AppVersion.description.contains(AppVersion.build),
+                      "the run banner has to contain the build it claims")
+    }
+
+    func testAnUnsubstitutedBuildSettingIsRecognised() {
+        XCTAssertTrue(AppVersion.isUnsubstituted("$(LUMAFRAME_BUILD)"))
+        XCTAssertFalse(AppVersion.isUnsubstituted("977f590"))
+        XCTAssertFalse(AppVersion.isUnsubstituted("local"))
+        XCTAssertFalse(AppVersion.isUnsubstituted(""))
+    }
+
+    /// Two exports from two runs are attached to the same report, so their names have to
+    /// differ. A dot turns the commit into an apparent file extension and a slash turns the
+    /// export path into a directory.
+    func testBuildIdentityIsSafeForAnExportFileName() {
+        let safe = AppVersion.fileNameSafeBuild
+        XCTAssertFalse(safe.isEmpty)
+        XCTAssertFalse(safe.contains("."), "a dot reads as a file extension")
+        XCTAssertFalse(safe.contains("/"), "a slash makes the export path a directory")
+    }
+
     // MARK: - Container detection
 
     func testContainerDetectionReadsTheLeadingBytes() {
