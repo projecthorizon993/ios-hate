@@ -320,7 +320,7 @@ function generate() {
     // default so a build that is not going through CI still gets a defined value rather than
     // an empty key, and CI overrides it on the xcodebuild command line.
     p('\t\t\t\tLUMAFRAME_BUILD = local;');
-    p("\t\t\t\tMARKETING_VERSION = 1.0;");
+    p("\t\t\t\tMARKETING_VERSION = 1.0.0;");
     p(`\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = ${BUNDLE_ID};`);
     p('\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";');
     p("\t\t\t\tSWIFT_EMIT_LOC_STRINGS = YES;");

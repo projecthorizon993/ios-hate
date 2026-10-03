@@ -69,8 +69,10 @@ jobs:
           set -uo pipefail
           DERIVED_DATA="$RUNNER_TEMP/DerivedData"
           # Stamped into Info.plist as LumaFrameBuild, so the log file the user sends back
-          # names the commit that produced it instead of "1.0 (1)".
-          SHORT_SHA="${GITHUB_SHA::8}"
+          # names the build it came from. The run number goes first because it is the
+          # part that increments by one on every single build: `138-2ff7527` reads as
+          # "build 138" at a glance and pins the commit exactly.
+          LUMAFRAME_BUILD="${{ github.run_number }}-${GITHUB_SHA::8}"
           set +e
           xcodebuild test \
             -project LumaFrame.xcodeproj \
@@ -168,7 +170,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            LUMAFRAME_BUILD="${GITHUB_SHA::8}" \
+            LUMAFRAME_BUILD="${{ github.run_number }}-${GITHUB_SHA::8}" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
           BUILD_STATUS=${PIPESTATUS[0]}
           set -e

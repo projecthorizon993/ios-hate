@@ -16,16 +16,29 @@ import Foundation
 /// rather than blank: "not stamped" should look different from a real hash.
 enum AppVersion {
 
-    /// `1.0 (1) 977f590` — version, bundle version, commit.
+/// `beta v1.0.0 build 138-2ff7527` — channel, version, then the build.
     static var description: String {
-        let info = Bundle.main.infoDictionary
-        let short = (info?["CFBundleShortVersionString"] as? String) ?? "?"
-        let bundle = (info?["CFBundleVersion"] as? String) ?? "?"
-        let commit = build
-        return "\(short) (\(bundle)) \(commit)"
+        "\(releaseLabel) build \(build)"
     }
 
-    /// The commit this binary was built from, or `local` / `unknown`.
+    /// `beta v1.0.0` — the version as a person says it, from `CFBundleShortVersionString`.
+    ///
+    /// The channel is a constant here rather than a build setting because it changes with a
+    /// decision, not with a build, and a decision that needs a build to change it has already
+    /// gone wrong once.
+    static var releaseLabel: String {
+        let short = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?"
+        return "\(channel) v\(short)"
+    }
+
+    /// The pre-release channel this build is on.
+    static let channel = "beta"
+
+    /// The commit and build number this binary was built from, or `local` / `unknown`.
+    ///
+    /// CI writes `<run number>-<short sha>`, so the number at the front increments by one on
+    /// every single build and the hash still pins the exact commit. That is what makes "which
+    /// version was this?" answerable from a log file alone instead of from memory.
     static var build: String {
         let trimmed = (Bundle.main.infoDictionary?["LumaFrameBuild"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -180,6 +193,8 @@ enum LumaFrameLogFile {
         if !FileManager.default.fileExists(atPath: url.path) {
             let header = "LumaFrame log. One line per event, flushed as it is written, so the"
                 + " tail survives a crash. Timestamps are UTC ISO 8601.\n"
+                + "This file holds every session; each run prints its own version banner, so"
+                + " read the banner nearest the event rather than this header.\n"
             FileManager.default.createFile(atPath: url.path, contents: header.data(using: .utf8))
         }
         return url

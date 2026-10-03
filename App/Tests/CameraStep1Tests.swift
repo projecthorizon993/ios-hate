@@ -602,6 +602,17 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertFalse(AppVersion.description.isEmpty)
         XCTAssertTrue(AppVersion.description.contains(AppVersion.build),
                       "the run banner has to contain the build it claims")
+        XCTAssertTrue(AppVersion.description.hasPrefix(AppVersion.channel + " v"),
+                      "the banner leads with the channel and version, which is what is read first")
+        XCTAssertTrue(AppVersion.description.contains("build "))
+    }
+
+    /// The version is labelled, not printed as a bare number: a log that says only "1.0.0"
+    /// cannot say whether that was a released build or a test build of that version.
+    func testReleaseLabelIsTheVersionUnderItsChannel() {
+        let label = AppVersion.releaseLabel
+        XCTAssertTrue(label.hasPrefix("beta v"), "expected a beta label, got \(label)")
+        XCTAssertTrue(label.contains("1.0.0"), "expected 1.0.0 in \(label)")
     }
 
     func testAnUnsubstitutedBuildSettingIsRecognised() {
