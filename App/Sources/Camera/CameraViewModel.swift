@@ -68,12 +68,6 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var facing: CameraFacing = .back
     @Published private(set) var thumbnail: UIImage?
     @Published private(set) var latestPhoto: SavedPhoto?
-    /// The graded version of `latestPhoto`, when a look was applied and the render
-    /// finished. `nil` for a capture taken with nothing applied, which is the case where
-    /// the original *is* the photo.
-    @Published private(set) var latestProcessedPhoto: SavedPhoto?
-    /// Guards the library export against a second tap while the first is still in flight.
-    @Published private(set) var isExportingToLibrary = false
     @Published private(set) var storedBytes: Int64?
     @Published private(set) var canFlip = false
     @Published var showDebugOverlay = false
@@ -966,9 +960,6 @@ final class CameraViewModel: ObservableObject {
                                                  container: capture.container,
                                                  metadata: metadata)
                 latestPhoto = saved
-                // Reset before the render below reports in, so a tap during the render
-                // exports the previous capture's processed file rather than this one's.
-                latestProcessedPhoto = nil
                 storedBytes = PhotoStore.totalBytes()
                 // The badge records that a quality-priority capture was requested on a
                 // format that supports it. The resolution is not readable back from
@@ -1036,42 +1027,8 @@ final class CameraViewModel: ObservableObject {
                                                  container: .jpeg,
                                                  metadata: metadata)
                 AppLog.note(AppLog.processing, "processed version written: \(saved.describeForLog)")
-                await MainActor.run {
-                    // Only claim the slot if this is still the newest capture. Two rapid
-                    // shutters can finish rendering out of order, and a stale render must
-                    // not become the photo the user is offered to export.
-                    guard self.latestPhoto?.id == original.id else { return }
-                    self.latestProcessedPhoto = saved
-                }
             } catch {
                 AppLog.fail(AppLog.processing, "processed version not written: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    /// Copies the newest capture into the user's photo library.
-    ///
-    /// Explicit rather than automatic: section 14 of the plan keeps media on the device, so
-    /// the library copy is something the user asks for rather than a side effect of the
-    /// shutter. The file in the container is untouched either way, and refusing permission
-    /// costs the user nothing that was not already saved to disk.
-    func saveLatestToPhotoLibrary() {
-        guard !isExportingToLibrary else { return }
-        guard let candidate = PhotoStore.libraryCandidate(original: latestPhoto,
-                                                           processed: latestProcessedPhoto) else {
-            present("No photo to save yet", isError: false)
-            return
-        }
-        isExportingToLibrary = true
-        Task {
-            defer { isExportingToLibrary = false }
-            do {
-                try await PhotoStore.addToLibrary(candidate)
-                AppLog.note(AppLog.camera, "added to photo library: \(candidate.describeForLog)")
-                present("Saved to Photos", isError: false)
-            } catch {
-                AppLog.fail(AppLog.camera, "not added to photo library: \(error.localizedDescription)")
-                present(error.localizedDescription, isError: true)
             }
         }
     }

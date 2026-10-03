@@ -30,10 +30,10 @@ struct CameraScreen: View {
     @State private var draggedZoom: Double?
     /// Which Pro parameter's dial is docked, or nil when collapsed.
     @State private var openProParameter: ProParameter?
-    /// Whether the "save to Photos" confirmation is up. Held here rather than saving on
-    /// tap, because the button sits under the user's thumb next to the shutter and a
-    /// library write is too permanent to trigger by accident.
-    @State private var isConfirmingLibrarySave = false
+    /// Whether the gallery is up. A sheet rather than a push, so the camera session is never
+    /// rebuilt to go back to the viewfinder — the user returns to exactly the framing they
+    /// left, which is the whole point of checking a photo straight after taking it.
+    @State private var isShowingGallery = false
 
     /// Derived, never stored twice. Rotating the device or flipping the camera both
     /// change it, and there is only one place the angle is computed.
@@ -176,6 +176,9 @@ struct CameraScreen: View {
         .gesture(focusGesture)
         .simultaneousGesture(debugTap)
         .animation(Theme.Motion.animation(Theme.Motion.overlay), value: focusReticle)
+        .sheet(isPresented: $isShowingGallery) {
+            GalleryView { isShowingGallery = false }
+        }
     }
 
     /// Grid and debug line in a single `Canvas`, so the overlay costs one draw.
@@ -530,17 +533,8 @@ struct CameraScreen: View {
 
     private var shutterRow: some View {
         HStack {
-            GalleryButton(thumbnail: model.thumbnail,
-                          isBusy: model.isExportingToLibrary) {
-                isConfirmingLibrarySave = true
-            }
-            .confirmationDialog("Save this photo to your Photos library?",
-                                isPresented: $isConfirmingLibrarySave,
-                                titleVisibility: .visible) {
-                Button("Save to Photos") { model.saveLatestToPhotoLibrary() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("LumaFrame keeps its own copy in the app either way.")
+            GalleryButton(thumbnail: model.thumbnail) {
+                isShowingGallery = true
             }
 
             Spacer(minLength: Theme.Space.l)
@@ -675,7 +669,6 @@ private struct ShutterButton: View {
 
 private struct GalleryButton: View {
     var thumbnail: UIImage?
-    var isBusy: Bool
     var action: () -> Void
 
     var body: some View {
@@ -693,17 +686,11 @@ private struct GalleryButton: View {
             .frame(width: Theme.Space.huge, height: Theme.Space.huge)
             .background(Theme.ColorToken.surfaceRaised)
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
-            .overlay {
-                if isBusy {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                }
-            }
         }
-        .disabled(thumbnail == nil || isBusy)
-        .accessibilityLabel("Save to Photos")
-        .accessibilityValue(thumbnail == nil ? "No photos yet" : "Saves the latest photo to your library")
-        .accessibilityHint("Offers the newest capture for saving to your Photos library")
+        .disabled(thumbnail == nil)
+        .accessibilityLabel("Photos")
+        .accessibilityValue(thumbnail == nil ? "No photos yet" : "Opens your photos")
+        .accessibilityHint("Browse, save to Photos, share or delete a capture")
     }
 }
 

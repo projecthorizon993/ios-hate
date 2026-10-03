@@ -757,43 +757,113 @@ final class CameraStep1Tests: XCTestCase {
                        "a look at full strength must not report itself as the identity")
     }
 
-    // MARK: - Library export
+    // MARK: - Gallery entries
 
     private func savedPhoto(_ name: String,
-                            container: PhotoContainer = .jpeg) -> SavedPhoto {
-        SavedPhoto(id: UUID(),
-                   url: URL(fileURLWithPath: "/tmp/\(name)"),
-                   capturedAt: Date(timeIntervalSince1970: 0),
-                   container: container,
-                   metadata: CaptureMetadata(mode: "auto"))
+                            container: PhotoContainer = .jpeg,
+                            capturedAt: TimeInterval = 0,
+                            derivedFrom: UUID? = nil) -> SavedPhoto {
+        var metadata = CaptureMetadata(mode: "auto")
+        metadata.derivedFrom = derivedFrom
+        return SavedPhoto(id: UUID(),
+                          url: URL(fileURLWithPath: "/tmp/\(name)"),
+                          capturedAt: Date(timeIntervalSince1970: capturedAt),
+                          container: container,
+                          metadata: metadata)
     }
 
-    func testLibraryExportPrefersTheProcessedVersion() {
-        // The user is offered the picture they were looking at, which after a look is the
-        // graded render rather than the untouched sensor file.
-        let original = savedPhoto("original")
-        let processed = savedPhoto("processed")
-        XCTAssertEqual(PhotoStore.libraryCandidate(original: original, processed: processed)?.id,
-                       processed.id)
+    func testACaptureWithAndWithoutALookIsOneGridEntry() {
+        // A look writes a second file beside the original rather than replacing it. Both are
+        // real and both stay on disk, but one shutter press filling two cells reads as two
+        // photos having been taken.
+        let original = savedPhoto("original", capturedAt: 100)
+        let processed = savedPhoto("processed", capturedAt: 101, derivedFrom: original.id)
+        XCTAssertEqual(GalleryView.entries(from: [processed, original]).count, 1)
     }
 
-    func testLibraryExportFallsBackToTheOriginalWhenNothingWasProcessed() {
-        // The common case: no look applied, so there is no second file at all.
-        let original = savedPhoto("original")
-        XCTAssertEqual(PhotoStore.libraryCandidate(original: original, processed: nil)?.id,
-                       original.id)
+    func testTheGradedVersionIsTheEntryThatSurvives() {
+        // What the user saw on screen is what should open when they tap the capture.
+        let original = savedPhoto("original", capturedAt: 100)
+        let processed = savedPhoto("processed", capturedAt: 101, derivedFrom: original.id)
+        XCTAssertEqual(GalleryView.entries(from: [processed, original]).first?.url,
+                       processed.url)
     }
 
-    func testLibraryExportHasNothingToSendBeforeTheFirstCapture() {
-        // An empty shutter is the one case where the button must do nothing rather than
-        // invent something to save.
-        XCTAssertNil(PhotoStore.libraryCandidate(original: nil, processed: nil))
+    func testCapturesWithoutALookEachGetAnEntry() {
+        let first = savedPhoto("a", capturedAt: 100)
+        let second = savedPhoto("b", capturedAt: 200)
+        XCTAssertEqual(GalleryView.entries(from: [second, first]).count, 2)
+    }
+
+    func testGalleryEntriesAreNewestFirst() {
+        // Dictionary iteration order is not stable, so the grid would reshuffle itself
+        // between launches if the grouping did not re-sort.
+        let first = savedPhoto("a", capturedAt: 100)
+        let second = savedPhoto("b", capturedAt: 300)
+        let third = savedPhoto("c", capturedAt: 200)
+        let entries = GalleryView.entries(from: [first, third, second])
+        XCTAssertEqual(entries.map(\.capturedAt),
+                       [300, 200, 100])
+    }
+
+    func testAnEmptyLibraryIsAnEmptyGalleryNotACrash() {
+        XCTAssertTrue(GalleryView.entries(from: []).isEmpty)
     }
 
     func testLibraryAccessErrorExplainsWhereToReEnableIt() {
         // The denial is only recoverable in Settings, so the message has to say so.
         let message = PhotoStoreError.libraryAccessDenied.errorDescription ?? ""
         XCTAssertTrue(message.contains("Privacy"), "the message should name the Settings path")
+    }
+
+    // MARK: - Recipe read back
+
+    func testARecipeSurvivesTheRoundTripThroughItsOwnFile() {
+        // The gallery reads what a shot was back out of the file's own metadata, so the
+        // decoder has to recover the fields a reader actually displays.
+        var written = CaptureMetadata(mode: "looks")
+        written.iso = 400
+        written.shutterSeconds = 1.0 / 120.0
+        written.exposureTargetOffset = -0.3
+        written.lensRelativeScale = 24
+        written.lensKind = "AVCaptureDeviceTypeBuiltInTelephotoCamera"
+        written.zoomFactor = 4.08
+        written.photoQualityPrioritization = "quality"
+        written.frontCamera = true
+        written.colorSpace = "display-p3"
+        written.hdrStatus = "qualityRequested"
+
+        let read = CaptureMetadata(recipe: written.recipeString())
+        XCTAssertEqual(read.mode, "looks")
+        XCTAssertEqual(read.iso, 400)
+        XCTAssertEqual(read.shutterSeconds ?? 0, 1.0 / 120.0, accuracy: 0.000_001)
+        XCTAssertEqual(read.exposureTargetOffset ?? 0, -0.3, accuracy: 0.000_1)
+        XCTAssertEqual(read.lensRelativeScale, 24)
+        XCTAssertEqual(read.lensKind, "AVCaptureDeviceTypeBuiltInTelephotoCamera")
+        XCTAssertEqual(read.zoomFactor ?? 0, 4.08, accuracy: 0.000_1)
+        XCTAssertEqual(read.photoQualityPrioritization, "quality")
+        XCTAssertTrue(read.frontCamera)
+        XCTAssertEqual(read.colorSpace, "display-p3")
+        XCTAssertEqual(read.hdrStatus, "qualityRequested")
+    }
+
+    func testAnUnreadableRecipeDegradesInsteadOfFailing() {
+        // A photo must still open when its recipe is from a future version or is simply
+        // garbage. Defaults are the honest answer: nothing recorded is not a measurement.
+        let read = CaptureMetadata(recipe: "v9;iso=notanumber;garbage")
+        XCTAssertEqual(read.mode, "auto")
+        XCTAssertNil(read.iso)
+        XCTAssertFalse(read.frontCamera)
+    }
+
+    func testTheLensKindResolvesFromTheRawDeviceType() {
+        // The file stores `deviceType.rawValue` so it outlives a rename of the app's own
+        // enum, which means the display name can only be resolved at read time.
+        let telephoto = "AVCaptureDeviceTypeBuiltInTelephotoCamera"
+        XCTAssertEqual(BackCameraCapabilities.kind(ofRawValue: telephoto).zoomLabel,
+                       "Telephoto")
+        XCTAssertEqual(BackCameraCapabilities.kind(ofRawValue: "something-else"),
+                       .unknown)
     }
 
     // MARK: - Recipe round trip

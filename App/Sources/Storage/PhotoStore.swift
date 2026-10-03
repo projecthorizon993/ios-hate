@@ -81,6 +81,31 @@ struct CaptureMetadata: Equatable, Sendable {
 
     // MARK: - Recipe string
 
+    /// Rebuilds metadata from a recipe string read back out of a file.
+    ///
+    /// The inverse of `recipeString()`, and total by design: an unreadable, truncated or
+    /// future-version recipe yields defaults rather than failing, because a photo the app
+    /// cannot describe is still a photo the user must be able to open. Every field is
+    /// optional in the format, so a missing key is an absent measurement rather than a zero.
+    init(recipe: String) {
+        let (_, fields) = CaptureMetadata.parse(recipe: recipe)
+        if let mode = fields["mode"] { self.mode = mode }
+        if let value = fields["iso"], let parsed = Float(value) { self.iso = parsed }
+        if let value = fields["sh"], let parsed = Double(value) { self.shutterSeconds = parsed }
+        if let value = fields["ev"], let parsed = Double(value) { self.exposureTargetOffset = parsed }
+        if let value = fields["rs"], let parsed = Double(value) { self.lensRelativeScale = parsed }
+        if let lensKind = fields["lens"] { self.lensKind = lensKind }
+        if let value = fields["zoom"], let parsed = Double(value) { self.zoomFactor = parsed }
+        if let value = fields["q"] { self.photoQualityPrioritization = value }
+        proRaw = fields["proraw"] == "1"
+        raw = fields["raw"] == "1"
+        frontCamera = fields["front"] == "1"
+        if let space = fields["space"], !space.isEmpty { self.colorSpace = space }
+        if let hdr = fields["hdr"], !hdr.isEmpty { self.hdrStatus = hdr }
+        if let derived = fields["derived"] { self.derivedFrom = UUID(uuidString: derived) }
+        processing = fields["proc"].flatMap(CaptureMetadata.decodeProcessing)
+    }
+
     /// Compact, stable, round-trippable. Unknown keys are ignored by a reader and
     /// missing keys fall back to defaults, which is what lets step 5 add fields without
     /// invalidating step 1 files.
@@ -350,20 +375,99 @@ enum PhotoStore {
         }.count
     }
 
-    // MARK: - Photo library export
+    // MARK: - Reading
 
-    /// Which file represents a capture when the user sends it onward.
+    /// Every stored photo, newest first.
     ///
-    /// The processed version wins when it exists, because that is the picture on screen at
-    /// the moment the button is pressed; falling back to the original is the right answer
-    /// for the common no-look case, where the two are the same shot. A capture taken with
-    /// a look therefore exports as the graded JPEG, not as the untouched sensor file.
+    /// The recipe is read back out of each file's own `Exif.UserComment` rather than from a
+    /// sidecar index. There is no index, so there is nothing to fall out of step with the
+    /// directory, and a file copied in through Files.app still lists with whatever recipe it
+    /// happens to carry.
     ///
-    /// Pure, so the rule is unit tested without asking for library access.
-    static func libraryCandidate(original: SavedPhoto?,
-                                 processed: SavedPhoto?) -> SavedPhoto? {
-        processed ?? original
+    /// Sorting is by capture time descending. A file whose name does not carry a timestamp
+    /// — one the user copied in — falls back to its modification date rather than being
+    /// dropped, because a photo that exists but is not listed is worse than one listed with
+    /// an approximate date.
+    static func loadAll(in fileManager: FileManager = .default) -> [SavedPhoto] {
+        guard let folder = try? directory(in: fileManager),
+              let contents = try? fileManager.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles])
+        else { return [] }
+
+        let photos = contents.compactMap { url -> SavedPhoto? in
+            // The extension was written from the container the bytes were detected as, so it
+            // is trusted here rather than re-reading every file's header: this runs over the
+            // whole library on the main actor.
+            guard let container = PhotoContainer(rawValue: url.pathExtension.lowercased()) else {
+                return nil
+            }
+            let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+            return SavedPhoto(id: identifier(from: url),
+                              url: url,
+                              capturedAt: capturedAt(from: url)
+                                ?? modified?.contentModificationDate
+                                ?? Date(timeIntervalSince1970: 0),
+                              container: container,
+                              metadata: readMetadata(from: url) ?? CaptureMetadata())
+        }
+        return photos.sorted { $0.capturedAt > $1.capturedAt }
     }
+
+    /// The recipe recorded inside a stored file, or `nil` when it carries none.
+    ///
+    /// A file the app did not write — or one whose metadata an editor stripped — reports
+    /// `nil`, which the gallery shows as "no recipe recorded" rather than as zeros that
+    /// would read as real measurements.
+    static func readMetadata(from url: URL) -> CaptureMetadata? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+              let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any],
+              let comment = exif[kCGImagePropertyExifUserComment] as? String,
+              !comment.isEmpty
+        else { return nil }
+        return CaptureMetadata(recipe: comment)
+    }
+
+    /// Removes one photo. Throws rather than returning a flag: a failed delete that is
+    /// reported as a success leaves the user believing a photo is gone.
+    static func delete(_ photo: SavedPhoto, in fileManager: FileManager = .default) throws {
+        try fileManager.removeItem(at: photo.url)
+        AppLog.note(AppLog.camera, "photo deleted: \(photo.describeForLog)")
+    }
+
+    /// Recovers the UUID from the file name this store writes.
+    ///
+    /// The name is `<stamp>-<uuid>.<ext>`, and the stamp contains hyphens, so the UUID is
+    /// taken from the end: everything after the last hyphen that still parses as a UUID is
+    /// found by trying successive suffixes. A name that is not ours yields `nil`, and the
+    /// gallery falls back to a fresh identity — which costs nothing except that SwiftUI sees
+    /// a new `Identifiable` for a file it already had.
+    private static func identifier(from url: URL) -> UUID {
+        let stem = url.deletingPathExtension().lastPathComponent
+        var suffix = stem
+        while let range = suffix.range(of: "-") {
+            suffix = String(suffix[range.upperBound...])
+            if let uuid = UUID(uuidString: suffix) { return uuid }
+        }
+        return UUID()
+    }
+
+    /// The capture time encoded in the file name, or `nil` when the name is not ours.
+    private static func capturedAt(from url: URL) -> Date? {
+        let stem = url.deletingPathExtension().lastPathComponent
+        // The stamp is a fixed 24 characters; the UUID that follows is variable length.
+        guard stem.count > stampFormat.count else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = stampFormat
+        return formatter.date(from: String(stem.prefix(stampFormat.count)))
+    }
+
+    // MARK: - Photo library export
 
     /// Prompts for add-only access if it has not been decided yet.
     ///

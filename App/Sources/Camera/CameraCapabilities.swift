@@ -182,6 +182,26 @@ struct BackCameraCapabilities: Equatable, Identifiable, Sendable {
         default: return .unknown
         }
     }
+
+    /// The same mapping from a `deviceType` **raw value** rather than the type.
+    ///
+    /// Needed because a photo's recipe records `deviceType.rawValue` as a string, and that
+    /// is deliberate: `Kind` is an app concept, so a file that stored one would become
+    /// unreadable the moment the app renamed or extended it. The cost is that the display
+    /// name can only be resolved at read time, on a string the compiler cannot check against
+    /// the enum — which is exactly why the cases are spelled out rather than derived, and
+    /// why the unknown case is a real answer instead of a crash.
+    static func kind(ofRawValue raw: String) -> Kind {
+        switch raw {
+        case AVCaptureDevice.DeviceType.builtInUltraWideCamera.rawValue: return .ultraWide
+        case AVCaptureDevice.DeviceType.builtInWideAngleCamera.rawValue: return .wide
+        case AVCaptureDevice.DeviceType.builtInTelephotoCamera.rawValue: return .telephoto
+        case AVCaptureDevice.DeviceType.builtInDualCamera.rawValue,
+             AVCaptureDevice.DeviceType.builtInDualWideCamera.rawValue,
+             AVCaptureDevice.DeviceType.builtInTripleCamera.rawValue: return .composite
+        default: return .unknown
+        }
+    }
 }
 
 /// The display name for a device's own lens.
