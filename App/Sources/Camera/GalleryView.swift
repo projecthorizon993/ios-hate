@@ -263,9 +263,15 @@ private final class GalleryThumbnailCache: @unchecked Sendable {
         let url = photo.url
         // The return type is written out because the closure returns on two paths, and
         // without it `return nil` has nothing to infer from.
+        // `PhotoStore.thumbnail` returns encoded JPEG **data**, so the `UIImage` is made here
+        // rather than inside the store. Keeping the store free of decoded images is what lets
+        // it stay free of a main-actor hop.
         let decoded: UIImage? = await Task.detached(priority: .utility) { () -> UIImage? in
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return PhotoStore.thumbnail(from: data, maxPixelSize: 400)
+            guard let data = try? Data(contentsOf: url),
+                  let encoded = PhotoStore.thumbnail(from: data, maxPixelSize: 400),
+                  let image = UIImage(data: encoded)
+            else { return nil }
+            return image
         }.value
         guard let decoded else { return nil }
         store(decoded, for: url)
