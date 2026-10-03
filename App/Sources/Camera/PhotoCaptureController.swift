@@ -134,6 +134,8 @@ final class PhotoCaptureController: NSObject {
                     + "proRAW: \(output.isAppleProRAWSupported), "
                     + "format high photo quality: \(capabilities.photoQualitySupported)")
 
+        preparePhotoQualityResources(for: capabilities)
+
         guard capabilities.proRawSupported else {
             if output.isAppleProRAWEnabled {
                 _ = LumaFrameSafety.perform({ self.output.isAppleProRAWEnabled = false })
@@ -145,6 +147,54 @@ final class PhotoCaptureController: NSObject {
         } else {
             AppLog.note(AppLog.camera, "ProRAW enabled")
         }
+    }
+
+    /// Tells the session to reserve resources for `.quality` **before** any capture asks
+    /// for it.
+    ///
+    /// ## Why this exists
+    ///
+    /// The one capture that had ever been attempted with JPEG died the instant the shutter
+    /// was pressed — no `willBeginCapture`, no delegate callback, process gone:
+    ///
+    ///     shutter: look=No Colour intensity=0.0 recipe=identity
+    ///     capture requested: codec=jpeg quality=quality flash=off
+    ///     <- nothing further; a new run banner 3 s later
+    ///
+    /// Every capture before it succeeded, and every one of those logged
+    /// `codec=hvc1 quality=balanced`. JPEG became the preferred codec in `f72380a`, so this
+    /// was the **first JPEG capture this app ever attempted** — the crash is new, and the
+    /// only two things that differ are the codec and the prioritisation.
+    ///
+    /// `photoQualityPrioritization` is a property of a single `AVCapturePhotoSettings`, and
+    /// asking for `.quality` on a capture costs resources the session has to reserve up
+    /// front. Apple's own guidance (WWDC 304, *Implement high resolution photo capture*) is
+    /// explicit: set `maxPhotoQualityPrioritization` on the **output** so the session
+    /// "prepare[s] resources for all three prioritization levels", because "high resolution
+    /// captures require specific resource allocations based on `photoQualityPrioritization`
+    /// and `maxPhotoDimensions`", and an unreserved allocation happens *at capture time*.
+    ///
+    /// Nothing here sets `.quality` on a capture on its own — `prioritization(for:)` still
+    /// decides that from the request. This only makes the level available, so a `.quality`
+    /// capture is a lookup rather than a reconfiguration.
+    ///
+    /// Wrapped because this is a device-capability-dependent write on a property that
+    /// raises on an output that cannot do it, which is the same failure mode as the ProRAW
+    /// flag two lines below.
+    private func preparePhotoQualityResources(for capabilities: CameraCapabilities) {
+        guard capabilities.photoQualitySupported else {
+            AppLog.note(AppLog.camera,
+                        "photo quality resources: not prepared; the format does not support it")
+            return
+        }
+        if let failure = LumaFrameSafety.perform({
+            self.output.maxPhotoQualityPrioritization = .quality
+        }) {
+            AppLog.warn(AppLog.camera, "photo quality resources could not be reserved: \(failure)")
+            return
+        }
+        AppLog.note(AppLog.camera,
+                    "photo quality resources: reserved up to \(output.maxPhotoQualityPrioritization.rawValue)")
     }
 
     /// The codec to ask for, and **JPEG first**.
@@ -274,7 +324,30 @@ final class PhotoCaptureController: NSObject {
         // `onCapture` is the single result channel, so a rejected press reports through
         // exactly the same path as a finished one and the UI has one code path.
         onProgressChange?(true)
-        output.capturePhoto(with: settings, delegate: self)
+        // The shutter must not be able to kill the app.
+        //
+        // `capturePhoto(with:delegate:)` raises rather than returns on a settings object the
+        // output will not accept, and it is called on the main thread from a gesture, so a
+        // raise takes the whole process with it — which is exactly what happened to the
+        // first JPEG capture. The caller cannot guard it: the argument is built here, and
+        // the failure is a property of the device's configuration, not of the call site.
+        //
+        // So the trap happens in one place that already exists for this, and a refusal
+        // becomes a banner and a log line naming the reason. `LumaFrameSafety.perform`
+        // returns `nil` on success, which is what "the capture started" looks like.
+        if let failure = LumaFrameSafety.perform({
+            output.capturePhoto(with: settings, delegate: self)
+        }) {
+            isCapturing = false
+            pendingMetadata = nil
+            pendingRequest = nil
+            AppLog.fail(AppLog.camera,
+                        "capture rejected by the output (codec=\(codec.rawValue) "
+                        + "quality=\(recorded.photoQualityPrioritization)): \(failure)")
+            onProgressChange?(false)
+            fail(.failed("This camera would not accept that photo format"))
+            return
+        }
     }
 
     // MARK: - Result plumbing
