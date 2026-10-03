@@ -370,12 +370,17 @@ enum PhotoStore {
             throw PhotoStoreError.libraryAccessDenied
         }
         try await PHPhotoLibrary.shared().performChanges {
-            // The options object is required rather than optional in this SDK, and leaving
-            // it empty means Photos picks its own filename instead of inheriting the
-            // timestamp-and-UUID one the container uses.
-            PHAssetCreationRequest.addResource(with: .photo,
-                                               fileURL: photo.url,
-                                               options: PHAssetResourceCreationOptions())
+            // A request has to be created before anything is attached to it: `addResource`
+            // is an instance method, so there is no static shortcut. Going through
+            // `forAsset()` rather than `creationRequestForAssetFromImage` is what keeps
+            // this working for a DNG, which the image-from-file helper does not accept.
+            let request = PHAssetCreationRequest.forAsset()
+            // The options object is required, and leaving it empty means Photos picks its
+            // own filename instead of inheriting the timestamp-and-UUID one the container
+            // uses.
+            request.addResource(with: .photo,
+                                fileURL: photo.url,
+                                options: PHAssetResourceCreationOptions())
         }
     }
 
