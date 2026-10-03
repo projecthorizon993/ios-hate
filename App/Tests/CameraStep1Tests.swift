@@ -657,6 +657,45 @@ final class CameraStep1Tests: XCTestCase {
         return bytes
     }
 
+    // MARK: - Library export
+
+    private func savedPhoto(_ name: String,
+                            container: PhotoContainer = .jpeg) -> SavedPhoto {
+        SavedPhoto(id: UUID(),
+                   url: URL(fileURLWithPath: "/tmp/\(name)"),
+                   capturedAt: Date(timeIntervalSince1970: 0),
+                   container: container,
+                   metadata: CaptureMetadata(mode: "auto"))
+    }
+
+    func testLibraryExportPrefersTheProcessedVersion() {
+        // The user is offered the picture they were looking at, which after a look is the
+        // graded render rather than the untouched sensor file.
+        let original = savedPhoto("original")
+        let processed = savedPhoto("processed")
+        XCTAssertEqual(PhotoStore.libraryCandidate(original: original, processed: processed)?.id,
+                       processed.id)
+    }
+
+    func testLibraryExportFallsBackToTheOriginalWhenNothingWasProcessed() {
+        // The common case: no look applied, so there is no second file at all.
+        let original = savedPhoto("original")
+        XCTAssertEqual(PhotoStore.libraryCandidate(original: original, processed: nil)?.id,
+                       original.id)
+    }
+
+    func testLibraryExportHasNothingToSendBeforeTheFirstCapture() {
+        // An empty shutter is the one case where the button must do nothing rather than
+        // invent something to save.
+        XCTAssertNil(PhotoStore.libraryCandidate(original: nil, processed: nil))
+    }
+
+    func testLibraryAccessErrorExplainsWhereToReEnableIt() {
+        // The denial is only recoverable in Settings, so the message has to say so.
+        let message = PhotoStoreError.libraryAccessDenied.errorDescription ?? ""
+        XCTAssertTrue(message.contains("Privacy"), "the message should name the Settings path")
+    }
+
     // MARK: - Recipe round trip
 
     func testRecipeRoundTripsEveryRecordedField() {

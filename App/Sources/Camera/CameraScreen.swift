@@ -30,6 +30,10 @@ struct CameraScreen: View {
     @State private var draggedZoom: Double?
     /// Which Pro parameter's dial is docked, or nil when collapsed.
     @State private var openProParameter: ProParameter?
+    /// Whether the "save to Photos" confirmation is up. Held here rather than saving on
+    /// tap, because the button sits under the user's thumb next to the shutter and a
+    /// library write is too permanent to trigger by accident.
+    @State private var isConfirmingLibrarySave = false
 
     /// Derived, never stored twice. Rotating the device or flipping the camera both
     /// change it, and there is only one place the angle is computed.
@@ -522,7 +526,18 @@ struct CameraScreen: View {
 
     private var shutterRow: some View {
         HStack {
-            GalleryButton(thumbnail: model.thumbnail) {}
+            GalleryButton(thumbnail: model.thumbnail,
+                          isBusy: model.isExportingToLibrary) {
+                isConfirmingLibrarySave = true
+            }
+            .confirmationDialog("Save this photo to your Photos library?",
+                                isPresented: $isConfirmingLibrarySave,
+                                titleVisibility: .visible) {
+                Button("Save to Photos") { model.saveLatestToPhotoLibrary() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("LumaFrame keeps its own copy in the app either way.")
+            }
 
             Spacer(minLength: Theme.Space.l)
 
@@ -656,6 +671,7 @@ private struct ShutterButton: View {
 
 private struct GalleryButton: View {
     var thumbnail: UIImage?
+    var isBusy: Bool
     var action: () -> Void
 
     var body: some View {
@@ -673,11 +689,17 @@ private struct GalleryButton: View {
             .frame(width: Theme.Space.huge, height: Theme.Space.huge)
             .background(Theme.ColorToken.surfaceRaised)
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
+            .overlay {
+                if isBusy {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                }
+            }
         }
-        .disabled(thumbnail == nil)
-        .accessibilityLabel("Gallery")
-        .accessibilityValue(thumbnail == nil ? "No photos yet" : "Opens the gallery")
-        .accessibilityHint("The gallery arrives in a later step")
+        .disabled(thumbnail == nil || isBusy)
+        .accessibilityLabel("Save to Photos")
+        .accessibilityValue(thumbnail == nil ? "No photos yet" : "Saves the latest photo to your library")
+        .accessibilityHint("Offers the newest capture for saving to your Photos library")
     }
 }
 

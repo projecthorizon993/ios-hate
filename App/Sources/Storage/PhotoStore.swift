@@ -8,6 +8,7 @@ import AVFoundation
 import CoreMedia
 import Foundation
 import ImageIO
+import Photos
 import UIKit
 
 // MARK: - metadata (was App/Sources/Storage/CaptureMetadata.swift)
@@ -246,6 +247,7 @@ struct SavedPhoto: Equatable, Identifiable, Sendable {
 enum PhotoStoreError: LocalizedError, Equatable {
     case documentsUnavailable
     case writeFailed(String)
+    case libraryAccessDenied
 
     var errorDescription: String? {
         switch self {
@@ -253,17 +255,24 @@ enum PhotoStoreError: LocalizedError, Equatable {
             return "The app's Documents directory is not available"
         case .writeFailed(let reason):
             return reason
+        case .libraryAccessDenied:
+            return "LumaFrame is not allowed to add photos. Enable it in Settings > Privacy > Photos."
         }
     }
 }
 
-/// Writes captures into the app container and nothing else.
+/// Writes captures into the app container, and copies them to the photo library only when
+/// the user asks.
 ///
 /// Three deliberate choices:
 ///
-/// - **Local only.** `IOS_CAMERA_APP_PLAN.md` section 14 says media stays on the device
-///   by default and the gallery is Step 9, so nothing is added to the photo library here
-///   and no library permission is needed.
+/// - **Local first.** `IOS_CAMERA_APP_PLAN.md` section 14 says media stays on the device
+///   by default and the gallery is Step 9. Every capture lands in the app container
+///   unconditionally; the library copy is a separate, explicit export that *copies* rather
+///   than moves, so the original still exists for Step 4's re-render. That export is
+///   add-only — `NSPhotoLibraryUsageDescription` is deliberately absent, so the app can
+///   put a photo into the library without ever gaining the right to read the user's
+///   existing library.
 /// - **The original bytes are written untouched.** Enhancement is Step 4 and later, and
 ///   it must be able to re-render from the original. Writing a derived image here would
 ///   make that impossible, so the recipe travels in the metadata instead.
@@ -317,6 +326,52 @@ enum PhotoStore {
                                metadata: metadata)
         AppLog.note(AppLog.camera, "photo stored: \(saved.describeForLog)")
         return saved
+    }
+
+    // MARK: - Photo library export
+
+    /// Which file represents a capture when the user sends it onward.
+    ///
+    /// The processed version wins when it exists, because that is the picture on screen at
+    /// the moment the button is pressed; falling back to the original is the right answer
+    /// for the common no-look case, where the two are the same shot. A capture taken with
+    /// a look therefore exports as the graded JPEG, not as the untouched sensor file.
+    ///
+    /// Pure, so the rule is unit tested without asking for library access.
+    static func libraryCandidate(original: SavedPhoto?,
+                                 processed: SavedPhoto?) -> SavedPhoto? {
+        processed ?? original
+    }
+
+    /// Prompts for add-only access if it has not been decided yet.
+    ///
+    /// Grants are compared against `.authorized` exactly rather than "not denied": a
+    /// limited library is a read-side concept and cannot satisfy an add.
+    static func requestLibraryAddAccess() async -> Bool {
+        switch PHPhotoLibrary.authorizationStatus(for: .addOnly) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await PHPhotoLibrary.requestAuthorization(for: .addOnly) == .authorized
+        case .denied, .restricted, .limited:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    /// Copies an already-stored capture into the user's photo library.
+    ///
+    /// A copy, never a move: the file in the container is what Step 4 re-renders from, and
+    /// removing it to avoid a duplicate would leave nothing to enhance. The library keeps
+    /// its own copy and the app cannot read it back, which is the add-only bargain.
+    static func addToLibrary(_ photo: SavedPhoto) async throws {
+        guard await requestLibraryAddAccess() else {
+            throw PhotoStoreError.libraryAccessDenied
+        }
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetCreationRequest.addResource(with: .photo, fileURL: photo.url)
+        }
     }
 
     /// Byte count of everything stored so far, for the storage indicator. Returns `nil`
