@@ -670,8 +670,12 @@ final class CameraViewModel: ObservableObject {
     /// *can* express 0.5x directly needs no translation at all.
     nonisolated static func requestedFactor(forLens lens: Double,
                                             minimumAvailableFactor: Double) -> Double {
-        guard minimumAvailableFactor > lens else { return lens }
-        return lens / minimumAvailableFactor
+        // The lens row starts at 0.5 and the device's range starts at its floor, so the
+        // two scales differ by exactly that ratio. With a floor of 1 the device's scale is
+        // twice the lens scale, which is the 0.5->1, 1->2, 2->4 mapping above.
+        let lowestLens: Double = 0.5
+        guard minimumAvailableFactor > lowestLens else { return lens }
+        return lens * (minimumAvailableFactor / lowestLens)
     }
 
     /// The zoom factors the slider can reach.
