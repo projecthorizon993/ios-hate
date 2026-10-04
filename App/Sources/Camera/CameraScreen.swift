@@ -302,17 +302,20 @@ struct CameraScreen: View {
     @ViewBuilder
     private var contextualRow: some View {
         switch model.mode {
-        case .auto:
+        case .photo:
+            // Flash only. The colour chips moved to Pro, where a grade lives now — a
+            // photo-mode row offering both would be the duplication the Looks mode used
+            // to be, just spread across two modes instead of being its own.
             autoControls
         case .pro:
             ProChipBar(model: model,
                        expanded: $isShowingPro,
                        open: $openProParameter)
-        case .looks:
-            HStack(spacing: Theme.Space.s) {
-                LooksChipBar(model: model, expanded: $isShowingLooks)
-                toneChip
-            }
+        case .video:
+            // Unreachable while Video is disabled, but the switch must be exhaustive and
+            // the mode is coming back with a recorder, so it is spelled out rather than
+            // left to a `default` that would hide a fourth mode if one were ever added.
+            EmptyView()
         }
     }
 
