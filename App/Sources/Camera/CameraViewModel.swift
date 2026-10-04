@@ -83,7 +83,9 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var readout = Readout()
     @Published private(set) var sample: PreviewMeter.Sample?
     @Published private(set) var isCapturing = false
-    @Published private(set) var mode: CameraMode = .auto
+    /// Photo on launch: it is the mode that always works, and the
+    /// switcher highlights it before the user touches anything.
+    @Published private(set) var mode: CameraMode = .photo
     @Published private(set) var facing: CameraFacing = .back
     @Published private(set) var thumbnail: UIImage?
     @Published private(set) var latestPhoto: SavedPhoto?
