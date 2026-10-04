@@ -280,29 +280,25 @@ extension ProcessedPreview {
     }
 
     /// Re-runs segmentation at most once per `SubjectSegmentation.cadence`.
+    ///
+    /// ## Why this is off
+    ///
+    /// It ran on every device build and the log never once showed a mask being *used*:
+    ///
+    ///     subject mask not used: mask rejected: covers the frame
+    ///
+    /// thousands of times, on a wall, a desk, and every framing without a person in it. That
+    /// is not a broken gate — it is `VNGeneratePersonSegmentationRequest` doing the right
+    /// thing. With no person in frame it returns an all-foreground mask, so coverage is 1.0
+    /// and there is no subject to find. Raising the coverage ceiling to 0.98 (which this
+    /// build did, and which changed nothing) could not have helped, because the rejection
+    /// was never marginal.
+    ///
+    /// What it cost was real: a Vision request and a buffer copy every 0.5 seconds, forever,
+    /// to produce nothing. So the call is gone rather than merely ignored, and it comes back
+    /// with a proper Pro-mode subject pipeline rather than as a slider that does nothing.
     private func updateSubjectMaskIfDue(for pixelBuffer: CVPixelBuffer) {
-        let now = DispatchTime.now().uptimeNanoseconds
-        let interval = UInt64(SubjectSegmentation.cadence * 1_000_000_000)
-        if let lastAt = lastSegmentationAt, now &- lastAt < interval { return }
-        lastSegmentationAt = now
-
-        segmentationQueue.async { [weak self] in
-            guard let self else { return }
-            guard let result = SubjectSegmentation.compute(for: pixelBuffer) else {
-                self.setMask(nil)
-                return
-            }
-            // A mask the pipeline would reject is not carried forward. Keeping it would let
-            // a stale mask survive into frames it no longer describes, and the most common
-            // rejection is a mask that covers the whole frame — carrying that forward would
-            // blend by it forever.
-            guard result.mask.isUsable else {
-                AppLog.note(AppLog.ml, "subject mask not used: \(result.mask.decision())")
-                self.setMask(nil)
-                return
-            }
-            self.setMask(result)
-        }
+        _ = pixelBuffer
     }
 
     private func setMask(_ result: SubjectSegmentation.Result?) {

@@ -362,9 +362,9 @@ enum PhotoStore {
         // bytes actually reached the disk, without putting the user's file names in a log
         // that gets shared. When a capture "succeeds" and nothing can be found, this is the
         // line that separates a write problem from a file-not-where-you-expected problem.
-        if let total = totalBytes() {
+        if let total = totalBytes(), let count = storedFileCount() {
             AppLog.note(AppLog.camera,
-                        "stored total: \(storedFileCount()) files, \(total / 1024) KB")
+                        "stored total: \(count) files, \(total / 1024) KB")
         }
         return saved
     }
