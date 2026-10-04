@@ -3,23 +3,42 @@ import CoreImage
 import Foundation
 import UIKit
 
-    /// The mode switcher. Step 1 shipped Auto only; Step 3 added Looks and Step 4 added
-    /// Pro. All three are implemented, and each still reports what it cannot do on the
-    /// current device rather than presenting a control that would do nothing.
+    /// The mode switcher. Three modes, and the names are the three things a photographer
+    /// actually chooses between.
+    ///
+    /// **Looks is not one of them.** It was a fourth mode that held only a colour grade, and
+    /// the Pro panel already carries a look and a strength slider — so the mode duplicated a
+    /// control that already existed one tap away, and gave the user four choices where there
+    /// are three. Grading lives under Pro, as live colour grading, which is where a control
+    /// that shapes an image belongs rather than being a destination in its own right.
     enum CameraMode: String, CaseIterable, Equatable {
-        case auto
+        case photo
+        case video
         case pro
-        case looks
 
         var label: String {
             switch self {
-            case .auto: return "Auto"
+            case .photo: return "Photo"
+            case .video: return "Video"
             case .pro: return "Pro"
-            case .looks: return "Looks"
             }
         }
 
-        var isImplemented: Bool { true }
+        /// Whether this mode can actually capture.
+        ///
+        /// **Video is `false` and this is a real gap, not a placeholder.** There is no
+        /// recorder in the app: `AVAssetWriter` appears only in the still-export path, and
+        /// there is no `AVCaptureMovieFileOutput`, no start/stop, and no audio input wired.
+        /// A Video button that switched to a viewfinder you could not record from would be
+        /// worse than no button, so it is disabled and says why. It stays in the switcher so
+        /// the three-mode shape the user asked for is visible and the gap is honest rather
+        /// than hidden until someone wonders where it went.
+var isImplemented: Bool {
+            switch self {
+            case .photo, .pro: return true
+            case .video: return false
+            }
+        }
     }
 
 /// Everything the camera screen renders, in one observable object.
@@ -618,6 +637,39 @@ final class CameraViewModel: ObservableObject {
                                         upper: Double) -> Double {
         guard switchOver.contains(where: { abs($0 - clamped) < 0.005 }) else { return clamped }
         return min(clamped * switchOverMargin, upper)
+    }
+
+    /// The three factors the lens pills offer: 0.5x, 1x and 2x.
+    ///
+    /// These are the three *physical* lenses — ultra wide, wide and telephoto — rather than
+    /// the switch-over factors the device reports, which on this class of hardware are 2 and
+    /// 4. A 4x stop is not a fourth lens: it is the 2x telephoto cropped again, so offering it
+    /// beside the others put a digital crop next to two optical lenses and made the pill row
+    /// claim something untrue about the hardware.
+    nonisolated static func lensStops() -> [ZoomStop] {
+        [ZoomStop(factor: 0.5), ZoomStop(factor: 1), ZoomStop(factor: 2)]
+    }
+
+    /// The factor to actually ask the device for when a lens pill is tapped.
+    ///
+    /// ## Why the pills and the device do not agree
+    ///
+    /// The active format reports `minAvailableVideoZoomFactor == 1`, so this camera cannot
+    /// express a 0.5x *zoom factor* at all — below 1x is a lens, not a factor, on this
+    /// hardware. What the device calls 1x is the ultra wide, 2x is the wide and 4x is the
+    /// telephoto, which is exactly why it reports its switch points as 2 and 4.
+    ///
+    /// So the pill row shows the true lens factors the user recognises — 0.5, 1, 2 — and
+    /// this translates them to the device's own scale on the way out. One function, so the
+    /// mapping is stated once and can be asserted once, rather than being spread across the
+    /// taps that need it.
+    ///
+    /// The shift is derived from the device's floor rather than hardcoded, so a phone that
+    /// *can* express 0.5x directly needs no translation at all.
+    nonisolated static func requestedFactor(forLens lens: Double,
+                                            minimumAvailableFactor: Double) -> Double {
+        guard minimumAvailableFactor > lens else { return lens }
+        return lens / minimumAvailableFactor
     }
 
     /// The zoom factors the slider can reach.

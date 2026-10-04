@@ -396,22 +396,25 @@ struct CameraScreen: View {
     /// four labels into the left third of the slider makes them smaller than the target they
     /// need to be. This is also how the platform's own camera control is laid out.
     private var zoomStopLabels: some View {
-        let stops = model.capabilities.zoomStops
+        let minimum = model.capabilities.plan.bound?.minAvailableVideoZoomFactor ?? 1
+        let stops = CameraViewModel.lensStops()
         let switchOver = model.capabilities.plan.bound?.switchOverZoomFactors ?? []
         // The zoom settles just *past* a switch-over point, so "which chip is lit" has to be a
-        // band question. `band(containing:switchOver:)` is the tested version of that.
+        // band question, and on the device's own scale rather than the pill's.
         let current = CameraViewModel.band(containing: Double(model.readout.zoomFactor),
                                            switchOver: switchOver)
 
         return HStack(spacing: 0) {
             ForEach(stops) { stop in
+                let asked = CameraViewModel.requestedFactor(forLens: stop.factor,
+                                                             minimumAvailableFactor: minimum)
                 Button {
                     draggedZoom = nil
-                    model.selectZoom(stop)
+                    model.selectZoom(ZoomStop(factor: asked))
                 } label: {
                     Text(stop.label)
                         .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
-                        .foregroundStyle(abs(current - stop.factor) < 0.005
+                        .foregroundStyle(abs(current - asked) < 0.005
                                          ? Theme.ColorToken.accentActive
                                          : Theme.ColorToken.textSecondary)
                         .frame(minHeight: Theme.Space.xl)
@@ -422,7 +425,7 @@ struct CameraScreen: View {
                 .accessibilityLabel(stop.label)
                 .accessibilityValue(stop.label)
                 .accessibilityHint("Jumps straight to the \(stop.label) lens")
-                .accessibilityAddTraits(abs(current - stop.factor) < 0.005
+                .accessibilityAddTraits(abs(current - asked) < 0.005
                                         ? [.isSelected, .isButton]
                                         : .isButton)
             }
@@ -496,32 +499,75 @@ struct CameraScreen: View {
                 .environment(\.proParameterOverride, open)
                 .background(Theme.ColorToken.surfaceBase.opacity(0.96))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-        } else if model.mode == .looks, isShowingLooks {
+        } else if model.mode == .pro, isShowingLooks {
+            // Grading reached from Pro rather than from a Looks mode of its own. Same panel,
+            // same controls — it is where a grade belongs now that the mode is gone.
             LooksCarousel(model: model, expanded: $isShowingLooks)
                 .background(Theme.ColorToken.surfaceBase.opacity(0.96))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-        } else if model.mode == .looks, isShowingTone {
+        } else if model.mode == .pro, isShowingTone {
             TonePanel(model: model, expanded: $isShowingTone)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
+    /// Three modes as one sliding track.
+    ///
+    /// A single selected pill that slides, rather than three separate buttons. It reads as
+    /// one choice with three settings instead of three destinations, which is what it is,
+    /// and it keeps the whole switcher to one tap target height and one background shape —
+    /// so it costs the viewfinder less chrome than the row of buttons it replaces.
     private var modeSwitcher: some View {
-        HStack(spacing: Theme.Space.s) {
-            ForEach(CameraMode.allCases, id: \.self) { mode in
-                ModeButton(mode: mode, isSelected: model.mode == mode) {
-                    Haptics.selection()
-                    // Switching mode collapses any open panel. Leaving a dial open behind
-                    // a different mode's chips would be showing a control for something
-                    // that is no longer being adjusted.
-                    collapsePanels()
-                    // Auto is the base state: the recipe stays exactly as the user left
-                    // it, because a look dialled in in Looks mode is a preference, not
-                    // something leaving the mode should undo.
-                    model.setMode(mode)
+        let modes = CameraMode.allCases
+        return GeometryReader { geometry in
+            let width = geometry.size.width
+            let segment = width / CGFloat(modes.count)
+            let index = modes.firstIndex(of: model.mode) ?? 0
+
+            ZStack(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(Theme.ColorToken.surfaceRaised)
+                    .frame(height: Theme.Space.minTouch)
+
+                Capsule(style: .continuous)
+                    .fill(Theme.ColorToken.accentActive.opacity(0.18))
+                    .frame(width: segment, height: Theme.Space.minTouch)
+                    .offset(x: segment * CGFloat(index))
+                    .animation(Theme.Motion.animation(Theme.Motion.mode),
+                               value: model.mode)
+
+                HStack(spacing: 0) {
+                    ForEach(modes, id: \.self) { mode in
+                        ModeButton(mode: mode,
+                                   isSelected: model.mode == mode) {
+                            choose(mode: mode)
+                        }
+                        .frame(width: segment)
+                    }
                 }
             }
+            .frame(height: Theme.Space.minTouch)
+            .clipShape(Capsule(style: .continuous))
         }
+        .frame(height: Theme.Space.minTouch)
+    }
+
+    /// Applies a mode tap.
+    ///
+    /// The animation is suppressed for the update itself, because the pill's offset reads
+    /// `model.mode` and animating towards a value the model has not taken yet would slide
+    /// the pill to the new segment while the old label was still selected under it. The
+    /// switch itself is then instant and the next state change animates normally.
+    private func choose(mode: CameraMode) {
+        guard mode != model.mode else { return }
+        Haptics.selection()
+        // Switching mode collapses any open panel. Leaving a dial open behind a different
+        // mode's chips would be showing a control for something that is no longer being
+        // adjusted.
+        collapsePanels()
+        // Photo is the base state: the recipe stays exactly as the user left it, because a
+        // grade dialled in under Pro is a preference, not something leaving the mode undoes.
+        withAnimation(nil) { model.setMode(mode) }
     }
 
     private func collapsePanels() {
@@ -627,14 +673,19 @@ private struct ModeButton: View {
         Button(action: action) {
             Text(mode.label)
                 .font(.system(size: Theme.TypeSize.label, weight: .medium))
-                .foregroundStyle(isSelected ? Theme.ColorToken.accentActive : Theme.ColorToken.textDisabled)
+                .foregroundStyle(isSelected
+                                 ? Theme.ColorToken.accentActive
+                                 : Theme.ColorToken.textDisabled)
                 .frame(maxWidth: .infinity, minHeight: Theme.Space.minTouch)
-                .background(Theme.ColorToken.surfaceRaised,
-                            in: RoundedRectangle(cornerRadius: Theme.Radius.control))
         }
+        // Disabled rather than removed, and the reason is in the hint: a mode that cannot
+        // capture is a gap the user should be able to see, not a mystery.
+        .disabled(!mode.isImplemented)
         .accessibilityLabel("\(mode.label) mode")
         .accessibilityValue(isSelected ? "Selected" : "Not available yet")
-        .accessibilityHint(mode.isImplemented ? "Switches to \(mode.label) mode" : "Not available in this step")
+        .accessibilityHint(mode.isImplemented
+                          ? "Switches to \(mode.label) mode"
+                          : "Recording is not implemented yet")
     }
 }
 

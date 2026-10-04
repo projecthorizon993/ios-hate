@@ -978,19 +978,62 @@ final class CameraStep1Tests: XCTestCase {
 
     // MARK: - Modes
 
-    /// Was `testOnlyAutoIsImplementedInStep1`, asserting that Pro and Looks reported
-    /// themselves unavailable. Steps 3 and 4 built them, so the assertion was inverted
-    /// rather than deleted — the modes are still all present and still all labelled the
-    /// same way, which is the part of the contract that does not change when one of them
-    /// stops being a placeholder.
-    func testEveryModeIsImplementedAndKeepsItsLabel() {
+    /// Every mode keeps a label, and the switcher's order is the chrome that
+    /// `DESIGN_SPEC.md` requires not to move.
+    func testEveryModeIsLabelledAndInOrder() {
         for mode in CameraMode.allCases {
-            XCTAssertTrue(mode.isImplemented, "\(mode) should be implemented")
             XCTAssertFalse(mode.label.isEmpty, "\(mode) needs a label")
         }
-        // The mode switcher's order is the chrome, and `DESIGN_SPEC.md` requires it not
-        // to move when a mode is filled in.
-        XCTAssertEqual(CameraMode.allCases, [.auto, .pro, .looks])
+        XCTAssertEqual(CameraMode.allCases, [.photo, .video, .pro])
+    }
+
+    /// Video reports itself unimplemented rather than pretending.
+    ///
+    /// There is no recorder in the app — no `AVCaptureMovieFileOutput`, no start/stop, no
+    /// audio input — so a Video button that switched to a viewfinder you cannot record from
+    /// would be worse than a disabled one.
+    func testVideoReportsItselfUnimplementedUntilThereIsARecorder() {
+        XCTAssertFalse(CameraMode.video.isImplemented)
+        XCTAssertTrue(CameraMode.photo.isImplemented)
+        XCTAssertTrue(CameraMode.pro.isImplemented)
+    }
+
+    /// Looks is no longer a mode; grading lives under Pro.
+    func testLooksIsNotAMode() {
+        XCTAssertFalse(CameraMode.allCases.contains { $0.label == "Looks" })
+    }
+
+    // MARK: - Lens pills
+
+    /// The pills are the three physical lenses, whatever the device calls them.
+    func testLensPillsAreHalfOneAndTwo() {
+        let stops = CameraViewModel.lensStops()
+        XCTAssertEqual(stops.map(\.factor), [0.5, 1, 2])
+        XCTAssertEqual(stops.map(\.label), ["0.5x", "1x", "2x"])
+    }
+
+    /// The device cannot express 0.5x as a factor, so the pill is translated to its own
+    /// scale: 0.5x asks for 1x, 1x asks for 2x, 2x asks for 4x. That is the same ×2 that
+    /// makes the device report its switch points as 2 and 4.
+    func testLensPillsAreTranslatedToTheDevicesOwnScale() {
+        XCTAssertEqual(CameraViewModel.requestedFactor(forLens: 0.5, minimumAvailableFactor: 1), 1)
+        XCTAssertEqual(CameraViewModel.requestedFactor(forLens: 1, minimumAvailableFactor: 1), 2)
+        XCTAssertEqual(CameraViewModel.requestedFactor(forLens: 2, minimumAvailableFactor: 1), 4)
+    }
+
+    /// A device that *can* express 0.5x needs no translation, so the mapping is derived from
+    /// the device's floor rather than hardcoded to a ×2.
+    func testNoTranslationWhenTheDeviceCanExpressTheLensDirectly() {
+        for lens in [0.5, 1, 2] {
+            XCTAssertEqual(CameraViewModel.requestedFactor(forLens: lens, minimumAvailableFactor: 0.5),
+                           lens)
+        }
+    }
+
+    /// A 4x stop is the 2x telephoto cropped again, so it must not sit beside the lenses.
+    func testThePillsNeverOfferACropAsIfItWereALens() {
+        XCTAssertFalse(CameraViewModel.lensStops().map(\.factor).contains(4),
+                       "4x is a crop of the 2x, not a lens")
     }
 
     // MARK: - Manual exposure gating
