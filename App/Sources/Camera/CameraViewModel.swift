@@ -1243,38 +1243,17 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    /// Tap to focus. Auto mode only: the exposure slider that DESIGN_SPEC pairs with the
-    /// reticle is a manual control and belongs to Pro in Step 4.
+    /// Tap to focus. Auto mode tracks continuously at the tap point; Pro locks
+    /// there, because the lock is the control in Pro and the panel shows it.
+    /// Both run on the session queue — the lock plus mode writes never touch the
+    /// frame-rate-sensitive path — and out-of-frame taps clamp to the edge.
     func focus(atDevicePoint point: CGPoint) {
-        guard let device = sessionController.configuration?.device,
-              device.isFocusPointOfInterestSupported
-        else { return }
-        do {
-            try device.lockForConfiguration()
-        } catch {
-            AppLog.warn(AppLog.camera, "focus: lock failed \(error.localizedDescription)")
-            return
+        guard let device = sessionController.configuration?.device else { return }
+        if mode == .pro {
+            sessionController.lockFocus(at: point, on: device)
+        } else {
+            sessionController.focusContinuously(at: point, on: device)
         }
-        defer { device.unlockForConfiguration() }
-
-        // These mode properties raise an Objective-C exception when the device is not
-        // locked rather than throwing a Swift error, so they go through
-        // `LumaFrameSafety`, which converts the exception into a log line.
-        if device.isFocusModeSupported(.autoFocus) {
-            if let failure = LumaFrameSafety.perform({ device.focusMode = .autoFocus }) {
-                AppLog.warn(AppLog.camera, "focus: auto focus rejected \(failure)")
-            }
-        }
-        if let failure = LumaFrameSafety.perform({ device.focusPointOfInterest = point }) {
-            AppLog.warn(AppLog.camera, "focus: point rejected \(failure)")
-            return
-        }
-        if let failure = LumaFrameSafety.perform({ device.focusMode = .locked }) {
-            AppLog.warn(AppLog.camera, "focus: lock rejected \(failure)")
-            return
-        }
-        Haptics.focusLocked()
-        AppLog.note(AppLog.camera, "focus locked at device point \(point.x), \(point.y)")
     }
 
     // MARK: - Presentation

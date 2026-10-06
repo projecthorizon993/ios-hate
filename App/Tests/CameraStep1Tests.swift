@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreGraphics
 import ImageIO
 import XCTest
 @testable import LumaFrame
@@ -1335,6 +1336,16 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertEqual(ProParameter.whiteBalance.readout(ManualSettings.none), "Auto")
         XCTAssertTrue(ProParameter.whiteBalance.isAutomatic(ManualSettings.none))
         XCTAssertFalse(ProParameter.whiteBalance.isAutomatic(ManualSettings(kelvin: 5200)))
+    }
+
+    /// Out-of-frame taps clamp to the edge rather than reaching the device: the
+    /// field log showed points like x=1.08, y=-2.17, and `focusPointOfInterest`
+    /// only takes 0…1.
+    func testFocusPointsClampToTheFrame() {
+        XCTAssertEqual(CaptureSessionController.clampedFocusPoint(CGPoint(x: 1.08, y: -2.17)),
+                       CGPoint(x: 1, y: 0))
+        XCTAssertEqual(CaptureSessionController.clampedFocusPoint(CGPoint(x: 0.4, y: 0.6)),
+                       CGPoint(x: 0.4, y: 0.6))
     }
 
     /// `photoQualityPrioritization` is decided from this, and `.balanced` would let the

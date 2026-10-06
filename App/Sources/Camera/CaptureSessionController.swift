@@ -878,6 +878,94 @@ final class CaptureSessionController: NSObject {
                                                  blueGain: clamp(gains.blueGain))
     }
 
+    /// A tap point clamped to the device's field of view.
+    ///
+    /// Pure, because the preview letterboxes and taps land outside it: the log showed
+    /// points like x=1.08, y=-2.17 reaching `focusPointOfInterest`, which only takes
+    /// 0…1. Clamped, never rejected — the nearest edge is still the point the user
+    /// meant, and the clamp is logged at the call site.
+    nonisolated static func clampedFocusPoint(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
+    }
+
+    /// Focuses continuously at a tap point, on the session queue.
+    ///
+    /// Continuous AF biased to the point — not a lock. The tap this replaces ended in
+    /// `.locked` with no path back, so one tap killed autofocus until the session was
+    /// rebuilt, which on the telephoto's shallow depth of field reads as no autofocus
+    /// at all. `.autoFocus` is the fallback where continuous is unsupported.
+    func focusContinuously(at point: CGPoint, on device: AVCaptureDevice) {
+        let clamped = Self.clampedFocusPoint(point)
+        if clamped != point {
+            AppLog.warn(AppLog.camera,
+                         "tap outside the frame (\(point.x), \(point.y)); focusing at the edge")
+        }
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                try device.lockForConfiguration()
+            } catch {
+                AppLog.warn(AppLog.camera, "focus: lock failed \(error.localizedDescription)")
+                return
+            }
+            defer { device.unlockForConfiguration() }
+            if device.isFocusPointOfInterestSupported {
+                if let failure = LumaFrameSafety.perform({
+                    device.focusPointOfInterest = clamped
+                }) {
+                    AppLog.warn(AppLog.camera, "focus: point rejected \(failure)")
+                    return
+                }
+            }
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                if let failure = LumaFrameSafety.perform({
+                    device.focusMode = .continuousAutoFocus
+                }) {
+                    AppLog.warn(AppLog.camera, "focus: continuous focus rejected \(failure)")
+                }
+            } else {
+                self.setFocusMode(.autoFocus, on: device, name: "focus")
+            }
+            // Feedback generators belong on the main thread; the device writes above
+            // do not.
+            DispatchQueue.main.async { Haptics.focusLocked() }
+            AppLog.note(AppLog.camera,
+                         "focus tracking at device point \(clamped.x), \(clamped.y)")
+        }
+    }
+
+    /// Locks focus at a tap point, on the session queue. Pro mode only: the lock is
+    /// the control there, and the panel shows it.
+    func lockFocus(at point: CGPoint, on device: AVCaptureDevice) {
+        let clamped = Self.clampedFocusPoint(point)
+        if clamped != point {
+            AppLog.warn(AppLog.camera,
+                         "tap outside the frame (\(point.x), \(point.y)); locking at the edge")
+        }
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                try device.lockForConfiguration()
+            } catch {
+                AppLog.warn(AppLog.camera, "focus: lock failed \(error.localizedDescription)")
+                return
+            }
+            defer { device.unlockForConfiguration() }
+            if device.isFocusPointOfInterestSupported {
+                if let failure = LumaFrameSafety.perform({
+                    device.focusPointOfInterest = clamped
+                }) {
+                    AppLog.warn(AppLog.camera, "focus: point rejected \(failure)")
+                    return
+                }
+            }
+            self.setFocusMode(.locked, on: device, name: "focus")
+            DispatchQueue.main.async { Haptics.focusLocked() }
+            AppLog.note(AppLog.camera,
+                         "focus locked at device point \(clamped.x), \(clamped.y)")
+        }
+    }
+
     private func setFocusMode(_ mode: AVCaptureDevice.FocusMode,
                               on device: AVCaptureDevice,
                               name: String) {
