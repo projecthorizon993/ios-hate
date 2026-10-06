@@ -127,7 +127,7 @@ struct GalleryView: View {
 
     /// One entry per capture: the graded file when there is one, otherwise the original.
     ///
-    /// A look writes a *second* file beside the original rather than replacing it, because
+    /// Processing writes a *second* file beside the original rather than replacing it, because
     /// the untouched original is what a later re-render needs. Both files are real and both
     /// stay on disk, but a single shutter press filling two cells in the grid reads as two
     /// photos having been taken, so they are collapsed here.
@@ -472,8 +472,8 @@ private struct Fact: Identifiable {
         if !metadata.colorSpace.isEmpty {
             rows.append(Fact(label: "Colour", value: metadata.colorSpace))
         }
-        if let look = metadata.processing, let name = look.look?.name {
-            rows.append(Fact(label: "Look", value: name))
+        if let processing = metadata.processing, processing.summarise() != "identity" {
+            rows.append(Fact(label: "Grade", value: processing.summarise()))
         }
         return rows
     }

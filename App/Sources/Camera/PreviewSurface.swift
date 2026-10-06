@@ -72,17 +72,8 @@ final class ProcessedPreview: NSObject {
     private var inputSpace: ColorSpace = .sRGB
     private var outputSpace: ColorSpace = .sRGB
 
-    /// The most recent rendered image, for the still-frame grab in the compare control.
+    /// The most recent rendered image, for the display renderer below.
     private var lastRendered: CIImage?
-
-    /// Segmentation state, guarded because it is written from the segmentation queue and
-    /// read from the capture queue.
-    private let maskLock = NSLock()
-    private var cachedMask: SubjectSegmentation.Result?
-    private var lastSegmentationAt: UInt64?
-
-    private let segmentationQueue = DispatchQueue(label: "com.example.LumaFrame.preview.segmentation",
-                                                   qos: .userInitiated)
 
     override init() {
         // Before `super.init()`: `output` and the delegate hand-off both need a fully
@@ -116,22 +107,8 @@ final class ProcessedPreview: NSObject {
         }
     }
 
-    /// Compare mode: render the frame with nothing applied.
-    ///
-    /// A **hold, not a toggle** (`DESIGN_SPEC.md`, Controls). The user is checking what
-    /// the look is doing to their photo, and the answer has to be available continuously
-    /// while they look, not after they commit to a mode change and find their way back.
-    ///
-    /// Implemented by skipping the pipeline rather than by setting the intensity to zero,
-    /// so the compare path is genuinely the unprocessed frame and cannot drift from it.
-    func setComparing(_ comparing: Bool) {
-        queue.sync { isComparing = comparing }
-    }
-
-    private var isComparing = false
-
-    /// The last frame the pipeline produced, for a still comparison.
-    func lastStill() -> CIImage? {
+    /// The last frame the pipeline produced, for the display renderer below.
+    func lastFrame() -> CIImage? {
         queue.sync { lastRendered }
     }
 }
@@ -156,74 +133,11 @@ extension ProcessedPreview {
             image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         }
 
-        // Compare mode bypasses the pipeline entirely rather than rendering the look at
-        // zero intensity, so what the user sees while holding is the actual unprocessed
-        // frame and not a second code path that happens to look like one.
-        if isComparing {
-            lastRendered = image
-            return
-        }
-
-        // Segmentation runs on a cadence, not per frame, and on its own queue: it is the
-        // most expensive thing in the app and the mask changes far slower than the image
-        // does. A nil is a real "no subject here" rather than "not computed yet", so the
-        // look falls back to global for that frame.
-        updateSubjectMaskIfDue(for: pixelBuffer)
-
         let rendered = pipeline.renderOrOriginal(image,
-                                                settings: recipeCarryingMask,
-                                                inputSpace: inputSpace,
-                                                outputSpace: outputSpace,
-                                                subjectMaskImage: currentMaskImage)
+                                                 settings: settings,
+                                                 inputSpace: inputSpace,
+                                                 outputSpace: outputSpace)
         lastRendered = rendered
-    }
-
-    /// Re-runs segmentation at most once per `SubjectSegmentation.cadence`.
-    ///
-    /// ## Why this is off
-    ///
-    /// It ran on every device build and the log never once showed a mask being *used*:
-    ///
-    ///     subject mask not used: mask rejected: covers the frame
-    ///
-    /// thousands of times, on a wall, a desk, and every framing without a person in it. That
-    /// is not a broken gate — it is `VNGeneratePersonSegmentationRequest` doing the right
-    /// thing. With no person in frame it returns an all-foreground mask, so coverage is 1.0
-    /// and there is no subject to find. Raising the coverage ceiling to 0.98 (which this
-    /// build did, and which changed nothing) could not have helped, because the rejection
-    /// was never marginal.
-    ///
-    /// What it cost was real: a Vision request and a buffer copy every 0.5 seconds, forever,
-    /// to produce nothing. So the call is gone rather than merely ignored, and it comes back
-    /// with a proper Pro-mode subject pipeline rather than as a slider that does nothing.
-    private func updateSubjectMaskIfDue(for pixelBuffer: CVPixelBuffer) {
-        _ = pixelBuffer
-    }
-
-    private func setMask(_ result: SubjectSegmentation.Result?) {
-        maskLock.lock()
-        cachedMask = result
-        maskLock.unlock()
-        if let result {
-            AppLog.note(AppLog.ml, "subject mask ready: \(result.mask.decision())")
-        }
-    }
-
-    private var currentMaskImage: CIImage? {
-        maskLock.lock()
-        defer { maskLock.unlock() }
-        return cachedMask?.image()
-    }
-
-    /// The recipe with the mask's statistics folded in, so a capture records that a
-    /// subject was found. The pixels stay in `cachedMask`, because they belong to a frame
-    /// and a `CIImage` cannot go in a photo's metadata.
-    private var recipeCarryingMask: ProcessingSettings {
-        maskLock.lock()
-        defer { maskLock.unlock() }
-        var recipe = settings
-        recipe.subjectMask = cachedMask?.mask
-        return recipe
     }
 }
 
@@ -248,7 +162,7 @@ final class ProcessedPreviewRenderer: NSObject, MTKViewDelegate {
         // `context` is assigned before `super.init()` because Swift requires every stored
         // property to be initialised by the time the superclass initialiser runs.
         // The working colour space is stated for the same reason as in `ProcessedPreview`
-        // above: the colour-managed LUT path depends on it, so it is not left implicit.
+        // above: tone runs in linear light, so it is not left implicit.
         context = CIContext(mtlDevice: metalDevice,
                            options: [.workingColorSpace: ColorSpace.linearSRGB.cgColorSpace])
         view = MTKView(frame: .zero, device: metalDevice)
@@ -283,7 +197,7 @@ final class ProcessedPreviewRenderer: NSObject, MTKViewDelegate {
     /// The one required member of `MTKViewDelegate`. `enableSetNeedsDisplay` is on and the
     /// view is paused, so this is called only when `redraw()` or a size change asks for it.
     func draw(in view: MTKView) {
-        guard let image = source?.lastStill(),
+        guard let image = source?.lastFrame(),
               let drawable = view.currentDrawable,
               // `MTLDevice` has no `makeCommandBuffer`; the buffer comes from a queue.
               let queue = view.device?.makeCommandQueue(),

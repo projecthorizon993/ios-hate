@@ -6,11 +6,11 @@ import UIKit
     /// The mode switcher. Three modes, and the names are the three things a photographer
     /// actually chooses between.
     ///
-    /// **Looks is not one of them.** It was a fourth mode that held only a colour grade, and
-    /// the Pro panel already carries a look and a strength slider — so the mode duplicated a
-    /// control that already existed one tap away, and gave the user four choices where there
-    /// are three. Grading lives under Pro, as live colour grading, which is where a control
-    /// that shapes an image belongs rather than being a destination in its own right.
+    /// Colour grading is not one of them. It lived here once as a fourth mode holding a
+    /// look and a strength slider, and that surface is removed: grading belongs to the
+    /// photography engine now being planned (see `docs/ENGINE_PLAN.md`), where a look is
+    /// one input among tone and custom colour rather than a separate path. Until the
+    /// engine lands, Pro holds the manual capture controls and tone.
     enum CameraMode: String, CaseIterable, Equatable {
         case photo
         case video
@@ -93,17 +93,14 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var canFlip = false
     @Published var showDebugOverlay = false
 
-    // MARK: - Processing (Steps 2, 3, 4, 5)
+    // MARK: - Processing
 
     /// The recipe. **One value, read by the preview and by the save path**, which is the
-    /// only way a look can be guaranteed to look the same in the photo as it did on
+    /// only way a grade can be guaranteed to look the same in the photo as it did on
     /// screen. Neither caller may hold its own copy.
     @Published private(set) var settings = ProcessingSettings.none
 
-    /// The looks the user can pick, built-ins first then their own imports.
-    @Published private(set) var looks: [Look] = []
-
-    /// The live processed preview. Created once and reused; `ProcessedPreview` owns a
+    /// The live processed preview. Created once and reused; the renderer owns a
     /// `CIContext` and a video output, and both are far too expensive to make per frame.
     let processedPreview = ProcessedPreview()
 
@@ -118,7 +115,6 @@ final class CameraViewModel: ObservableObject {
     private let sessionController = CaptureSessionController()
     private let photo = PhotoCaptureController()
     private let meter = PreviewMeter()
-    private let lookLibrary = LookLibrary.shared
 
     /// The photo output, exposed only so the session can attach it.
     var captureSession: AVCaptureSession { sessionController.session }
@@ -268,7 +264,6 @@ final class CameraViewModel: ObservableObject {
         if let configuration = sessionController.configuration, manual != .none {
             sessionController.apply(manual: manual, to: configuration)
         }
-        looks = lookLibrary.all
         pushSettingsToPreview()
         startReadout()
         storedBytes = PhotoStore.totalBytes()
@@ -308,28 +303,6 @@ final class CameraViewModel: ObservableObject {
         AppLog.note(AppLog.processing, "recipe: \(recipe.summarise())")
     }
 
-    /// Picks a look. `nil` means Original, which is the identity recipe and therefore gets
-    /// the cheap direct preview path back.
-    func select(look: Look?) {
-        updateSettings {
-            $0.look = look
-            // `lookIntensity` starts at 0, and `isIdentity` counts `lookIntensity == 0` as
-            // "no look applied". Selecting a look and leaving it at 0 therefore produced the
-            // identity recipe: the preview did not change, the strength slider read 0, and
-            // the whole control looked broken. Choosing a look means "show me this look", at
-            // the same full strength its thumbnail was generated at. Original resets to 0 so
-            // the next look does not inherit a stale dial position.
-            $0.lookIntensity = look == nil ? 0 : 1
-        }
-        if let look {
-            AppLog.note(AppLog.processing, "look selected: \(look.name)")
-        }
-    }
-
-    func setLookIntensity(_ value: Float) {
-        updateSettings { $0.lookIntensity = value }
-    }
-
     func setTone(_ tone: ToneCurve) {
         // A dialled-in correction is exactly the case where the native pipeline's own
         // white balance must not also be assumed, so the recipe records it explicitly.
@@ -342,59 +315,6 @@ final class CameraViewModel: ObservableObject {
 
     func setSharpen(_ value: Float) {
         updateSettings { $0.sharpen = value }
-    }
-
-    /// Imports a `.cube` the user picked, and selects it if it parses.
-    func importLook(cube data: Data, filename: String) -> Bool {
-        guard let look = lookLibrary.addImported(cube: data, filename: filename) else {
-            present("That lookup table could not be used", isError: true)
-            return false
-        }
-        looks = lookLibrary.all
-        select(look: look)
-        return true
-    }
-
-    func removeImportedLook(_ look: Look) {
-        lookLibrary.removeImported(look)
-        looks = lookLibrary.all
-        if settings.look?.id == look.id {
-            select(look: nil)
-        }
-    }
-
-    /// `true` while the user is holding to compare against the original.
-    ///
-    /// A hold, not a toggle. `DESIGN_SPEC.md` is explicit, and it is also just better: the
-    /// question "what is this look actually doing" needs the answer available continuously
-    /// while you are looking, not as a state you have to enter and remember to leave.
-    @Published private(set) var isComparing = false
-
-    /// Shows the unprocessed frame for as long as the press lasts. Both halves are needed
-    /// — a begin with no matching end would leave the preview stuck on the original.
-    func beginCompare() {
-        guard !isComparing else { return }
-        isComparing = true
-        processedPreview.setComparing(true)
-        Haptics.selection()
-    }
-
-    func endCompare() {
-        guard isComparing else { return }
-        isComparing = false
-        processedPreview.setComparing(false)
-    }
-
-    /// Pushes a recipe to the preview **without** changing what a capture will use.
-    ///
-    /// This is what a hold-to-preview needs. Tapping a look in the carousel selects it, but
-    /// touching and holding a look you have not chosen must not change the photo you are
-    /// about to take — so the temporary recipe goes to the preview only, and the real one
-    /// is restored on release. Conflating the two would mean every "let me just look at
-    /// this" quietly altered the user's settings.
-    func previewOnly(_ temporary: ProcessingSettings) {
-        processedPreview.update(settings: temporary, inputSpace: .sRGB, outputSpace: .sRGB)
-        previewRedrawToken += 1
     }
 
     /// `true` when the recipe does nothing, which is when the app uses the direct preview
@@ -872,17 +792,13 @@ final class CameraViewModel: ObservableObject {
         var metadata = makeMetadata()
         let request = makeRequest()
         metadata.hdrStatus = hdr.label
-        // The look, at the moment of the shutter press.
+        // The recipe, at the moment of the shutter press.
         //
         // The recipe does travel inside the file, and `updateSettings` logs it — but those
-        // are two separate lines, and a log where a look is selected at 02:46:11 and a
-        // photo stored at 02:46:19 cannot say which look the photo has. On device that
-        // ambiguity is the whole test: "does a look visibly change the photo" is the one
-        // thing no compiler and no simulator can answer, and the only evidence available is
-        // a pair of lines a few seconds apart. `identity` here is the tell that a look was
-        // *not* applied, which is exactly the case that looked like "looks don't work".
-        AppLog.note(AppLog.camera, "shutter: look=\(settings.look?.name ?? "none") "
-                    + "intensity=\(settings.lookIntensity) recipe=\(settings.summarise())")
+        // are two separate lines, and a log where a grade is set at 02:46:11 and a
+        // photo stored at 02:46:19 cannot say which grade the photo has. `identity` here
+        // is the tell that nothing was applied.
+        AppLog.note(AppLog.camera, "shutter: recipe=\(settings.summarise())")
         logCameraSource()
         photo.capture(metadata: metadata, request: request)
     }

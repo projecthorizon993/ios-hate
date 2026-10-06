@@ -21,7 +21,7 @@ the same generic shape.
 | `text.secondary` | `#9BA0A8` | Labels, units |
 | `text.disabled` | `#5C6068` | Controls that exist but are unavailable |
 | `accent.active` | `#F2C14E` | Active mode, shutter ring, focus reticle, recording dot |
-| `accent.compare` | `#6FA8FF` | Before/after compare state, focus peaking |
+| `accent.compare` | `#6FA8FF` | Reserved for the engine's compare state, unused until it lands |
 | `state.warn` | `#E8804A` | Unsupported setting, thermal warning |
 | `state.error` | `#E2564C` | Capture error |
 | `state.lock` | `#8F7BD8` | AE / AF / AWB lock badges |
@@ -126,10 +126,11 @@ Rules:
   at the device's real min/max (never a synthetic range). Live value in `type.value`.
   An `AUTO` chip per parameter; tapping it returns that parameter to auto without
   touching the others.
-- **Style carousel**: horizontal, live thumbnails, selected item scaled 1.0 and
-  unselected 0.85, strength slider below.
-- **Long-press any style or the viewfinder** → compare with the original. The
-  compare state is `accent.compare`, and it is a hold, not a toggle.
+- **Style carousel**: removed with the look system (October 2026). Grading UI returns
+  with the photography engine (`docs/ENGINE_PLAN.md`); until then no carousel ships,
+  rather than one that does nothing.
+- **Long-press the viewfinder** → reserved for the engine's compare state. No hold
+  gesture ships until there are two grades to compare.
 - **Tap to focus** shows a reticle in `accent.active` plus a vertical exposure
   slider. Pinch zooms. Both operate on the capability set, so a single-lens device
   has no zoom steps and no zoom control at all.

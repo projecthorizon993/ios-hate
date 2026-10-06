@@ -1,17 +1,17 @@
 import AVFoundation
 import SwiftUI
 
-/// The camera screen — Auto, Looks and Pro.
+/// The camera screen — Auto and Pro.
 ///
 /// Layout follows `docs/DESIGN_SPEC.md`: a status row with no tappable controls, the
 /// viewfinder, then a bottom stack that is the only interactive region. Portrait only,
 /// matching `UISupportedInterfaceOrientations` in the Info.plist; the landscape column
 /// layout arrives with the orientation change that enables it.
 ///
-/// Looks and Pro are **sheets over the viewfinder, not replacements for it.** A camera
+/// Pro panels are **docked over the viewfinder, not replacements for it.** A camera
 /// app that swaps the screen to show a slider has taken away the thing the slider is
 /// adjusting, and the user has to dismiss it to check the result. The preview is computed
-/// per frame, so leaving it visible behind a sheet costs nothing extra.
+/// per frame, so leaving it visible behind the panel costs nothing extra.
 struct CameraScreen: View {
 
     @StateObject private var model = CameraViewModel()
@@ -19,7 +19,6 @@ struct CameraScreen: View {
     @State private var deviceOrientation = UIDevice.current.orientation
     @State private var focusReticle: CGPoint?
     @State private var isShowingDeveloper = false
-    @State private var isShowingLooks = false
     @State private var isShowingPro = false
     @State private var isShowingTone = false
     /// The zoom slider's position while it is being dragged, or `nil` when it is not.
@@ -55,16 +54,6 @@ struct CameraScreen: View {
         .background(Theme.ColorToken.surfaceBase)
         .preferredColorScheme(.dark)
         .statusBarHidden()
-        // The compare hold. `pressing` gives both edges of the press, so releasing always
-        // ends it even if the gesture is cancelled by a sheet or a rotation. Without the
-        // `onEnded` belt-and-braces below, a cancelled gesture would leave the preview
-        // stuck showing the original.
-        .onLongPressGesture(minimumDuration: Theme.Motion.tap, maximumDistance: 40) {
-            // Fires on a *completed* long press, which is a tap-and-hold that finished.
-            // Kept as a no-op safety net; the real work is in `pressing`.
-        } onPressingChanged: { pressing in
-            if pressing { model.beginCompare() } else { model.endCompare() }
-        }
         .task { begin() }
         .task(id: model.banner) { await dismissBannerSoon() }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
@@ -80,7 +69,7 @@ struct CameraScreen: View {
         // The developer panel, replacing the capability report.
         //
         // It is a sheet because it is a read-only list of values and there is nothing to
-        // adjust while it is open — unlike Looks and Pro, which dock over the viewfinder so
+        // adjust while it is open — unlike the Pro panels, which dock over the viewfinder so
         // the camera stays visible. It reads cached values and opens no second capture
         // session, so the camera never has to be handed over and the previous
         // release/resume pair is now a no-op.
@@ -91,36 +80,12 @@ struct CameraScreen: View {
 
     // MARK: - Viewfinder
 
-    /// Shown while the user is holding to compare. `accent.compare` per the spec, and it
-    /// carries the word rather than relying on colour alone — a blue tint with no label
-    /// reads as a rendering fault, not as "this is the unprocessed frame".
-    private var compareBadge: some View {
-        VStack {
-            HStack {
-                Text("ORIGINAL")
-                    .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
-                    .tracking(0.6)
-                    .foregroundStyle(Theme.ColorToken.accentCompare)
-                    .padding(.horizontal, Theme.Space.s)
-                    .padding(.vertical, Theme.Space.xs)
-                    .background(Theme.ColorToken.surfaceRaised.opacity(0.8))
-                    .clipShape(Capsule())
-                Spacer()
-            }
-            .padding(Theme.Space.s)
-            Spacer()
-        }
-        .transition(.opacity)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
     private var viewfinder: some View {
         ZStack {
             // Two preview paths, chosen by whether the recipe does anything. The direct
             // layer is the fastest preview there is and is on screen for the whole of Auto
-            // mode; the processed one is what makes the Looks tab mean anything, because
-            // otherwise the intensity slider would be a guess until after the shutter.
+            // mode; the processed one carries the dialled tone, so what the shutter saves
+            // is what was on screen.
             if model.isProcessingActive {
                 ProcessedPreviewView(preview: model.processedPreview,
                                      redrawToken: model.previewRedrawToken)
@@ -140,14 +105,6 @@ struct CameraScreen: View {
             overlayCanvas
                 .aspectRatio(3.0 / 4.0, contentMode: .fit)
                 .allowsHitTesting(false)
-
-            // Compare is a hold on the viewfinder, not a toggle in a menu. The gesture is
-            // on the ZStack so it also works in the direct-preview path, where there is
-            // nothing to re-render — the chrome is the only thing that changes, which is
-            // what makes the comparison honest.
-            if model.isComparing {
-                compareBadge
-            }
 
             if let focusReticle {
                 FocusReticle()
@@ -227,8 +184,7 @@ struct CameraScreen: View {
         }
     }
 
-    /// Tap to focus. A long press is reserved for the compare gesture, which needs a
-    /// second style to exist (Step 3), so tap is free.
+    /// Tap to focus.
     private var focusGesture: some Gesture {
         SpatialTapGesture(count: 1)
             .onEnded { value in
@@ -239,8 +195,7 @@ struct CameraScreen: View {
     }
 
     /// Triple tap toggles the debug overlay. Zero chrome, and it never sits under a
-    /// finger while composing. A long press is not usable yet: DESIGN_SPEC reserves it
-    /// for the compare gesture, which needs a second style to compare against.
+    /// finger while composing.
     private var debugTap: some Gesture {
         SpatialTapGesture(count: 3)
             .onEnded { _ in
@@ -303,9 +258,7 @@ struct CameraScreen: View {
     private var contextualRow: some View {
         switch model.mode {
         case .photo:
-            // Flash only. The colour chips moved to Pro, where a grade lives now — a
-            // photo-mode row offering both would be the duplication the Looks mode used
-            // to be, just spread across two modes instead of being its own.
+            // Flash only, in the contextual row.
             autoControls
         case .pro:
             // An empty chip list used to render as an empty strip of the same height —
@@ -341,7 +294,7 @@ struct CameraScreen: View {
     ///
     /// It sits in its own row directly under the viewfinder, above the contextual row,
     /// because it is the one control the thumb reaches for while composing — and because a
-    /// slider needs the whole width. The flash button and the Pro and Looks chips keep the
+    /// slider needs the whole width. The flash button and the Pro chips keep the
     /// contextual row to themselves.
     ///
     /// **A device with one lens gets no slider at all**, not a disabled one. The spec:
@@ -452,13 +405,12 @@ struct CameraScreen: View {
         }
     }
 
-    /// Opens the tone panel in the same docked slot the carousel uses, so only one of the
-    /// two is ever open. Tone is a separate gesture from choosing a look because it is a
-    /// different kind of adjustment, not because it needs a different screen.
+    /// Opens the tone panel in its docked slot over the viewfinder. Tone is a slower,
+    /// dialled-in adjustment, which is why it docks rather than living in the
+    /// contextual row.
     private var toneChip: some View {
         Button {
             Haptics.selection()
-            isShowingLooks = false
             isShowingTone.toggle()
         } label: {
             Text("Tune")
@@ -505,7 +457,7 @@ struct CameraScreen: View {
         .frame(minHeight: Theme.Space.xs)
     }
 
-    /// The open Pro or Looks panel, overlaid on the lower part of the viewfinder.
+    /// The open Pro panel, overlaid on the lower part of the viewfinder.
     ///
     /// A plain overlay rather than a `sheet` for the reason above. It has no background of
     /// its own, so the viewfinder reads through above it, and the panel's own
@@ -517,12 +469,6 @@ struct CameraScreen: View {
                 // The chip chose the parameter, so the docked dial has no picker and is
                 // told what to show.
                 .environment(\.proParameterOverride, open)
-                .background(Theme.ColorToken.surfaceBase.opacity(0.96))
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-        } else if model.mode == .pro, isShowingLooks {
-            // Grading reached from Pro rather than from a Looks mode of its own. Same panel,
-            // same controls — it is where a grade belongs now that the mode is gone.
-            LooksCarousel(model: model, expanded: $isShowingLooks)
                 .background(Theme.ColorToken.surfaceBase.opacity(0.96))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if model.mode == .pro, isShowingTone {
@@ -592,7 +538,6 @@ struct CameraScreen: View {
 
     private func collapsePanels() {
         isShowingPro = false
-        isShowingLooks = false
         isShowingTone = false
         openProParameter = nil
     }

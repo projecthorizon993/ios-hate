@@ -742,19 +742,16 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertEqual(CameraViewModel.zoomPosition(forFactor: 99, in: range), 1, accuracy: 0.0001)
     }
 
-    // MARK: - Look strength
+    // MARK: - Recipe identity
 
-    func testSelectingALookIsNotTheIdentityRecipe() {
-        // A look at zero strength *is* the identity recipe, which is why selecting one used
-        // to change nothing on screen and read as a dead control.
+    func testAnUntouchedRecipeIsTheIdentityRecipe() {
+        // The identity fast path is what keeps the direct preview layer on screen: any
+        // set value must flip it off, or the processed preview would never appear.
+        XCTAssertTrue(ProcessingSettings.none.isIdentity)
         var settings = ProcessingSettings.none
-        settings.look = Look.Generated.warmth.look
-        settings.lookIntensity = 0
-        XCTAssertTrue(settings.clamped().isIdentity,
-                      "a look at zero strength must report itself as no look at all")
-        settings.lookIntensity = 1
+        settings.grain = 1
         XCTAssertFalse(settings.clamped().isIdentity,
-                       "a look at full strength must not report itself as the identity")
+                       "a set value must not report itself as nothing to do")
     }
 
     // MARK: - Gallery entries
@@ -772,8 +769,8 @@ final class CameraStep1Tests: XCTestCase {
                           metadata: metadata)
     }
 
-    func testACaptureWithAndWithoutALookIsOneGridEntry() {
-        // A look writes a second file beside the original rather than replacing it. Both are
+    func testACaptureWithAndWithoutAGradeIsOneGridEntry() {
+        // Processing writes a second file beside the original rather than replacing it. Both are
         // real and both stay on disk, but one shutter press filling two cells reads as two
         // photos having been taken.
         let original = savedPhoto("original", capturedAt: 100)
@@ -789,7 +786,7 @@ final class CameraStep1Tests: XCTestCase {
                        processed.url)
     }
 
-    func testCapturesWithoutALookEachGetAnEntry() {
+    func testCapturesWithoutAGradeEachGetAnEntry() {
         let first = savedPhoto("a", capturedAt: 100)
         let second = savedPhoto("b", capturedAt: 200)
         XCTAssertEqual(GalleryView.entries(from: [second, first]).count, 2)

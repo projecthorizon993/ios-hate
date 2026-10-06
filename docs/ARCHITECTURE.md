@@ -279,16 +279,21 @@ composite, so it must be confirmed on a Pro device. See `docs/IOS_PLAN.md` 3.2.
 Both platforms must implement **exactly** this order. Preview and saved photo use
 the same code path with the same parameters, which is what makes them match.
 
+> **Looks removed, October 2026.** The LUT + style stages below are gone — the whole
+> separate look system (`Looks/`, `CubeLUT*`, `LUTProcessor`, the pipeline look and
+> subject-blend stages) was deleted. Colour grading now belongs to the photography
+> engine being planned in `docs/ENGINE_PLAN.md`, where a user-imported LUT is one
+> input to the engine rather than a separate path. Old recipes carrying look keys
+> decode to the original. The LUT history in 3.1 below is kept as the record.
+
 ```text
 1. capture           native pipeline (AVCapturePhotoOutput / CameraX ImageCapture)
                      -> RAW/DNG or sRGB/P3/HEIF still
 2. white balance     ONLY if manual WB was set by the user
                      (never re-apply WB the sensor already applied)
 3. tone curve        tone curve + exposure/EV, in linear light
-4. ml masks          subject / skin-tone / scene masks (Step 5)
-5. lut + style       per-region blend using the masks from step 4
-6. grain + sharpen   grain last, sharpen after denoise only
-7. output transform  to the target color space, then save
+4. grain + sharpen   grain last, sharpen after denoise only
+5. output transform  to the target color space, then save
 ```
 
 Two rules that are easy to get wrong and produce the "washed out" look:
@@ -306,15 +311,16 @@ Two rules that are easy to get wrong and produce the "washed out" look:
 | --- | --- | --- |
 | Input from sensor | Device-native (RAW = camera space, JPEG = sRGB or P3) | |
 | WB / tone curve | Working space: **linear sRGB** | Curves in gamma space produce muddy shadows |
-| LUT | LUT's own declared domain, usually 0–1 gamma | `.cube` `DOMAIN_MIN/MAX` must be honoured |
-| Style blend | Working space | |
 | Grain | Gamma space | Grain in linear space is invisible in shadows |
 | Output | sRGB or **Display P3** if the capture was P3 | |
 
-`ColorSpace` is an explicit parameter on every processor. The LUT and the image both
-carry a space, and a mismatch is a **hard error with a log line**, never a silent
-conversion. A `.cube` file with no `DOMAIN_*` directive is treated as sRGB domain and
-the report logs that assumption.
+(The LUT and style-blend rows are gone with the look system. `ColorSpace` stays an
+explicit parameter on every processor; the space-mismatch rules below describe the
+engine's contract going forward, not a stage that still runs.)
+
+`ColorSpace` is an explicit parameter on every processor. A processor and the image
+both carry a space, and a mismatch is a **hard error with a log line**, never a silent
+conversion.
 
 Display P3 is a per-capture decision, not a global one: if the preview is P3 and the
 photo is saved as sRGB, the photo will look different from the preview. The gallery

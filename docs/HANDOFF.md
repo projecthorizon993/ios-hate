@@ -221,6 +221,7 @@ Carried from a review. Do not treat these as done.
 | `docs/device-record-02.md` | second run: why 1x is the ultra wide and 4x never reaches the telephoto |
 | `docs/IOS_PLAN.md` | the three live defects, the wide device matrix, the open-source survey |
 | `docs/ARCHITECTURE.md` | platform contract: Step-1 decisions, Android rules, repository topology |
+| `docs/ENGINE_PLAN.md` | photography engine plan: colour ownership, LUT ingestion, custom colour, build order |
 | `docs/DESIGN_SPEC.md` | visual tokens; unchanged and authoritative for the UI |
 | `docs/ORCHESTRATION.md`, `docs/tasks/*` | **retired.** Kept only as a record. |
 

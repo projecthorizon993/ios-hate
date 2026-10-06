@@ -59,9 +59,9 @@ struct CaptureMetadata: Equatable, Sendable {
     var colorSpace: String = "srgb"
     var hdrStatus: String = "unsupported"
 
-    /// The processing recipe, as of Step 2 onwards. `nil` on a capture taken with nothing
+    /// The processing recipe. `nil` on a capture taken with nothing
     /// applied, which is the common case and is recorded as absence rather than as a
-    /// zeroed struct: "no look was applied" and "a look was applied at zero intensity" are
+    /// zeroed struct: "nothing was applied" and "a grade was dialled back to zero" are
     /// different facts about a photo and only one of them is usually true.
     var processing: ProcessingSettings?
 
