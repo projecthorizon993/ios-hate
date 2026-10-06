@@ -26,6 +26,11 @@ struct ProcessingSettings: Equatable, Codable, Sendable {
     /// `nil` (or zero intensity) means no table stage at all.
     var lut: LutReference?
 
+    /// What the last segmentation found. Travels so preview and file blend by the
+    /// same numbers; the pixels are always recomputed from the frame being graded.
+    /// `nil` (or unusable numbers) grades globally — the honest fallback.
+    var subject: SubjectStat?
+
     /// 0…1. Grain in linear light is invisible in shadows, so this runs in gamma space.
     var grain: Float = 0
     /// 0…2.5, the CISharpness radius, applied after denoise thinking — never before
@@ -39,6 +44,7 @@ struct ProcessingSettings: Equatable, Codable, Sendable {
         var copy = self
         copy.tone = tone?.clamped()
         copy.lut = lut?.clamped()
+        copy.subject = subject?.clamped()
         copy.grain = min(max(grain.isFinite ? grain : 0, 0), 1)
         copy.sharpen = min(max(sharpen.isFinite ? sharpen : 0, 0), 2.5)
         return copy
@@ -47,6 +53,10 @@ struct ProcessingSettings: Equatable, Codable, Sendable {
     /// `true` when every stage would be a no-op, so the caller can skip Core Image
     /// entirely. Worth having: on an iPhone SE this is the difference between a live
     /// preview and a warm one.
+    ///
+    /// Subject statistics never break identity on their own: without an active table
+    /// there is nothing to blend, so a stats-only recipe still gets the direct
+    /// preview layer rather than a processed pass that changes nothing.
     var isIdentity: Bool {
         (tone?.isIdentity ?? true)
             && (lut == nil || lut?.intensity == 0)
@@ -61,6 +71,7 @@ struct ProcessingSettings: Equatable, Codable, Sendable {
         if let lut, lut.intensity > 0 {
             parts.append("table(\(lut.filename)@\(lut.intensity))")
         }
+        if let subject, subject.isUsable { parts.append("subject(\(subject.decision()))") }
         if grain > 0 { parts.append("grain(\(grain))") }
         if sharpen > 0 { parts.append("sharpen(\(sharpen))") }
         return parts.isEmpty ? "identity" : parts.joined(separator: " ")

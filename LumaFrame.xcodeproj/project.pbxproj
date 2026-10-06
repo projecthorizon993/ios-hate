@@ -59,6 +59,8 @@
 				AE7CF6C2FC0AF03188E15E98,
 				A10880D6DBFC29C0EA3BFF07,
 				AC8B016C6F86342C5160A808,
+				A3874625AE0F9F3ABADDB3DB,
+				A0AB1B9F76521A069C959E9A,
 				AAE0F97D8CE57352E249633B,
 				ADE0B4F355E5FFE40C86B372,
 				AEB620EE64789952E59B006A,
@@ -72,6 +74,7 @@
 				AC938FD7C68ED288AC7E4FED,
 				A1A8AA801A2E1ECDD7509869,
 				A2DBE3DC77B7D5D67C72CF65,
+				A9336B406BB727F54619691D,
 				A10000000000000000000058
 			);
 			name = LumaFrame;
@@ -271,6 +274,8 @@
 				C2E3FDE2922A3982527BAD22,
 				CB027F8F37C8B0ECE2069B9E,
 				C2A1FBECAA50DFCFF699BB6B,
+				C1F42B8F0A9D61544E14999E,
+				C7A42C77623B71474D59A309,
 				CDB8F82FA873B01CFE9AB0D3,
 				CE223E22A62A4CCB4BA2A88F,
 				C8F0875D32195865344EC1F9,
@@ -289,6 +294,7 @@
 				D7EA069DAB30A429FBAE2818,
 				D2D629DD0BDAD299C7E5769E,
 				DE69752AFD735837BE0E75AB,
+				D50B20C96DD9F22E58895E40,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -447,6 +453,18 @@
 			path = App/Sources/Processing/ProcessingSettings.swift;
 			sourceTree = "<group>";
 		};
+		A3874625AE0F9F3ABADDB3DB = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Processing/Segmentation.swift;
+			sourceTree = "<group>";
+		};
+		A0AB1B9F76521A069C959E9A = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Processing/SubjectStat.swift;
+			sourceTree = "<group>";
+		};
 		AAE0F97D8CE57352E249633B = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -525,6 +543,12 @@
 			path = App/Tests/ProcessingPipelineTests.swift;
 			sourceTree = "<group>";
 		};
+		A9336B406BB727F54619691D = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Tests/SubjectMaskTests.swift;
+			sourceTree = "<group>";
+		};
 		C15352A586C2134E09B448B6 = {
 			isa = PBXBuildFile;
 			fileRef = A7A90ACB24107C131EF7144E;
@@ -601,6 +625,14 @@
 			isa = PBXBuildFile;
 			fileRef = AC8B016C6F86342C5160A808;
 		};
+		C1F42B8F0A9D61544E14999E = {
+			isa = PBXBuildFile;
+			fileRef = A3874625AE0F9F3ABADDB3DB;
+		};
+		C7A42C77623B71474D59A309 = {
+			isa = PBXBuildFile;
+			fileRef = A0AB1B9F76521A069C959E9A;
+		};
 		CDB8F82FA873B01CFE9AB0D3 = {
 			isa = PBXBuildFile;
 			fileRef = AAE0F97D8CE57352E249633B;
@@ -644,6 +676,10 @@
 		DE69752AFD735837BE0E75AB = {
 			isa = PBXBuildFile;
 			fileRef = A2DBE3DC77B7D5D67C72CF65;
+		};
+		D50B20C96DD9F22E58895E40 = {
+			isa = PBXBuildFile;
+			fileRef = A9336B406BB727F54619691D;
 		};
 		A10000000000000000000053 = {
 			isa = PBXBuildFile;

@@ -51,16 +51,34 @@ enum ProcessingError: LocalizedError, Equatable {
 ///   makes a photo look washed out.
 /// - Highlight recovery is not in this list. If the native pipeline is already doing HDR
 ///   fusion, doing it again is the other half of the same problem.
+/// Mask input for per-region grading: the mask pixels plus the statistics the
+/// recipe already carries.
+///
+/// Kept together so the image and the numbers cannot disagree — a mask for one
+/// frame blended by another frame's statistics is exactly the seam this type
+/// closes. Neither half is `Sendable` on its own terms (`CIImage` is not), and
+/// the pipeline runs on the caller's thread, so this travels as a parameter,
+/// never across queues.
+struct SubjectBlendInput {
+
+    var mask: CIImage
+    var stats: SubjectStat
+}
+
 struct ProcessingPipeline {
 
     /// Renders one frame.
     ///
+    /// - Parameter subject: the mask for *this* frame. The recipe carries the
+    ///   statistics (which is what makes preview and file agree); the pixels
+    ///   cannot ride in a `Codable` recipe and arrive here instead.
     /// - Throws: only for reasons the caller should surface. Callers that cannot fail
     ///   should use `renderOrOriginal`, which degrades to the untouched frame.
     func render(_ image: CIImage,
                 settings: ProcessingSettings,
                 inputSpace: ColorSpace,
-                outputSpace: ColorSpace) throws -> CIImage {
+                outputSpace: ColorSpace,
+                subject: SubjectBlendInput? = nil) throws -> CIImage {
         let recipe = settings.clamped()
         // The fast path, and a real one: on a slow device an identity recipe is the
         // difference between a live preview and a warm one.
@@ -85,8 +103,10 @@ struct ProcessingPipeline {
         // space, and the invariant filter that skipped the conversion is gone.
         // Intensity interpolates the table toward identity (engine semantics,
         // `docs/ENGINE_PLAN.md` §4), so one filter pass, not a dissolve of two.
+        // A usable subject mask blends full strength on the subject against a
+        // reduced background pass; without one the grade applies globally.
         if let lut = recipe.lut, lut.intensity > 0 {
-            result = try applyTable(lut, to: result, space: &space)
+            result = try applyTable(lut, to: result, space: &space, subject: subject)
         }
 
         // 3. Sharpen then grain, in gamma space. Grain in linear light is invisible in the
@@ -114,12 +134,14 @@ struct ProcessingPipeline {
     func renderOrOriginal(_ image: CIImage,
                           settings: ProcessingSettings,
                           inputSpace: ColorSpace,
-                          outputSpace: ColorSpace) -> CIImage {
+                          outputSpace: ColorSpace,
+                          subject: SubjectBlendInput? = nil) -> CIImage {
         do {
             return try render(image,
                               settings: settings,
                               inputSpace: inputSpace,
-                              outputSpace: outputSpace)
+                              outputSpace: outputSpace,
+                              subject: subject)
         } catch {
             AppLog.fail(AppLog.processing, "render failed, showing the unprocessed frame: \(error)")
             return image
@@ -223,7 +245,8 @@ struct ProcessingPipeline {
     /// the original via `renderOrOriginal`, never to a half-graded image.
     private func applyTable(_ reference: LutReference,
                             to image: CIImage,
-                            space: inout ColorSpace) throws -> CIImage {
+                            space: inout ColorSpace,
+                            subject: SubjectBlendInput? = nil) throws -> CIImage {
         guard let table = LutStore.resolve(reference) else {
             throw LUTApplicationError.notUsable(
                 reason: "table file \(reference.filename) is missing")
@@ -233,18 +256,77 @@ struct ProcessingPipeline {
             current = try convert(current, from: space, to: table.space)
             space = table.space
         }
-        guard let data = table.rgbaData(intensity: reference.intensity) else {
+        let full = try evaluate(table, intensity: reference.intensity, image: current)
+        guard let subject, subject.stats.isUsable else { return full }
+        AppLog.note(AppLog.ml, "subject blend: \(subject.stats.decision())")
+        return try blendBySubject(full: full,
+                                  softIntensity: reference.intensity * Self.backgroundTableFraction,
+                                  table: table,
+                                  image: current,
+                                  mask: subject.mask)
+    }
+
+    /// One table evaluation at one intensity, in the table's own space.
+    private func evaluate(_ table: LutTable,
+                          intensity: Float,
+                          image: CIImage) throws -> CIImage {
+        guard let data = table.rgbaData(intensity: intensity) else {
             throw LUTApplicationError.notUsable(reason: "table samples failed the upload shape")
         }
         let filter = CIFilter.colorCubeWithColorSpace()
         filter.colorSpace = table.space.cgColorSpace
-        filter.inputImage = current
+        filter.inputImage = image
         filter.cubeDimension = Float(table.size)
         filter.cubeData = data
         // Clamp out-of-range samples to the table edge: the tables the engine writes
         // never leave 0…1, so anything outside is a conversion artefact, not a colour.
         filter.extrapolate = false
         return try output(of: filter, stage: "color table")
+    }
+
+    /// How much of the table the **background** gets when a subject mask is in play.
+    ///
+    /// Not zero: a grade that only touches the subject reads as a cut-out, because
+    /// real light does not leave the background untouched. Not one: then the mask
+    /// does no work at all.
+    nonisolated static let backgroundTableFraction: Float = 0.35
+
+    /// Full table on the subject, a reduced table everywhere else, feathered between.
+    ///
+    /// The background is evaluated separately rather than derived by inverting the
+    /// subject result, because a second pass at lower intensity is a genuinely
+    /// different amount of the grade, not a subtraction.
+    private func blendBySubject(full: CIImage,
+                                softIntensity: Float,
+                                table: LutTable,
+                                image: CIImage,
+                                mask: CIImage) throws -> CIImage {
+        let base: CIImage
+        if softIntensity > 0.01 {
+            base = try evaluate(table, intensity: softIntensity, image: image)
+        } else {
+            // A background fraction of zero means the grade is wanted on the
+            // subject only.
+            base = image
+        }
+        // Feather the mask edge in fractions of the frame's shorter side: wide
+        // enough to hide the boundary, narrow enough that the transition still
+        // reads as belonging to the subject.
+        let shortSide = min(image.extent.width, image.extent.height)
+        let feathered: CIImage
+        if shortSide > 0 {
+            let blur = CIFilter.gaussianBlur()
+            blur.inputImage = mask
+            blur.radius = Float(shortSide * 0.04)
+            feathered = try output(of: blur, stage: "mask feather")
+        } else {
+            feathered = mask
+        }
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = full
+        blend.backgroundImage = base
+        blend.maskImage = feathered
+        return try output(of: blend, stage: "subject blend")
     }
 
     /// `CIRandomGenerator` is monochrome by design, so it needs no desaturation — only

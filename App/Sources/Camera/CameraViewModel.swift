@@ -298,7 +298,8 @@ final class CameraViewModel: ObservableObject {
         // space is known.
         processedPreview.update(settings: recipe,
                                 inputSpace: .sRGB,
-                                outputSpace: .sRGB)
+                                outputSpace: .sRGB,
+                                segmentationAllowed: runtimeCapabilities.personSegmentationAvailable)
         previewRedrawToken += 1
         AppLog.note(AppLog.processing, "recipe: \(recipe.summarise())")
     }
@@ -1119,6 +1120,12 @@ final class CameraViewModel: ObservableObject {
             do {
                 var metadata = capture.metadata
                 metadata.processing = settings
+                // The preview's latest subject observation rides into the file's
+                // recipe, so the saved render blends by the same numbers the
+                // viewfinder did. Stale by the delivery delay, like the rest of
+                // the live recipe — and cleared by the preview itself whenever
+                // nothing usable is in frame.
+                metadata.processing?.subject = processedPreview.latestSubjectStats
                 let saved = try PhotoStore.write(capture.data,
                                                  container: capture.container,
                                                  metadata: metadata)
@@ -1162,6 +1169,7 @@ final class CameraViewModel: ObservableObject {
         }
         let recipe = settings
         let source = capture.data
+        let segmentationAllowed = runtimeCapabilities.personSegmentationAvailable
 
         Task.detached(priority: .userInitiated) {
             let pipeline = ProcessingPipeline()
@@ -1172,10 +1180,33 @@ final class CameraViewModel: ObservableObject {
             let outputSpace: ColorSpace = capture.metadata.container == PhotoContainer.heic.rawValue
                 ? .displayP3
                 : .sRGB
+            // The mask pixels are recomputed from the original bytes: the recipe
+            // carries the shutter-time statistics and the preview frame's pixels
+            // are a different image. Same numbers, same program — which is what
+            // makes the file match the viewfinder.
+            var blend: SubjectBlendInput?
+            var recipeWithSubject = recipe
+            if segmentationAllowed,
+               let stats = recipe.subject, stats.isUsable,
+               recipe.lut?.intensity ?? 0 > 0 {
+                let context = CIContext(options: [.workingColorSpace: ColorSpace.linearSRGB.cgColorSpace])
+                blend = PersonSegmentation.exportBlendInput(for: ciImage,
+                                                             stats: stats,
+                                                             context: context)
+                if blend == nil {
+                    // The recompute found nothing to blend around: drop the
+                    // statistics so the derived file describes the global grade
+                    // it actually contains. The original keeps the observation.
+                    recipeWithSubject.subject = nil
+                    AppLog.note(AppLog.processing,
+                                 "processed version: no subject in the original; graded globally")
+                }
+            }
             let rendered = pipeline.renderOrOriginal(ciImage,
-                                                    settings: recipe,
-                                                    inputSpace: .sRGB,
-                                                    outputSpace: outputSpace)
+                                                     settings: recipeWithSubject,
+                                                     inputSpace: .sRGB,
+                                                     outputSpace: outputSpace,
+                                                     subject: blend)
             guard let data = ProcessingPipeline.encodeJPEG(rendered,
                                                            space: outputSpace,
                                                            quality: 0.95) else {
@@ -1184,7 +1215,7 @@ final class CameraViewModel: ObservableObject {
             }
             do {
                 var metadata = capture.metadata
-                metadata.processing = recipe
+                metadata.processing = recipeWithSubject
                 metadata.derivedFrom = original.id
                 let saved = try PhotoStore.write(data,
                                                  container: .jpeg,

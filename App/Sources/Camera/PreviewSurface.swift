@@ -66,16 +66,37 @@ final class ProcessedPreview: NSObject {
                                        qos: .userInitiated)
     private let pipeline: ProcessingPipeline
     private let metalDevice: MTLDevice?
+    /// Apple's on-device person segmentation, behind the `MaskProviding` seam so the
+    /// frame path is testable without Vision. Runs only while a table is active —
+    /// a mask with no grade to blend is work for nothing.
+    private let masks: MaskProviding
 
     /// Set from the main actor whenever the recipe or the colour spaces change.
     private var settings = ProcessingSettings.none
     private var inputSpace: ColorSpace = .sRGB
     private var outputSpace: ColorSpace = .sRGB
+    /// Whether the device reports person segmentation. Read once from the
+    /// capability model: asking Vision on hardware without the model is a request
+    /// that cannot succeed, so it is gated before it is made.
+    private var segmentationAllowed = false
+
+    /// The latest usable subject statistics, for the capture to record.
+    ///
+    /// The preview knows what the last frame contained; the shutter asks. Set on
+    /// every frame (cleared when nothing usable is found, so a departed subject
+    /// does not haunt the next photo), read once per capture.
+    private var latestSubject: SubjectStat?
+
+    /// Queue-synced read for the shutter path.
+    var latestSubjectStats: SubjectStat? {
+        queue.sync { latestSubject }
+    }
 
     /// The most recent rendered image, for the display renderer below.
     private var lastRendered: CIImage?
 
-    override init() {
+    init(masks: MaskProviding = PersonSegmentation()) {
+        self.masks = masks
         // Before `super.init()`: `output` and the delegate hand-off both need a fully
         // initialised `self`, and Swift will not let `super.init()` run twice.
         pipeline = ProcessingPipeline()
@@ -99,11 +120,15 @@ final class ProcessedPreview: NSObject {
     /// `queue.async` here would apply a frame with the previous frame's settings. Only the
     /// main actor calls this, and the preview queue is the only reader, so there is no
     /// path where the two could be the same thread.
-    func update(settings: ProcessingSettings, inputSpace: ColorSpace, outputSpace: ColorSpace) {
+    func update(settings: ProcessingSettings,
+                inputSpace: ColorSpace,
+                outputSpace: ColorSpace,
+                segmentationAllowed: Bool) {
         queue.sync {
             self.settings = settings
             self.inputSpace = inputSpace
             self.outputSpace = outputSpace
+            self.segmentationAllowed = segmentationAllowed
         }
     }
 
@@ -133,10 +158,30 @@ extension ProcessedPreview {
             image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         }
 
+        // A mask with no active table is work for nothing: the blend stage only runs
+        // under a table, so segmentation stays off until there is one to blend.
+        // `requestMask` throttles itself to its cadence and never blocks this queue.
+        let blend: SubjectBlendInput?
+        if segmentationAllowed, let intensity = settings.lut?.intensity, intensity > 0 {
+            masks.requestMask(for: pixelBuffer)
+            if let snapshot = masks.snapshot, snapshot.stats.isUsable,
+               let maskImage = snapshot.image(matching: image.extent) {
+                latestSubject = snapshot.stats
+                blend = SubjectBlendInput(mask: maskImage, stats: snapshot.stats)
+            } else {
+                latestSubject = nil
+                blend = nil
+            }
+        } else {
+            latestSubject = nil
+            blend = nil
+        }
+
         let rendered = pipeline.renderOrOriginal(image,
                                                  settings: settings,
                                                  inputSpace: inputSpace,
-                                                 outputSpace: outputSpace)
+                                                 outputSpace: outputSpace,
+                                                 subject: blend)
         lastRendered = rendered
     }
 }
