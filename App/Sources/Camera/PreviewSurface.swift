@@ -63,9 +63,8 @@ final class ProcessedPreview: NSObject {
     /// same buffer. Sharing is also faster, since bi-planar 420 is a third of the bytes of
     /// BGRA.
     private let queue = DispatchQueue(label: "com.example.LumaFrame.processedpreview",
-                                      qos: .userInitiated)
+                                       qos: .userInitiated)
     private let pipeline: ProcessingPipeline
-    private let context: CIContext
     private let metalDevice: MTLDevice?
 
     /// Set from the main actor whenever the recipe or the colour spaces change.
@@ -90,23 +89,11 @@ final class ProcessedPreview: NSObject {
         // initialised `self`, and Swift will not let `super.init()` run twice.
         pipeline = ProcessingPipeline()
         metalDevice = MTLCreateSystemDefaultDevice()
-        // The working colour space is stated, not inherited. Core Image's default already is
-        // linear sRGB, so this is a no-op today — which is the point. `LUTProcessor` hands
-        // `CIColorCubeWithColorSpace` the table's authored space and relies on the working
-        // space being linear to convert into, and a context whose working space is implicit
-        // is a context whose working space is Core Image's business. Same reason and same
-        // option as `ProcessingPipeline.encodeJPEG`.
-        let workingSpace: [CIContextOption: Any] = [
-            .workingColorSpace: ColorSpace.linearSRGB.cgColorSpace
-        ]
-        if let device = metalDevice {
-            context = CIContext(mtlDevice: device, options: workingSpace)
-        } else {
-            // No Metal device: the live preview is unavailable and `isAvailable` says so,
-            // but the still path still works on the CPU. Force-unwrapping the device here
-            // would crash the app on exactly the hardware least able to report it.
-            context = CIContext(options: workingSpace)
-            AppLog.warn(AppLog.processing, "no Metal device; stills will be processed on the CPU")
+        if metalDevice == nil {
+            // No Metal device: the live preview is unavailable and `isAvailable` says so.
+            // Force-unwrapping the device here would crash the app on exactly the
+            // hardware least able to report it.
+            AppLog.warn(AppLog.processing, "no Metal device; live preview unavailable")
         }
         super.init()
     }
@@ -146,94 +133,6 @@ final class ProcessedPreview: NSObject {
     /// The last frame the pipeline produced, for a still comparison.
     func lastStill() -> CIImage? {
         queue.sync { lastRendered }
-    }
-
-    /// Encodes a processed still to HEVC data.
-    ///
-    /// Separate from the preview on purpose: this is the path the "save the processed
-    /// frame" control uses, and it must run the identical `ProcessingPipeline` call so the
-    /// still and the preview cannot disagree.
-    func encodeStill(to url: URL, quality: Float = 0.9) {
-        guard let still = lastRendered else {
-            AppLog.warn(AppLog.processing, "no processed frame available to save")
-            return
-        }
-        // `AVAssetWriter` is the only encoder that writes HEVC from a `CIImage` without
-        // an intermediate file, and the app has to produce HEVC because that is the codec
-        // chosen for stills. It has a throwing initialiser, so a bad URL fails here
-        // rather than silently producing a zero-byte file.
-        let encoder: AVAssetWriter
-        do {
-            encoder = try AVAssetWriter(outputURL: url, fileType: .mov)
-        } catch {
-            AppLog.fail(AppLog.processing, "still encoder could not be created: \(error.localizedDescription)")
-            return
-        }
-        let settings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.hevc,
-            AVVideoWidthKey: Int(still.extent.width),
-            AVVideoHeightKey: Int(still.extent.height),
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: Int(quality * 24_000_000)
-            ]
-        ]
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
-        input.expectsMediaDataInRealTime = false
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferWidthKey as String: Int(still.extent.width),
-                kCVPixelBufferHeightKey as String: Int(still.extent.height)
-            ]
-        )
-
-        guard encoder.canAdd(input) else {
-            AppLog.fail(AppLog.processing, "still encoder rejected its input")
-            return
-        }
-        encoder.add(input)
-        encoder.startWriting()
-        encoder.startSession(atSourceTime: .zero)
-
-        guard let pool = adaptor.pixelBufferPool else {
-            AppLog.fail(AppLog.processing, "still encoder has no pixel buffer pool")
-            return
-        }
-        var buffer: CVPixelBuffer?
-        CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer)
-        guard let pixelBuffer = buffer else {
-            AppLog.fail(AppLog.processing, "could not allocate a pixel buffer for the still")
-            return
-        }
-
-        context.render(still,
-                       to: pixelBuffer,
-                       bounds: still.extent,
-                       colorSpace: outputSpace.cgColorSpace)
-
-        let finish: () -> Void = {
-            input.markAsFinished()
-            encoder.finishWriting {
-                if encoder.status == .failed {
-                    AppLog.fail(AppLog.processing, "still encode failed: \(encoder.error?.localizedDescription ?? "unknown")")
-                } else {
-                    AppLog.note(AppLog.processing, "processed still written")
-                }
-            }
-        }
-
-        if input.isReadyForMoreMediaData {
-            adaptor.append(pixelBuffer, withPresentationTime: .zero)
-            finish()
-        } else {
-            input.requestMediaDataWhenReady(on: queue) {
-                if input.isReadyForMoreMediaData {
-                    adaptor.append(pixelBuffer, withPresentationTime: .zero)
-                    finish()
-                }
-            }
-        }
     }
 }
 

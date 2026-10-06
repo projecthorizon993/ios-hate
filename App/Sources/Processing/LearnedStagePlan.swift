@@ -67,10 +67,11 @@ enum CaptureLens: String, Equatable, Sendable {
 /// is how a model ends up inventing detail where none was captured. Each is chosen because
 /// that lens has that specific defect:
 ///
-/// - **Denoise, ultra wide.** The ultra wide opens to f/2.4 against the wide's f/1.8, so at
+/// - **Denoise, ultra wide.** The ultra wide opens slower than the wide, so at
 ///   matched ISO it gathers less light and reads noisier. This is the one case where a
 ///   denoise model does work the arithmetic does not: it can separate noise from texture
-///   rather than blurring both together.
+///   rather than blurring both together. Stated without f-numbers because they differ
+///   per device while the routing — by lens kind, read at runtime — does not.
 /// - **Super-resolution, telephoto.** Past the optical limit the frame is a crop, so there
 ///   is no more real detail to recover — only pixels to make convincing. Worth shipping
 ///   because it looks better than blocky interpolation, not because the information is

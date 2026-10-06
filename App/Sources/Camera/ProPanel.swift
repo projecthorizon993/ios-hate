@@ -314,7 +314,9 @@ enum ProParameter: String, CaseIterable, Identifiable {
         case .shutter: return "1/s"
         case .exposure: return "EV"
         case .focus: return "AF"
-        case .whiteBalance: return "K"
+        // "WB", not "K": the control locks the current gains and offers no Kelvin
+        // value, so a Kelvin unit on the dial would promise a control that is Phase 3.2.
+        case .whiteBalance: return "WB"
         case .raw: return "RAW"
         }
     }
