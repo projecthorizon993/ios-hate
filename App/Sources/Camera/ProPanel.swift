@@ -689,13 +689,16 @@ struct TonePanel: View {
         case exposure = "Exposure"
         case contrast = "Contrast"
         case saturation = "Saturation"
+        case vibrance = "Vibrance"
+        case highlights = "Highlights"
+        case shadows = "Shadows"
         case lift = "Lifted shadows"
         case temperature = "Warmth"
 
         var range: ClosedRange<Float> {
             switch self {
             case .exposure, .lift: return 0...1
-            case .contrast, .saturation: return -1...1
+            case .contrast, .saturation, .vibrance, .highlights, .shadows: return -1...1
             case .temperature: return -1500...1500
             }
         }
@@ -705,6 +708,9 @@ struct TonePanel: View {
             case .exposure: return tone.exposure
             case .contrast: return tone.contrast
             case .saturation: return tone.saturation
+            case .vibrance: return tone.vibrance
+            case .highlights: return tone.highlights
+            case .shadows: return tone.shadows
             case .lift: return tone.lift
             case .temperature: return tone.temperatureOffset
             }
@@ -716,6 +722,9 @@ struct TonePanel: View {
             case .exposure: copy.exposure = value
             case .contrast: copy.contrast = value
             case .saturation: copy.saturation = value
+            case .vibrance: copy.vibrance = value
+            case .highlights: copy.highlights = value
+            case .shadows: copy.shadows = value
             case .lift: copy.lift = value
             case .temperature: copy.temperatureOffset = value
             }

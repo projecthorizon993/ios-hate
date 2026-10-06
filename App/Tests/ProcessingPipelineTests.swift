@@ -49,6 +49,21 @@ final class ProcessingPipelineTests: XCTestCase {
         XCTAssertEqual(clamped.temperatureOffset, 0)
     }
 
+    /// The newer colour controls clamp to the filter's own -1…1 range, and non-finite
+    /// input becomes neutral rather than surviving into `CIHighlightShadowAdjust`.
+    func testColorControlsClampToTheirFilterRange() {
+        var tone = ToneCurve()
+        tone.vibrance = 4
+        tone.highlights = -9
+        tone.shadows = .nan
+
+        let clamped = tone.clamped()
+
+        XCTAssertEqual(clamped.vibrance, 1)
+        XCTAssertEqual(clamped.highlights, -1)
+        XCTAssertEqual(clamped.shadows, 0)
+    }
+
     /// `CIColorControls` and `CIExposureAdjust` are centred on 1.0 or 0.0, not on the
     /// -1…1 the sliders use, so the mapping is the thing most likely to be wrong.
     func testSliderValuesAreMappedOntoTheCoreImageCentre() {
@@ -98,6 +113,22 @@ final class ProcessingPipelineTests: XCTestCase {
 
         XCTAssertFalse(ProcessingSettings(grain: 0.5).isIdentity)
         XCTAssertFalse(ProcessingSettings(sharpen: 0.5).isIdentity)
+    }
+
+    /// Every colour control must break identity, or its stage is skipped and the slider
+    /// is a control over nothing — the defect class this suite exists to close.
+    func testEveryColorControlBreaksIdentity() {
+        var vibrance = ToneCurve()
+        vibrance.vibrance = 0.5
+        XCTAssertFalse(ProcessingSettings(tone: vibrance).isIdentity)
+
+        var highlights = ToneCurve()
+        highlights.highlights = -0.5
+        XCTAssertFalse(ProcessingSettings(tone: highlights).isIdentity)
+
+        var shadows = ToneCurve()
+        shadows.shadows = 0.5
+        XCTAssertFalse(ProcessingSettings(tone: shadows).isIdentity)
     }
 
     /// A tone of `.neutral` and a tone of `nil` mean the same thing to the renderer, and

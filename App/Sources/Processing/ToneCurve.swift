@@ -26,6 +26,13 @@ struct ToneCurve: Equatable, Codable, Sendable {
     var contrast: Float = 0
     /// -1…1.
     var saturation: Float = 0
+    /// -1…1. Vibrance lifts muted colours while holding skin tones, where saturation
+    /// shifts everything equally.
+    var vibrance: Float = 0
+    /// -1…1. Positive recovers highlight detail, negative lets highlights clip.
+    var highlights: Float = 0
+    /// -1…1. Positive opens shadows, negative crushes them.
+    var shadows: Float = 0
     /// 0…1 multiplier.
     var exposure: Float = 0
 
@@ -49,6 +56,9 @@ struct ToneCurve: Equatable, Codable, Sendable {
         copy.lift = clamp(lift, -1, 1)
         copy.contrast = clamp(contrast, -1, 1)
         copy.saturation = clamp(saturation, -1, 1)
+        copy.vibrance = clamp(vibrance, -1, 1)
+        copy.highlights = clamp(highlights, -1, 1)
+        copy.shadows = clamp(shadows, -1, 1)
         copy.exposure = clamp(exposure, 0, 1)
         return copy
     }

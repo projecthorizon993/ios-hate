@@ -1,4 +1,11 @@
 import CoreImage
+// Typed filter accessors. `CIFilter(name:)` takes the registered name, and the names
+// this file used to pass ("exposure", "tone controls", "sharpen", …) are display
+// names that resolve to nil — so every stage silently produced nothing and the
+// pipeline fell back to the original on every frame. The accessor makes a wrong
+// filter a compile error instead of a silent no-op, which is the same lesson
+// `LUTProcessor` already taught once.
+import CoreImage.CIFilterBuiltins
 import Foundation
 
 /// Why a frame could not be processed.
@@ -66,7 +73,7 @@ struct ProcessingPipeline {
 
         // 1. Tone, in linear light.
         if let tone = recipe.tone, !tone.isIdentity {
-            result = try convert(result, from: space, to: .linearSRGB, stage: "to working space")
+            result = convert(result, from: space, to: .linearSRGB)
             space = .linearSRGB
             result = try applyTone(tone, to: result)
         }
@@ -75,7 +82,7 @@ struct ProcessingPipeline {
         // shadows, which is the whole reason it is specified there.
         if recipe.sharpen > 0 || recipe.grain > 0 {
             if space != .sRGB {
-                result = try convert(result, from: space, to: .sRGB, stage: "to gamma for grain")
+                result = convert(result, from: space, to: .sRGB)
                 space = .sRGB
             }
             if recipe.sharpen > 0 { result = try applySharpen(recipe.sharpen, to: result) }
@@ -84,7 +91,7 @@ struct ProcessingPipeline {
 
         // 3. Output transform.
         if space != outputSpace {
-            result = try convert(result, from: space, to: outputSpace, stage: "output transform")
+            result = convert(result, from: space, to: outputSpace)
         }
         return result
     }
@@ -144,56 +151,66 @@ struct ProcessingPipeline {
         // Exposure first, so the contrast and saturation that follow act on the
         // exposed image rather than on the original level.
         if tone.exposure > 0 {
-            result = try stage("exposure", result, [
-                kCIInputImageKey: result,
-                kCIInputEVKey: tone.exposureEV
-            ])
+            let filter = CIFilter.exposureAdjust()
+            filter.inputImage = result
+            filter.ev = tone.exposureEV
+            result = try output(of: filter, stage: "exposure")
         }
 
         if tone.temperatureOffset != 0 || tone.tintOffset != 0 {
-            result = try stage("white balance", result, [
-                kCIInputImageKey: result,
-                "inputNeutral": tone.neutralVector,
-                "inputTargetNeutral": tone.targetNeutralVector
-            ])
+            let filter = CIFilter.temperatureAndTint()
+            filter.inputImage = result
+            filter.neutral = tone.neutralVector
+            filter.targetNeutral = tone.targetNeutralVector
+            result = try output(of: filter, stage: "white balance")
         }
 
         // `CIColorControls` carries brightness, contrast and saturation, and they are
         // independent of each other in the filter, so one pass rather than three.
         if tone.lift != 0 || tone.contrast != 0 || tone.saturation != 0 {
-            result = try stage("tone controls", result, [
-                kCIInputImageKey: result,
-                kCIInputBrightnessKey: tone.brightness,
-                kCIInputContrastKey: tone.colorControlsContrast,
-                kCIInputSaturationKey: tone.colorControlsSaturation
-            ])
+            let filter = CIFilter.colorControls()
+            filter.inputImage = result
+            filter.brightness = tone.brightness
+            filter.contrast = tone.colorControlsContrast
+            filter.saturation = tone.colorControlsSaturation
+            result = try output(of: filter, stage: "tone controls")
+        }
+
+        // Highlight and shadow recovery in the same linear stage: both remap tonal
+        // ranges rather than scaling channels, so they belong with tone, not colour.
+        if tone.highlights != 0 || tone.shadows != 0 {
+            let filter = CIFilter.highlightShadowAdjust()
+            filter.inputImage = result
+            filter.highlightAmount = tone.highlights
+            filter.shadowAmount = tone.shadows
+            result = try output(of: filter, stage: "highlight shadow")
+        }
+
+        // Vibrance after saturation, so the skin-tone protection acts on the
+        // already-saturated image rather than being saturated over.
+        if tone.vibrance != 0 {
+            let filter = CIFilter.vibrance()
+            filter.inputImage = result
+            filter.amount = tone.vibrance
+            result = try output(of: filter, stage: "vibrance")
         }
         return result
     }
 
     private func applySharpen(_ amount: Float, to image: CIImage) throws -> CIImage {
-        try stage("sharpen", image, [
-            kCIInputImageKey: image,
-            kCIInputSharpnessKey: amount
-        ])
+        let filter = CIFilter.sharpenLuminance()
+        filter.inputImage = image
+        filter.sharpness = amount
+        return try output(of: filter, stage: "sharpen")
     }
 
     /// `CIRandomGenerator` is monochrome by design, so it needs no desaturation — only
     /// scaling, which is what makes the amount control mean anything.
     ///
-    /// Built by name and cropped to the frame rather than filtered, because it takes no
-    /// input image and produces an infinite extent.
+    /// The generator takes no input image and produces an infinite extent, so it is
+    /// cropped to the frame rather than filtered.
     private func applyGrain(_ amount: Float, to image: CIImage) throws -> CIImage {
-        var random: CIImage?
-        let failure = LumaFrameSafety.perform {
-            random = CIFilter(name: "CIRandomGenerator")?.outputImage?
-                .cropped(to: image.extent)
-        }
-        if let failure {
-            AppLog.warn(AppLog.processing, "grain unavailable (raised: \(failure)); skipping")
-            return image
-        }
-        guard let noise = random else {
+        guard let noise = CIFilter.randomGenerator().outputImage?.cropped(to: image.extent) else {
             AppLog.warn(AppLog.processing, "CIRandomGenerator unavailable; skipping grain")
             return image
         }
@@ -202,58 +219,44 @@ struct ProcessingPipeline {
         // monochrome noise by it. The alpha position is the fourth component, which is
         // the only part of a `CIColorMatrix` vector that is not an RGB coefficient.
         let amountVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(amount))
-        let scaled = noise.applyingFilter("CIColorMatrix", parameters: [
-            kCIInputImageKey: noise,
-            "inputRVector": amountVector,
-            "inputGVector": amountVector,
-            "inputBVector": amountVector
-        ])
-        return try stage("grain", image, [
-            kCIInputImageKey: image,
-            kCIInputBackgroundImageKey: scaled
-        ])
+        let matrix = CIFilter.colorMatrix()
+        matrix.inputImage = noise
+        matrix.rVector = amountVector
+        matrix.gVector = amountVector
+        matrix.bVector = amountVector
+        let scaled = try output(of: matrix, stage: "grain scale")
+
+        let add = CIFilter.additionCompositing()
+        add.inputImage = image
+        add.backgroundImage = scaled
+        return try output(of: add, stage: "grain")
     }
 
-    /// Colour space conversion, named explicitly at the call site.
+    /// Colour space conversion through the working space.
     ///
-    /// The keys are string literals because there is no Swift constant for them. This is
-    /// the *same trap* the LUT code fell into once already: `inputColorSpace` is a key on
-    /// `CIColorSpace` and is **not** a key on `CIColorCube`, and having been bitten by
-    /// that, they are written out rather than reached for by habit. The whole call is
-    /// inside `stage`, so a wrong key is a logged refusal rather than a crash.
+    /// `matchedToWorkingSpace(from:)` converts into the working space the contexts are
+    /// created with (linear sRGB, stated at every construction site); matching back out
+    /// lands in the target. Two hops when neither end is the working space, which keeps
+    /// one conversion rule instead of a matrix of them.
     private func convert(_ image: CIImage,
                          from: ColorSpace,
-                         to: ColorSpace,
-                         stage stageName: String) throws -> CIImage {
+                         to: ColorSpace) -> CIImage {
         guard from != to else { return image }
-        return try stage(stageName, image, [
-            kCIInputImageKey: image,
-            "inputColorSpace": from.cgColorSpace,
-            "outputColorSpace": to.cgColorSpace
-        ])
+        let working = image.matchedToWorkingSpace(from: from.cgColorSpace)
+        guard to != .linearSRGB else { return working }
+        return working.matchedFromWorkingSpace(to: to.cgColorSpace)
     }
 
-    // MARK: - Filter construction
+    // MARK: - Filter output
 
-    /// Builds one filter by name, inside the exception trap.
+    /// Reads a typed filter's output, or fails the frame.
     ///
-    /// Core Image raises `NSInvalidArgumentException` for an unknown filter or key, which
-    /// Swift cannot catch. A camera app that dies because a filter name was wrong is a
-    /// worse outcome than a frame that did not get processed, so every stage goes through
-    /// here and a raise becomes a `ProcessingError` the caller can log and skip past.
-    ///
-    /// `applyingFilter` on `CIImage` is avoided for this reason: it traps rather than
-    /// raising, and a trap is not catchable.
-    private func stage(_ name: String, _ image: CIImage, _ parameters: [String: Any]) throws -> CIImage {
-        var output: CIImage?
-        let failure = LumaFrameSafety.perform {
-            output = CIFilter(name: name, parameters: parameters)?.outputImage
-        }
-        if let failure {
-            AppLog.fail(AppLog.processing, "stage \(name) raised: \(failure)")
-            throw ProcessingError.stageFailed(failure, stage: name)
-        }
-        guard let output else {
+    /// With typed accessors a wrong filter name is a compile error, so the only failure
+    /// left is a nil output — which still degrades to the untouched frame via
+    /// `renderOrOriginal`, never to a crash. A stage that must never fail a frame
+    /// (grain) handles its own fallback above instead of coming through here.
+    private func output(of filter: CIFilter, stage name: String) throws -> CIImage {
+        guard let output = filter.outputImage else {
             AppLog.fail(AppLog.processing, "stage \(name) produced no output")
             throw ProcessingError.stageFailed("Core Image produced no output", stage: name)
         }
