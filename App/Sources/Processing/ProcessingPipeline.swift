@@ -75,7 +75,7 @@ struct ProcessingPipeline {
 
         // 1. Tone, in linear light.
         if let tone = recipe.tone, !tone.isIdentity {
-            result = convert(result, from: space, to: .linearSRGB)
+            result = try convert(result, from: space, to: .linearSRGB)
             space = .linearSRGB
             result = try applyTone(tone, to: result)
         }
@@ -93,7 +93,7 @@ struct ProcessingPipeline {
         // shadows, which is the whole reason it is specified there.
         if recipe.sharpen > 0 || recipe.grain > 0 {
             if space != .sRGB {
-                result = convert(result, from: space, to: .sRGB)
+                result = try convert(result, from: space, to: .sRGB)
                 space = .sRGB
             }
             if recipe.sharpen > 0 { result = try applySharpen(recipe.sharpen, to: result) }
@@ -102,7 +102,7 @@ struct ProcessingPipeline {
 
         // 4. Output transform.
         if space != outputSpace {
-            result = convert(result, from: space, to: outputSpace)
+            result = try convert(result, from: space, to: outputSpace)
         }
         return result
     }
@@ -230,7 +230,7 @@ struct ProcessingPipeline {
         }
         var current = image
         if space != table.space {
-            current = convert(current, from: space, to: table.space)
+            current = try convert(current, from: space, to: table.space)
             space = table.space
         }
         guard let data = table.rgbaData(intensity: reference.intensity) else {
@@ -280,14 +280,23 @@ struct ProcessingPipeline {
     /// `matchedToWorkingSpace(from:)` converts into the working space the contexts are
     /// created with (linear sRGB, stated at every construction site); matching back out
     /// lands in the target. Two hops when neither end is the working space, which keeps
-    /// one conversion rule instead of a matrix of them.
+    /// one conversion rule instead of a matrix of them. Both matches are failable, so
+    /// either failing fails the frame to the original rather than to a wrong-space
+    /// render that still looks like an image.
     private func convert(_ image: CIImage,
                          from: ColorSpace,
-                         to: ColorSpace) -> CIImage {
+                         to: ColorSpace) throws -> CIImage {
         guard from != to else { return image }
-        let working = image.matchedToWorkingSpace(from: from.cgColorSpace)
+        guard let working = image.matchedToWorkingSpace(from: from.cgColorSpace) else {
+            throw ProcessingError.stageFailed("match to working space produced no image",
+                                              stage: "colour match")
+        }
         guard to != .linearSRGB else { return working }
-        return working.matchedFromWorkingSpace(to: to.cgColorSpace)
+        guard let out = working.matchedFromWorkingSpace(to: to.cgColorSpace) else {
+            throw ProcessingError.stageFailed("match from working space produced no image",
+                                              stage: "colour match")
+        }
+        return out
     }
 
     // MARK: - Filter output
