@@ -52,7 +52,7 @@ struct SubjectMaskSnapshot: @unchecked Sendable {
         if !extent.isEmpty, extent.width > 0, extent.height > 0 {
             mask = mask.transformed(by: CGAffineTransform(
                 scaleX: extent.width / CGFloat(width),
-                scaleY: extent.height / CGFloat(height)))
+                y: extent.height / CGFloat(height)))
         }
         return mask
     }
