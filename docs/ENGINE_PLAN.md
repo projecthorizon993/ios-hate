@@ -130,7 +130,7 @@ colour ships washed-out photos:
 | E1 | Parametric colour ops (highlights, shadows, vibrance) + Tune sliders | Dials move real ranges; identity still exact | **Built** |
 | E2 | LUT ingestion (§4) + import UI, as an engine op | §7 checklist passes on device against a reference tool | **Built except the device half of §7** — parser, interpolation, upload shape and recipe round trip pinned in CI; pixel comparison against a reference tool still needs a phone |
 | E3 | Custom presets over engine recipes (MINOR contract bump + fixture) | Old files open; new files round-trip byte-exact | Open |
-| E4 | Masks feed the engine per-region (subject pipeline returns first) | Blend edge invisible on a face; no-person scenes global with no seam | Open |
+| E4 | Masks feed the engine per-region (subject pipeline returns first) | Blend edge invisible on a face; no-person scenes global with no seam | **Built except the device half** — Vision person segmentation (no bundled model) behind a seam, 0.5 s cadence, full-strength subject against 35% background, preview/file parity by recompute; blend-edge invisibility still needs eyes on a phone |
 
 Pro mode, which this engine serves, is finished alongside: constituent binding
 per mode and per lens pill (session rebind without stopping), diallable Kelvin
