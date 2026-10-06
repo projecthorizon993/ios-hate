@@ -66,7 +66,6 @@ enum LutParser {
             throw LutParseError.empty
         }
         var size: Int?
-        var sawOneDimensional: Int?
         var domainMin: [Float]?
         var domainMax: [Float]?
         var samples: [Float] = []
@@ -99,10 +98,13 @@ enum LutParser {
                 }
                 size = value
             case "LUT_1D_SIZE":
+                // Refused the moment it is declared: a 1D table is a different
+                // operation, not a smaller 3D one, and its data lines (one value
+                // each) must never be validated as 3D samples first.
                 guard tokens.count == 2, let value = Int(tokens[1]) else {
                     throw LutParseError.invalidSize(line: lineNumber)
                 }
-                sawOneDimensional = value
+                throw LutParseError.oneDimensional(size: value)
             case "DOMAIN_MIN", "DOMAIN_MAX":
                 guard tokens.count == 4,
                       let x = Float(tokens[1]), let y = Float(tokens[2]), let z = Float(tokens[3]),
@@ -120,27 +122,26 @@ enum LutParser {
                 }
                 guard lo == 0, hi == 1 else { throw LutParseError.nonUnitDomain }
             default:
-                // A data line is exactly three numbers. Anything else that is not a
-                // known directive is malformed input, reported with its line.
-                guard tokens.count == 3,
-                      let r = Float(tokens[0]), let g = Float(tokens[1]), let b = Float(tokens[2]) else {
-                    if isDirective(keyword) {
-                        throw LutParseError.unknownDirective(head, line: lineNumber)
-                    }
+                // A data line is exactly three finite numbers. Anything else that
+                // is not a known directive is malformed input — except a word
+                // shaped like a directive (capitals, digits, underscores), which
+                // is a newer directive failing by name rather than a bad sample.
+                if tokens.count == 3,
+                   let r = Float(tokens[0]),
+                   let g = Float(tokens[1]),
+                   let b = Float(tokens[2]),
+                   r.isFinite, g.isFinite, b.isFinite {
+                    samples.append(min(max(r, 0), 1))
+                    samples.append(min(max(g, 0), 1))
+                    samples.append(min(max(b, 0), 1))
+                } else if tokens.count == 1, Self.isDirectiveShaped(head) {
+                    throw LutParseError.unknownDirective(head, line: lineNumber)
+                } else {
                     throw LutParseError.invalidSample(line: lineNumber)
                 }
-                guard r.isFinite, g.isFinite, b.isFinite else {
-                    throw LutParseError.invalidSample(line: lineNumber)
-                }
-                samples.append(min(max(r, 0), 1))
-                samples.append(min(max(g, 0), 1))
-                samples.append(min(max(b, 0), 1))
             }
         }
 
-        if let oneD = sawOneDimensional, size == nil {
-            throw LutParseError.oneDimensional(size: oneD)
-        }
         guard let edge = size else { throw LutParseError.noSizeDirective }
         let min = domainMin ?? [0, 0, 0]
         let max = domainMax ?? [1, 1, 1]
@@ -152,10 +153,10 @@ enum LutParser {
         return (edge, samples)
     }
 
-    /// Directives this importer knows, so a file using a newer one fails by name
-    /// rather than as a bad sample on its first data-shaped line.
-    private static func isDirective(_ keyword: String) -> Bool {
-        ["LUT_1D_SIZE", "LUT_3D_SIZE", "DOMAIN_MIN", "DOMAIN_MAX",
-         "LUT_1D_INPUT_RANGE", "LUT_3D_INPUT_RANGE", "TITLE"].contains(keyword)
+    /// Whether a word is shaped like a directive (capitals, digits, underscores)
+    /// rather than data. Tested against the original case: "hello" has lowercase
+    /// and is a bad sample, "FUTURE_DIRECTIVE" has none and is an unknown one.
+    private static func isDirectiveShaped(_ word: String) -> Bool {
+        !word.isEmpty && word.allSatisfy { $0.isUppercase || $0.isNumber || $0 == "_" }
     }
 }

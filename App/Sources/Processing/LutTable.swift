@@ -29,10 +29,14 @@ struct LutTable: Equatable, Sendable {
     /// a property of the grade (decided here, in `docs/ENGINE_PLAN.md` §4) and costs
     /// one filter pass instead of two.
     func interpolated(at t: Float) -> [Float] {
+        let count = size * size * size
+        // A misshapen table interpolates to nothing, not to the identity lattice:
+        // the lattice is the right shape for any size, so falling back to it would
+        // hand `rgbaData` a plausible buffer for garbage input — the exact
+        // right-shape-wrong-content failure this file exists to prevent.
+        guard size > 1, samples.count == count * 3 else { return [] }
         let strength = min(max(t.isFinite ? t : 0, 0), 1)
-        guard strength > 0, samples.count == size * size * size * 3, size > 1 else {
-            return identityLattice()
-        }
+        guard strength > 0 else { return identityLattice() }
         guard strength < 1 else { return samples }
         let lattice = identityLattice()
         return zip(samples, lattice).map { sample, id in id + (sample - id) * strength }
