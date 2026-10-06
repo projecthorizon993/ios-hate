@@ -613,7 +613,7 @@ final class CaptureSessionController: NSObject {
         return true
     }
 
-    /// Writes the user's manual settings to the device.
+    /// Writes the user's manual settings to the device, off the main thread.
     ///
     /// Every value is gated on the capability that owns it, checked against the range it
     /// came from, and wrapped in the exception trap. AVFoundation raises
@@ -624,33 +624,40 @@ final class CaptureSessionController: NSObject {
     /// Clamping already happened in `ManualSettings.clamped(to:)`. This re-checks rather
     /// than trusting it, because the values arriving here have been through a `@Published`
     /// round trip and the capability set may have changed underneath them.
-    @discardableResult
-    func apply(manual: ManualSettings, to configuration: Configuration) -> Bool {
+    ///
+    /// Fire-and-forget on `sessionQueue`: `lockForConfiguration` plus up to four
+    /// AVFoundation writes used to run on the main thread in the frame-rate-sensitive
+    /// dial path. The values are snapshotted at the call and the outcome is logged
+    /// where it happens, never returned — by the time it exists the dial has moved
+    /// on. What the UI shows is the request; what the device took is the log line.
+    func apply(manual: ManualSettings, to configuration: Configuration) {
         let device = configuration.device
-        // `lockForConfiguration()` is `throws` and returns `Void`. Comparing it to `nil`
-        // does not compile, and the failure has to come from the `catch`, not from a
-        // sentinel.
-        do {
-            try device.lockForConfiguration()
-        } catch {
-            AppLog.fail(AppLog.camera, "manual: lockForConfiguration failed: \(error.localizedDescription)")
-            return false
-        }
-        defer { device.unlockForConfiguration() }
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            // `lockForConfiguration()` is `throws` and returns `Void`. Comparing it to
+            // `nil` does not compile, and the failure has to come from the `catch`,
+            // not from a sentinel.
+            do {
+                try device.lockForConfiguration()
+            } catch {
+                AppLog.fail(AppLog.camera, "manual: lockForConfiguration failed: \(error.localizedDescription)")
+                return
+            }
+            defer { device.unlockForConfiguration() }
 
-        let applied = applyExposure(manual, to: device)
-        let focused = applyFocus(manual, to: device)
-        let balanced = applyWhiteBalance(manual, to: device)
-        let any = applied || focused || balanced
+            let applied = self.applyExposure(manual, to: device)
+            let focused = self.applyFocus(manual, to: device)
+            let balanced = self.applyWhiteBalance(manual, to: device)
+            let any = applied || focused || balanced
 
-        // "Asked for" and "the device accepted" are logged as two facts, never one.
-        // `summarise` is the request; what follows is the outcome.
-        if manual.isExposureManual || manual.lockFocus || manual.lockWhiteBalance {
-            AppLog.note(AppLog.camera,
-                        "manual requested [\(manual.summarise)] applied=\(any) "
-                        + "exposure=\(applied) focus=\(focused) wb=\(balanced)")
+            // "Asked for" and "the device accepted" are logged as two facts, never one.
+            // `summarise` is the request; what follows is the outcome.
+            if manual.isExposureManual || manual.lockFocus || manual.lockWhiteBalance {
+                AppLog.note(AppLog.camera,
+                            "manual requested [\(manual.summarise)] applied=\(any) "
+                            + "exposure=\(applied) focus=\(focused) wb=\(balanced)")
+            }
         }
-        return any
     }
 
     /// ISO, shutter and exposure bias, resolved to one pair and written once.
