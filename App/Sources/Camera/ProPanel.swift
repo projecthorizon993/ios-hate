@@ -264,6 +264,18 @@ private struct DialTicks: View {
 
 // MARK: - Parameter
 
+/// The two states of the Pro contextual row.
+///
+/// Carries the resolved chip list in the `.chips` case so the row reads the same
+/// decision the dial will be opened from — a row that recomputed it separately could
+/// offer a chip whose dial then finds nothing to show. The `.reason` case carries
+/// the capabilities' own summary rather than a second copy of the words, so the
+/// line the user reads and the line the log holds cannot disagree.
+enum ProRowContent: Equatable {
+    case chips([ProParameter])
+    case reason(String)
+}
+
 /// The parameters the dial can show, and each one's mapping to a value.
 ///
 /// One type per parameter rather than a dictionary of closures, so the range, the readout,
@@ -317,6 +329,19 @@ enum ProParameter: String, CaseIterable, Identifiable {
         if capabilities.canLockWhiteBalance { result.append(.whiteBalance) }
         if capabilities.rawSupported { result.append(.raw) }
         return result
+    }
+
+    /// What the Pro contextual row shows. Chips when any parameter survives gating,
+    /// otherwise the reason as a status line.
+    ///
+    /// Pure so the empty-strip regression is a failing test rather than a screenshot:
+    /// `CameraScreen.contextualRow` switches on this, so an empty `supported` list can
+    /// never again render as an empty fixed-height strip — it renders the summary the
+    /// capabilities already produce, which is also what reaches the log.
+    static func rowContent(for capabilities: ProCapabilities) -> ProRowContent {
+        let chips = supported(by: capabilities)
+        guard chips.isEmpty else { return .chips(chips) }
+        return .reason(capabilities.availabilitySummary)
     }
 
     /// The real hardware range, or `nil` where the parameter does not exist here.

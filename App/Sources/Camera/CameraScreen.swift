@@ -308,9 +308,26 @@ struct CameraScreen: View {
             // to be, just spread across two modes instead of being its own.
             autoControls
         case .pro:
-            ProChipBar(model: model,
-                       expanded: $isShowingPro,
-                       open: $openProParameter)
+            // An empty chip list used to render as an empty strip of the same height —
+            // a control that cannot do anything, occupying the space of one that can.
+            // `rowContent` collapses that into the reason as a status line, so the panel
+            // is hidden rather than vacant and the user is told why.
+            switch ProParameter.rowContent(for: model.proCapabilities) {
+            case .chips:
+                ProChipBar(model: model,
+                           expanded: $isShowingPro,
+                           open: $openProParameter)
+            case .reason(let text):
+                Text(text)
+                    .font(.system(size: Theme.TypeSize.caption))
+                    .foregroundStyle(Theme.ColorToken.textDisabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Space.l)
+                    .padding(.vertical, Theme.Space.xs)
+                    .accessibilityLabel("Manual controls unavailable")
+                    .accessibilityValue(text)
+            }
         case .video:
             // Unreachable while Video is disabled, but the switch must be exhaustive and
             // the mode is coming back with a recorder, so it is spelled out rather than

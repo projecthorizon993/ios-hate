@@ -1330,4 +1330,42 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertEqual(PhotoCaptureController.name(for: PhotoCaptureController.prioritization(for: neither)),
                        "balanced")
     }
+
+    /// The empty Pro panel must collapse into its reason, not render an empty strip.
+    /// `contextualRow` switches on `rowContent`, so this pins the decision the view
+    /// reads: a composite-like set offers no chips, and the row must be the reason.
+    ///
+    /// `@MainActor` for the same reason as the chip test above: `ProParameter` is
+    /// main-actor isolated.
+    @MainActor
+    func testProRowShowsTheReasonWhenNoParameterSurvivesGating() {
+        let compositeLike = ProCapabilities(supportsCustomExposure: false, isCompositeDevice: true)
+
+        guard case .reason(let text) = ProParameter.rowContent(for: compositeLike) else {
+            return XCTFail("a composite-like set offers no chips, so the row must be a reason")
+        }
+        XCTAssertEqual(text, compositeLike.availabilitySummary,
+                       "the displayed reason is the summary, not a second copy of it")
+        XCTAssertTrue(text.contains("composite"), "the reason must name the cause: \(text)")
+    }
+
+    /// The converse: a capable set offers chips, in the picker's order, and never the
+    /// reason line.
+    @MainActor
+    func testProRowShowsChipsWhenParametersSurviveGating() {
+        let capable = ProCapabilities(
+            supportsCustomExposure: true,
+            isoRange: 50...400,
+            shutterRange: (1.0 / 8000)...(1.0 / 30),
+            exposureCompensationRange: -3...3,
+            canLockExposure: true,
+            canLockFocus: true,
+            canLockWhiteBalance: true
+        )
+
+        guard case .chips(let chips) = ProParameter.rowContent(for: capable) else {
+            return XCTFail("a capable set must offer chips, not a reason")
+        }
+        XCTAssertEqual(chips, [.iso, .shutter, .exposure, .focus, .whiteBalance])
+    }
 }
