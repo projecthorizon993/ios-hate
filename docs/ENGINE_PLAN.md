@@ -124,20 +124,28 @@ colour ships washed-out photos:
 
 ## 8. Build order
 
-| # | Work | Gate |
-| --- | --- | --- |
-| E0 | Engine skeleton: today's tone/grain/sharpen re-expressed as ops, same pixels | Existing tests green, no behaviour change |
-| E1 | Parametric colour ops (balance, mixer, curves) + UI | Dials move real ranges; identity still exact |
-| E2 | LUT ingestion (§4) + import UI, as an engine op | §7 checklist passes on device against a reference tool |
-| E3 | Custom presets over engine recipes (MINOR contract bump + fixture) | Old files open; new files round-trip byte-exact |
-| E4 | Masks feed the engine per-region (subject pipeline returns first) | Blend edge invisible on a face; no-person scenes global with no seam |
+| # | Work | Gate | Status |
+| --- | --- | --- | --- |
+| E0 | Engine skeleton: typed filter construction (the display-name lookups resolved to nil and rendered nothing), colour conversion through the working space | Existing tests green, no behaviour change | **Built** — every tone run before this was a silent fallback to the original; all logged recipes were identity, which is why the field never caught it |
+| E1 | Parametric colour ops (highlights, shadows, vibrance) + Tune sliders | Dials move real ranges; identity still exact | **Built** |
+| E2 | LUT ingestion (§4) + import UI, as an engine op | §7 checklist passes on device against a reference tool | **Built except the device half of §7** — parser, interpolation, upload shape and recipe round trip pinned in CI; pixel comparison against a reference tool still needs a phone |
+| E3 | Custom presets over engine recipes (MINOR contract bump + fixture) | Old files open; new files round-trip byte-exact | Open |
+| E4 | Masks feed the engine per-region (subject pipeline returns first) | Blend edge invisible on a face; no-person scenes global with no seam | Open |
+
+Pro mode, which this engine serves, is finished alongside: constituent binding
+per mode and per lens pill (session rebind without stopping), diallable Kelvin
+through device gains, and manual writes off the main thread.
 
 ## 9. Open questions (for the photographer, not the code)
 
 1. LUT intensity semantics: interpolate the table, or blend the result?
+   **Decided: interpolate the table toward identity.** One filter pass instead of
+   two, and the math is CI-testable arithmetic rather than a second render to keep
+   in step.
 2. P3-authored tables: Adobe `.cube` cannot declare P3 — refuse, or take a
    user-side declaration at import?
 3. Preset sharing format: stay inside the recipe string, or a sidecar file?
 4. Which custom-colour controls are launch (mixer? curves?) and which wait?
+   Highlights, shadows and vibrance shipped in E1; mixer and curves wait.
 
 Nothing in E0–E2 needs these answered. E3 does.
