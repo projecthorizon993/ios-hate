@@ -123,9 +123,11 @@ enum LutParser {
                 guard lo == 0, hi == 1 else { throw LutParseError.nonUnitDomain }
             default:
                 // A data line is exactly three finite numbers. Anything else that
-                // is not a known directive is malformed input — except a word
-                // shaped like a directive (capitals, digits, underscores), which
+                // is not a known directive is malformed input — except a line led
+                // by a directive-shaped word (capitals, digits, underscores), which
                 // is a newer directive failing by name rather than a bad sample.
+                // The shape test runs on the original case: "hello" has lowercase
+                // and is a bad sample, "FUTURE_DIRECTIVE" has none and is unknown.
                 if tokens.count == 3,
                    let r = Float(tokens[0]),
                    let g = Float(tokens[1]),
@@ -134,7 +136,7 @@ enum LutParser {
                     samples.append(min(max(r, 0), 1))
                     samples.append(min(max(g, 0), 1))
                     samples.append(min(max(b, 0), 1))
-                } else if tokens.count == 1, Self.isDirectiveShaped(head) {
+                } else if Self.isDirectiveShaped(head), !Self.isKnownDirective(keyword) {
                     throw LutParseError.unknownDirective(head, line: lineNumber)
                 } else {
                     throw LutParseError.invalidSample(line: lineNumber)
@@ -155,8 +157,15 @@ enum LutParser {
 
     /// Whether a word is shaped like a directive (capitals, digits, underscores)
     /// rather than data. Tested against the original case: "hello" has lowercase
-    /// and is a bad sample, "FUTURE_DIRECTIVE" has none and is an unknown one.
+    /// and is a bad sample, "FUTURE_DIRECTIVE" has none and is unknown.
     private static func isDirectiveShaped(_ word: String) -> Bool {
         !word.isEmpty && word.allSatisfy { $0.isUppercase || $0.isNumber || $0 == "_" }
+    }
+
+    /// Directives this importer implements. Anything directive-shaped but not here
+    /// is newer than the importer and fails by name.
+    private static func isKnownDirective(_ keyword: String) -> Bool {
+        ["LUT_1D_SIZE", "LUT_3D_SIZE", "DOMAIN_MIN", "DOMAIN_MAX",
+         "LUT_1D_INPUT_RANGE", "LUT_3D_INPUT_RANGE", "TITLE"].contains(keyword)
     }
 }
