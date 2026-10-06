@@ -239,6 +239,93 @@ final class CaptureSessionController: NSObject {
         return .success(configuration)
     }
 
+    /// Rebinds the running session to a different back device — a constituent in Pro
+    /// mode, the composite back in Auto — without stopping the session.
+    ///
+    /// Pro mode cannot work on a composite: Apple documents that composite devices
+    /// refuse `ExposureMode.custom`, custom lens positions and custom WB gains, so a
+    /// Pro dial on one is a control over nothing. Binding the constituent is a session
+    /// reconfiguration per lens change, which is the accepted cost (`docs/IOS_PLAN.md`
+    /// 3.2): a brief renegotiation instead of a smooth Auto-mode ramp.
+    ///
+    /// Validate-then-commit: the replacement input is constructed and `canAddInput`
+    /// checked *before* `beginConfiguration`, so a refusal fails here with the old
+    /// device still bound rather than mid-swap with neither. Outputs stay attached
+    /// throughout — only the video input is exchanged. A `nil` uniqueID rebinds the
+    /// default back device (the composite), which is the way back to Auto.
+    ///
+    /// Handed back on the main queue, like `configure`.
+    func rebind(toConstituentUniqueID uniqueID: String?,
+                completion: @escaping @MainActor (Result<Configuration, Error>) -> Void) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let device: AVCaptureDevice?
+            if let uniqueID {
+                device = AVCaptureProbeLike.discoverDevices(facing: .back)
+                    .first { $0.uniqueID == uniqueID }
+                if device == nil {
+                    AppLog.warn(AppLog.camera,
+                                 "rebind: constituent \(uniqueID) vanished from discovery; keeping bound device")
+                }
+            } else {
+                device = Self.pickDevice(facing: .back)
+            }
+            guard let device else {
+                let result: Result<Configuration, Error> = .failure(CameraError.noDevice(.back))
+                DispatchQueue.main.async {
+                    completion(result)
+                }
+                return
+            }
+            if device.uniqueID == self.videoInput?.device.uniqueID {
+                AppLog.note(AppLog.camera,
+                            "rebind: already bound to \(device.deviceType.rawValue); reconfiguring anyway")
+            }
+            let result = self.rebindLocked(to: device)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if case .success(let configuration) = result {
+                    self.configuration = configuration
+                }
+                completion(result)
+            }
+        }
+    }
+
+    /// Exchanges the video input. Must be called on `sessionQueue`, and performs its
+    /// own `beginConfiguration`/`commitConfiguration` pair.
+    private func rebindLocked(to device: AVCaptureDevice) -> Result<Configuration, Error> {
+        let input: AVCaptureDeviceInput
+        do {
+            input = try AVCaptureDeviceInput(device: device)
+        } catch {
+            return .failure(error)
+        }
+        guard session.canAddInput(input) else {
+            return .failure(CameraError.inputRejected(device.localizedName))
+        }
+
+        session.beginConfiguration()
+        if let videoInput { session.removeInput(videoInput) }
+        session.addInput(input)
+        videoInput = input
+
+        let requested = CaptureFormatChooser.bestFormat(for: device) ?? device.activeFormat
+        let applied = applyConfiguration(device: device, format: requested)
+        AppLog.note(AppLog.camera, "rebound to \(device.deviceType.rawValue), "
+                     + "format \(CaptureFormatChooser.describe(applied))")
+        if let photoOutput = self.photoOutput {
+            applyMaxPhotoDimensions(on: photoOutput, format: applied)
+        }
+        observeActiveConstituent(device)
+        session.commitConfiguration()
+
+        return .success(Configuration(facing: device.position == .front ? .front : .back,
+                                      device: device,
+                                      format: applied,
+                                      exposureRange: ExposureRange.from(applied)))
+    }
+
     /// Rebuilds inputs and outputs. Must be called between `beginConfiguration` and
     /// `commitConfiguration`.
     private func reconfigureLocked(facing: CameraFacing,

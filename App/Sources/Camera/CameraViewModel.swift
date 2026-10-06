@@ -372,6 +372,96 @@ final class CameraViewModel: ObservableObject {
 
     func setMode(_ mode: CameraMode) {
         self.mode = mode
+        rebindForMode(mode)
+    }
+
+    /// `true` while a lens rebind is in flight. A second rebind on top of the first
+    /// would interleave two `beginConfiguration` blocks on the session queue against
+    /// one device — so the second tap waits rather than racing.
+    private var isRebinding = false
+
+    /// Binds the device the mode needs: a constituent in Pro (the only binding on
+    /// which manual exposure exists), the composite everywhere else.
+    ///
+    /// Entering Pro keeps the framing: the constituent matching the composite's
+    /// currently active lens is bound where one is offered, so the viewfinder does
+    /// not jump to a different lens as a side effect of opening the dials. Leaving
+    /// Pro hands switching back to iOS. Either way a refusal keeps the old device —
+    /// `rebind` fails with the previous input still bound — and says so in a banner.
+    private func rebindForMode(_ mode: CameraMode) {
+        guard facing == .back, capabilities.plan.proRequiresRebinding else { return }
+        if mode == .pro {
+            let current = sessionController.configuration?.device.activePrimaryConstituent
+                .map { BackCameraCapabilities.kind(of: $0.deviceType) }
+            let match = current.flatMap { kind in
+                capabilities.plan.offeredLenses.first { $0.kind == kind }
+            }
+            let target = match ?? capabilities.plan.offeredLenses.first { $0.kind == .wide }
+            guard let target else { return }
+            AppLog.note(AppLog.camera,
+                         "pro mode: binding constituent \(target.kind.rawValue) (\(target.uniqueID))")
+            rebind(toConstituentUniqueID: target.uniqueID)
+        } else {
+            AppLog.note(AppLog.camera, "leaving pro mode: handing lens switching back to iOS")
+            rebind(toConstituentUniqueID: nil)
+        }
+    }
+
+    /// A lens pill tap. In Pro with constituents offered this binds the pill's lens;
+    /// everywhere else it zooms the composite to the translated factor, as before.
+    func selectLensPill(_ lens: Double) {
+        if mode == .pro,
+           facing == .back,
+           capabilities.plan.proRequiresRebinding,
+           let kind = Self.kindForLensPill(lens),
+           let target = capabilities.plan.offeredLenses.first(where: { $0.kind == kind }) {
+            AppLog.note(AppLog.camera,
+                         "lens pill \(lens)x: binding constituent \(kind.rawValue)")
+            rebind(toConstituentUniqueID: target.uniqueID)
+            return
+        }
+        let minimum = capabilities.plan.bound?.minAvailableVideoZoomFactor ?? 1
+        let asked = Self.requestedFactor(forLens: lens, minimumAvailableFactor: minimum)
+        selectZoom(ZoomStop(factor: asked))
+    }
+
+    /// The pill factor the bound lens answers to, for the highlight — or `nil` when
+    /// the composite is bound and the zoom-band logic owns the highlight instead.
+    ///
+    /// A constituent has no switch-over points, so banding its zoom factor against the
+    /// composite's points would light the wrong pill. Its own kind is the answer.
+    func lensPillFactor() -> Double? {
+        guard let bound = sessionController.configuration?.device, !bound.isVirtualDevice else {
+            return nil
+        }
+        switch BackCameraCapabilities.kind(of: bound.deviceType) {
+        case .ultraWide: return 0.5
+        case .wide: return 1.0
+        case .telephoto: return 2.0
+        case .composite, .unknown: return nil
+        }
+    }
+
+    private func rebind(toConstituentUniqueID uniqueID: String?) {
+        guard !isRebinding else {
+            AppLog.warn(AppLog.camera, "rebind already in flight; tap ignored")
+            return
+        }
+        guard sessionState.isCapturable else {
+            AppLog.warn(AppLog.camera, "rebind refused: session is \(sessionState)")
+            return
+        }
+        isRebinding = true
+        sessionController.rebind(toConstituentUniqueID: uniqueID) { [weak self] result in
+            guard let self else { return }
+            self.isRebinding = false
+            switch result {
+            case .success(let configuration):
+                self.finishConfiguration(configuration)
+            case .failure(let error):
+                self.present(error.localizedDescription, isError: true)
+            }
+        }
     }
 
     // MARK: - Pro (Step 4)
@@ -460,10 +550,13 @@ final class CameraViewModel: ObservableObject {
         // observable; the three inferences tried before this all produced the wrong answer,
         // one of them observed by the user on an iPhone 11 Pro.
         //
-        // `nil` is the documented value for a device that is not virtual — a single-lens
-        // phone has no constituent — so there is nothing to show and the status row stays
-        // empty rather than claiming a lens that does not exist as a separate object.
-        value.lensLabel = device.activePrimaryConstituent.map(\.lensName)
+        // `nil` from `activePrimaryConstituent` is documented for a nonvirtual device —
+        // and there the bound device's own type *is* the lens, which is exactly the
+        // Pro-mode constituent case. A composite mid-handover also reads nil, and
+        // there "Multi-lens" would be a lie about a transition, so virtual devices
+        // keep showing nothing rather than the container's name.
+        value.lensLabel = device.activePrimaryConstituent?.lensName
+            ?? (device.isVirtualDevice ? nil : device.lensName)
         readout = value
     }
 
@@ -619,6 +712,22 @@ final class CameraViewModel: ObservableObject {
     /// claim something untrue about the hardware.
     nonisolated static func lensStops() -> [ZoomStop] {
         [ZoomStop(factor: 0.5), ZoomStop(factor: 1), ZoomStop(factor: 2)]
+    }
+
+    /// The constituent kind behind a lens pill, for Pro-mode binding.
+    ///
+    /// Pills are physical lenses (0.5 ultra wide, 1 wide, 2 telephoto), and in Pro mode
+    /// a pill binds that lens's constituent device rather than zooming the composite —
+    /// which is exactly what "lens selection is device selection" means. `nil` for
+    /// anything off the three pills, so a stray value can never bind a wrong lens.
+    ///
+    /// `nonisolated` like its neighbours: pure arithmetic on its argument, asserted
+    /// from a nonisolated test context.
+    nonisolated static func kindForLensPill(_ lens: Double) -> BackCameraCapabilities.Kind? {
+        if abs(lens - 0.5) < 0.01 { return .ultraWide }
+        if abs(lens - 1.0) < 0.01 { return .wide }
+        if abs(lens - 2.0) < 0.01 { return .telephoto }
+        return nil
     }
 
     /// The factor to actually ask the device for when a lens pill is tapped.

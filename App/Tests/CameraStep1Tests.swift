@@ -1033,6 +1033,18 @@ final class CameraStep1Tests: XCTestCase {
                        "4x is a crop of the 2x, not a lens")
     }
 
+    /// In Pro mode each pill binds its constituent rather than zooming the composite,
+    /// so the pill has to resolve to a lens kind. Anything off the three pills binds
+    /// nothing — a stray value must never select a wrong lens.
+    func testLensPillsMapToConstituentKinds() {
+        XCTAssertEqual(CameraViewModel.kindForLensPill(0.5), .ultraWide)
+        XCTAssertEqual(CameraViewModel.kindForLensPill(1.0), .wide)
+        XCTAssertEqual(CameraViewModel.kindForLensPill(2.0), .telephoto)
+        XCTAssertNil(CameraViewModel.kindForLensPill(4.0),
+                     "4x is a crop of the telephoto, not a fourth lens")
+        XCTAssertNil(CameraViewModel.kindForLensPill(0.0))
+    }
+
     // MARK: - Manual exposure gating
 
     /// The regression test for the defect this branch was returned for.

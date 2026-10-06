@@ -392,18 +392,23 @@ struct CameraScreen: View {
         // band question, and on the device's own scale rather than the pill's.
         let current = CameraViewModel.band(containing: Double(model.readout.zoomFactor),
                                            switchOver: switchOver)
+        // A bound constituent has no switch-over points, so banding its factor against
+        // the composite's would light the wrong pill — its own kind answers instead.
+        let boundPill = model.lensPillFactor()
 
         return HStack(spacing: 0) {
             ForEach(stops) { stop in
                 let asked = CameraViewModel.requestedFactor(forLens: stop.factor,
                                                              minimumAvailableFactor: minimum)
+                let lit: Bool = boundPill.map { abs($0 - stop.factor) < 0.01 }
+                    ?? (abs(current - asked) < 0.005)
                 Button {
                     draggedZoom = nil
-                    model.selectZoom(ZoomStop(factor: asked))
+                    model.selectLensPill(stop.factor)
                 } label: {
                     Text(stop.label)
                         .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
-                        .foregroundStyle(abs(current - asked) < 0.005
+                        .foregroundStyle(lit
                                          ? Theme.ColorToken.accentActive
                                          : Theme.ColorToken.textSecondary)
                         .frame(minHeight: Theme.Space.xl)
@@ -414,7 +419,7 @@ struct CameraScreen: View {
                 .accessibilityLabel(stop.label)
                 .accessibilityValue(stop.label)
                 .accessibilityHint("Jumps straight to the \(stop.label) lens")
-                .accessibilityAddTraits(abs(current - asked) < 0.005
+                .accessibilityAddTraits(lit
                                         ? [.isSelected, .isButton]
                                         : .isButton)
             }
