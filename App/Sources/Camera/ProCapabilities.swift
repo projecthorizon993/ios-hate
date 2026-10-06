@@ -73,6 +73,12 @@ struct ProCapabilities: Equatable {
     var isoRange: ClosedRange<Float>?
     var shutterRange: ClosedRange<Double>?
     var exposureCompensationRange: ClosedRange<Float>?
+    /// Kelvin the user may dial, when custom gains can be locked. No device reports
+    /// a temperature range, so this is the documented photographic range every
+    /// iPhone white balance covers (tungsten to shade) rather than a measured one —
+    /// the same class of documented assumption as `ExposureRange.defaultOffsetRange`,
+    /// and the gains it produces are still clamped to the device's real maximum.
+    var kelvinRange: ClosedRange<Float>?
     var canLockExposure: Bool = false
     var canLockFocus: Bool = false
     var canLockWhiteBalance: Bool = false
@@ -141,6 +147,12 @@ struct ProCapabilities: Equatable {
             lockedModeSupported: device.isWhiteBalanceModeSupported(.locked),
             customGainsLockSupported: device.isLockingWhiteBalanceWithCustomDeviceGainsSupported)
 
+        // Kelvin is offered exactly where custom gains are: dialling a temperature the
+        // device cannot lock would be a slider that moves nothing.
+        if capabilities.canLockWhiteBalance {
+            capabilities.kelvinRange = 3000...8000
+        }
+
         return capabilities
     }
 
@@ -158,6 +170,7 @@ struct ProCapabilities: Equatable {
     /// `true` when the panel has nothing at all to show, which is a real state on an SE.
     var isEmpty: Bool {
         isoRange == nil && shutterRange == nil && exposureCompensationRange == nil
+            && kelvinRange == nil
             && !canLockExposure && !canLockFocus && !canLockWhiteBalance
             && !rawSupported && !proRawSupported
     }
@@ -180,7 +193,8 @@ struct ProCapabilities: Equatable {
         if shutterRange != nil { available.append("shutter") }
         if canLockExposure { available.append("exposure lock") }
         if canLockFocus { available.append("focus lock") }
-        if canLockWhiteBalance { available.append("white balance lock") }
+        if kelvinRange != nil { available.append("white balance Kelvin") }
+        else if canLockWhiteBalance { available.append("white balance lock") }
         if rawSupported { available.append("RAW") }
         if proRawSupported { available.append("ProRAW") }
         return available.isEmpty
@@ -231,6 +245,10 @@ struct ManualSettings: Equatable, Codable, Sendable {
     var lockExposure = false
     var lockFocus = false
     var lockWhiteBalance = false
+    /// Kelvin. `nil` means automatic. Setting a temperature implies the lock — a
+    /// Kelvin value with automatic white balance balancing over it is a request that
+    /// contradicts itself, so `clamped(to:)` sets the lock alongside.
+    var kelvin: Float?
     var raw = false
     var proRaw = false
 
@@ -258,6 +276,7 @@ struct ManualSettings: Equatable, Codable, Sendable {
         if exposureTargetOffset != 0 { parts.append("ev=\(String(format: "%.2f", exposureTargetOffset))") }
         if lockExposure { parts.append("lockExposure") }
         if lockFocus { parts.append("lockFocus") }
+        if let kelvin { parts.append("wb=\(Int(kelvin))K") }
         if lockWhiteBalance { parts.append("lockWB") }
         if raw { parts.append("raw") }
         if proRaw { parts.append("proRAW") }
@@ -289,7 +308,19 @@ struct ManualSettings: Equatable, Codable, Sendable {
         }
         if !capabilities.canLockExposure { copy.lockExposure = false }
         if !capabilities.canLockFocus { copy.lockFocus = false }
-        if !capabilities.canLockWhiteBalance { copy.lockWhiteBalance = false }
+        if let range = capabilities.kelvinRange, let kelvin {
+            copy.kelvin = min(max(kelvin, range.lowerBound), range.upperBound)
+            // A temperature without the lock is a contradiction: the auto system would
+            // keep balancing over the dialled value. The lock is set here rather than
+            // trusted from the panel, so the two cannot disagree.
+            copy.lockWhiteBalance = true
+        } else {
+            copy.kelvin = nil
+        }
+        if !capabilities.canLockWhiteBalance {
+            copy.lockWhiteBalance = false
+            copy.kelvin = nil
+        }
         if !capabilities.rawSupported { copy.raw = false }
         if !capabilities.proRawSupported { copy.proRaw = false }
         // ProRAW is a RAW variant, so asking for it without RAW is a request that cannot

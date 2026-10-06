@@ -811,6 +811,32 @@ final class CaptureSessionController: NSObject {
             AppLog.warn(AppLog.camera, "manual white balance requested but refused; not applied")
             return false
         }
+        // A dialled Kelvin goes through `temperatureAndTintValues`, which is the
+        // device-independent form — the panel speaks Kelvin and the device speaks
+        // gains, and this conversion is the only honest bridge between them.
+        // `deviceWhiteBalanceGains(for:)` can hand back gains past
+        // `maxWhiteBalanceGain` for temperatures at the range edges, so the clamp
+        // below is against the device's real maximum, not the request.
+        if let kelvin = manual.kelvin {
+            guard device.isLockingWhiteBalanceWithCustomDeviceGainsSupported else {
+                AppLog.warn(AppLog.camera, "kelvin requested but custom gains refused; not applied")
+                return false
+            }
+            let values = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(
+                temperature: kelvin, tint: 0)
+            let gains = Self.clampedGains(device.deviceWhiteBalanceGains(for: values),
+                                          ceiling: device.maxWhiteBalanceGain)
+            if let failure = LumaFrameSafety.perform({
+                device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
+            }) {
+                AppLog.warn(AppLog.camera, "kelvin white balance rejected: \(failure)")
+                return false
+            }
+            AppLog.note(AppLog.camera,
+                        "kelvin white balance applied: \(Int(kelvin))K "
+                        + "gains=\(gains.redGain)/\(gains.greenGain)/\(gains.blueGain)")
+            return true
+        }
         // `AVCaptureDevice.currentWhiteBalanceGains`, **not** a `device.whiteBalanceGains`
         // property — there is no such property, and the branch that wrote it had never been
         // compiled. Apple documents this constant as "a special constant representing the
@@ -818,11 +844,7 @@ final class CaptureSessionController: NSObject {
         // `isLockingWhiteBalanceWithCustomDeviceGainsSupported` documents that passing any
         // *other* gains value **throws** when that flag is false, which is what a composite
         // reports. So a lock with no user-chosen gains locks whatever the device is doing now,
-        // and cannot raise.
-        //
-        // A UI that let the user dial a Kelvin value would go through
-        // `temperatureAndTintValues` and gain the flag above; that is a different feature and
-        // is `docs/PHASES.md` 3.2.
+        // and cannot raise. A dialled Kelvin takes the temperature branch above instead.
         let gains = AVCaptureDevice.currentWhiteBalanceGains
         if let failure = LumaFrameSafety.perform({
             device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
@@ -831,6 +853,22 @@ final class CaptureSessionController: NSObject {
             return false
         }
         return true
+    }
+
+    /// Gains clamped to what the device will accept: [1, max], per channel.
+    ///
+    /// Pure, because the conversion from temperature can overshoot on real hardware
+    /// and the rule "never write a value the device refused" has to hold without a
+    /// camera attached to prove it against.
+    nonisolated static func clampedGains(_ gains: AVCaptureDevice.WhiteBalanceGains,
+                                        ceiling: Float) -> AVCaptureDevice.WhiteBalanceGains {
+        func clamp(_ value: Float) -> Float {
+            guard value.isFinite else { return 1 }
+            return min(max(value, 1), max(ceiling, 1))
+        }
+        return AVCaptureDevice.WhiteBalanceGains(redGain: clamp(gains.redGain),
+                                                 greenGain: clamp(gains.greenGain),
+                                                 blueGain: clamp(gains.blueGain))
     }
 
     private func setFocusMode(_ mode: AVCaptureDevice.FocusMode,

@@ -354,7 +354,8 @@ enum ProParameter: String, CaseIterable, Identifiable {
         case .iso: return capabilities.isoRange
         case .shutter: return capabilities.shutterRange.map { Float($0.lowerBound)...Float($0.upperBound) }
         case .exposure: return capabilities.exposureCompensationRange
-        case .focus, .whiteBalance, .raw: return nil
+        case .whiteBalance: return capabilities.kelvinRange
+        case .focus, .raw: return nil
         }
     }
 
@@ -363,7 +364,8 @@ enum ProParameter: String, CaseIterable, Identifiable {
         case .iso: return manual.iso
         case .shutter: return manual.shutterSeconds.map { Float($0) }
         case .exposure: return manual.exposureTargetOffset
-        case .focus, .whiteBalance, .raw: return nil
+        case .whiteBalance: return manual.kelvin
+        case .focus, .raw: return nil
         }
     }
 
@@ -380,6 +382,10 @@ enum ProParameter: String, CaseIterable, Identifiable {
         case .focus:
             return manual.lockFocus ? "Locked" : "Auto"
         case .whiteBalance:
+            // Kelvin when dialled (the value the device was actually told), the lock
+            // when only locked, Auto when neither. Three states, not two, because a
+            // lock and a temperature are different requests.
+            if let kelvin = manual.kelvin { return "\(Int(kelvin))K" }
             return manual.lockWhiteBalance ? "Locked" : "Auto"
         case .raw:
             return manual.raw ? (manual.proRaw ? "ProRAW" : "RAW") : "Off"
@@ -392,7 +398,7 @@ enum ProParameter: String, CaseIterable, Identifiable {
         case .shutter: return manual.shutterSeconds == nil
         case .exposure: return manual.exposureTargetOffset == 0
         case .focus: return !manual.lockFocus
-        case .whiteBalance: return !manual.lockWhiteBalance
+        case .whiteBalance: return manual.kelvin == nil && !manual.lockWhiteBalance
         case .raw: return !manual.raw
         }
     }
@@ -403,7 +409,7 @@ enum ProParameter: String, CaseIterable, Identifiable {
         case .shutter: model.setManualShutter(automatic: automatic)
         case .exposure: model.setManualEV(automatic: automatic)
         case .focus: model.setManual(lockFocus: !automatic)
-        case .whiteBalance: model.setManual(lockWhiteBalance: !automatic)
+        case .whiteBalance: model.setManualKelvin(automatic: automatic)
         case .raw: model.setManual(raw: !automatic)
         }
     }
@@ -433,7 +439,12 @@ enum ProParameter: String, CaseIterable, Identifiable {
             // Linear, not logarithmic: EV is already a linear quantity and applying a log
             // curve to it would make +2 stops as easy to reach as +0.2.
             model.setManual(exposureTargetOffset: Float(lower + fraction * (upper - lower)))
-        case .focus, .whiteBalance, .raw:
+        case .whiteBalance:
+            // Kelvin is linear for dial purposes: equal arc, equal hundreds of Kelvin.
+            // A drag implies the lock (a temperature with AWB balancing over it is a
+            // contradiction), and `updateManual` clamps both through the capabilities.
+            model.setManual(kelvin: Float(lower + fraction * (upper - lower)))
+        case .focus, .raw:
             break
         }
     }
@@ -474,7 +485,21 @@ enum ProParameter: String, CaseIterable, Identifiable {
                                                           range.upperBound))
             }
         case .focus: model.setManual(lockFocus: !model.manual.lockFocus)
-        case .whiteBalance: model.setManual(lockWhiteBalance: !model.manual.lockWhiteBalance)
+        case .whiteBalance:
+            if model.proCapabilities.kelvinRange != nil {
+                // 100 K detents: fine enough to see a cast change, coarse enough that a
+                // VoiceOver pass does not take fifty swipes to cross the range. Starts
+                // from the device's own temperature when nothing is dialled, so the
+                // first step continues from the scene rather than jumping to an edge.
+                if model.manual.kelvin == nil {
+                    model.setManualKelvin(automatic: false)
+                } else {
+                    let delta: Float = direction == .increment ? 100 : -100
+                    model.setManual(kelvin: (model.manual.kelvin ?? 5200) + delta)
+                }
+            } else {
+                model.setManual(lockWhiteBalance: !model.manual.lockWhiteBalance)
+            }
         case .raw: model.setManual(raw: !model.manual.raw)
         }
     }

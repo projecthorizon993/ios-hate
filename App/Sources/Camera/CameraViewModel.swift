@@ -500,6 +500,14 @@ final class CameraViewModel: ObservableObject {
     func setManual(lockExposure: Bool) { updateManual { $0.lockExposure = lockExposure } }
     func setManual(lockFocus: Bool) { updateManual { $0.lockFocus = lockFocus } }
     func setManual(lockWhiteBalance: Bool) { updateManual { $0.lockWhiteBalance = lockWhiteBalance } }
+    func setManual(kelvin: Float) {
+        updateManual {
+            $0.kelvin = kelvin
+            // A temperature without the lock contradicts itself; `clamped(to:)` also
+            // sets it, so the two cannot disagree whichever path runs first.
+            $0.lockWhiteBalance = true
+        }
+    }
     func setManual(raw: Bool) { updateManual { $0.raw = raw } }
     func setManual(proRaw: Bool) { updateManual { $0.proRaw = proRaw } }
 
@@ -520,6 +528,28 @@ final class CameraViewModel: ObservableObject {
         updateManual { $0.exposureTargetOffset = automatic ? 0 : $0.exposureTargetOffset }
         if !automatic, manual.exposureTargetOffset == 0 {
             updateManual { $0.exposureTargetOffset = 0.25 }
+        }
+    }
+
+    /// Kelvin on or off. Turning it on starts from the device's own temperature —
+    /// read from the current gains — so the dial continues from the scene rather
+    /// than jumping to a range edge. Daylight fallback when no device is bound,
+    /// which only happens before the first configuration.
+    func setManualKelvin(automatic: Bool) {
+        if automatic {
+            updateManual {
+                $0.kelvin = nil
+                $0.lockWhiteBalance = false
+            }
+            return
+        }
+        var start: Float = 5200
+        if let device = sessionController.configuration?.device {
+            start = device.temperatureAndTintValues(for: device.deviceWhiteBalanceGains).temperature
+        }
+        updateManual {
+            $0.kelvin = start
+            $0.lockWhiteBalance = true
         }
     }
 

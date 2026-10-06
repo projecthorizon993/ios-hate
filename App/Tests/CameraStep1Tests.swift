@@ -1296,6 +1296,47 @@ final class CameraStep1Tests: XCTestCase {
         XCTAssertTrue(ProParameter.supported(by: capable).contains(.whiteBalance))
     }
 
+    /// A dialled Kelvin survives clamping only where custom gains can be locked, is
+    /// clamped to the documented range, and always brings the lock with it — a
+    /// temperature with AWB balancing over it contradicts itself.
+    func testKelvinIsGatedClampedAndImpliesTheLock() {
+        var capable = ProCapabilities(supportsCustomExposure: true)
+        capable.canLockWhiteBalance = true
+        capable.kelvinRange = 3000...8000
+
+        let dialled = ManualSettings(kelvin: 9000, lockWhiteBalance: false).clamped(to: capable)
+        XCTAssertEqual(dialled.kelvin, 8000)
+        XCTAssertTrue(dialled.lockWhiteBalance, "a temperature without the lock is a contradiction")
+
+        var incapable = ProCapabilities(supportsCustomExposure: true)
+        incapable.canLockWhiteBalance = false
+        let withdrawn = ManualSettings(kelvin: 5200, lockWhiteBalance: true).clamped(to: incapable)
+        XCTAssertNil(withdrawn.kelvin)
+        XCTAssertFalse(withdrawn.lockWhiteBalance)
+    }
+
+    /// Gains past the device maximum are refused before they reach AVFoundation, and
+    /// non-finite gains become neutral rather than surviving into the lock call.
+    func testGainsClampToTheDeviceMaximum() {
+        let gains = AVCaptureDevice.WhiteBalanceGains(redGain: 9, greenGain: .nan, blueGain: 0.2)
+        let clamped = CaptureSessionController.clampedGains(gains, ceiling: 4)
+
+        XCTAssertEqual(clamped.redGain, 4)
+        XCTAssertEqual(clamped.greenGain, 1)
+        XCTAssertEqual(clamped.blueGain, 1, "below 1 is not a gain any device accepts")
+    }
+
+    /// Three readout states, not two: a temperature, a bare lock, and automatic.
+    @MainActor
+    func testWhiteBalanceReadoutNamesTheTemperature() {
+        XCTAssertEqual(ProParameter.whiteBalance.readout(ManualSettings(kelvin: 5200)), "5200K")
+        XCTAssertEqual(ProParameter.whiteBalance.readout(ManualSettings(lockWhiteBalance: true)),
+                       "Locked")
+        XCTAssertEqual(ProParameter.whiteBalance.readout(ManualSettings.none), "Auto")
+        XCTAssertTrue(ProParameter.whiteBalance.isAutomatic(ManualSettings.none))
+        XCTAssertFalse(ProParameter.whiteBalance.isAutomatic(ManualSettings(kelvin: 5200)))
+    }
+
     /// `photoQualityPrioritization` is decided from this, and `.balanced` would let the
     /// system override the user's ISO in low light. So the flag has to be true exactly
     /// when something was dialled in.
