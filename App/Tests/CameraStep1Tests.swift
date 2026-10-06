@@ -1304,13 +1304,13 @@ final class CameraStep1Tests: XCTestCase {
         capable.canLockWhiteBalance = true
         capable.kelvinRange = 3000...8000
 
-        let dialled = ManualSettings(kelvin: 9000, lockWhiteBalance: false).clamped(to: capable)
+        let dialled = ManualSettings(lockWhiteBalance: false, kelvin: 9000).clamped(to: capable)
         XCTAssertEqual(dialled.kelvin, 8000)
         XCTAssertTrue(dialled.lockWhiteBalance, "a temperature without the lock is a contradiction")
 
         var incapable = ProCapabilities(supportsCustomExposure: true)
         incapable.canLockWhiteBalance = false
-        let withdrawn = ManualSettings(kelvin: 5200, lockWhiteBalance: true).clamped(to: incapable)
+        let withdrawn = ManualSettings(lockWhiteBalance: true, kelvin: 5200).clamped(to: incapable)
         XCTAssertNil(withdrawn.kelvin)
         XCTAssertFalse(withdrawn.lockWhiteBalance)
     }
