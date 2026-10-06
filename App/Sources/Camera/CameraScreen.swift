@@ -217,6 +217,10 @@ struct CameraScreen: View {
                 StatusChip(text: lens)
             }
 
+            if model.isRebinding {
+                StatusChip(text: "switching lens…")
+            }
+
             if let status = model.sessionState.statusText {
                 StatusChip(text: status, isWarning: true)
             }
@@ -422,6 +426,9 @@ struct CameraScreen: View {
                 .accessibilityAddTraits(lit
                                         ? [.isSelected, .isButton]
                                         : .isButton)
+                // A rebind already in flight owns the session queue; a second tap
+                // would race it, so the pills rest while it lands.
+                .disabled(model.isRebinding)
             }
         }
     }

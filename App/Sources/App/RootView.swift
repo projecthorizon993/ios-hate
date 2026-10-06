@@ -3,8 +3,8 @@ import SwiftUI
 
 /// The camera screen needs the camera permission: RAW and ProRAW are output properties
 /// that can only be read from a live session, and so is every capability the camera UI
-/// gates itself on. The Step 0 report is reachable from inside the camera screen once
-/// the permission is in place.
+/// gates itself on. The developer panel is reachable from inside the camera screen
+/// once the permission is in place.
 struct RootView: View {
 
     @State private var status = AVCaptureDevice.authorizationStatus(for: .video)

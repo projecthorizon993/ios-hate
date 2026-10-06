@@ -377,8 +377,9 @@ final class CameraViewModel: ObservableObject {
 
     /// `true` while a lens rebind is in flight. A second rebind on top of the first
     /// would interleave two `beginConfiguration` blocks on the session queue against
-    /// one device — so the second tap waits rather than racing.
-    private var isRebinding = false
+    /// one device — so the second tap waits rather than racing. Published so the
+    /// pills can disable themselves instead of swallowing the tap silently.
+    @Published private(set) var isRebinding = false
 
     /// Binds the device the mode needs: a constituent in Pro (the only binding on
     /// which manual exposure exists), the composite everywhere else.
