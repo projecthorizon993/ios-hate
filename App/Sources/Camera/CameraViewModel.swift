@@ -317,6 +317,55 @@ final class CameraViewModel: ObservableObject {
         updateSettings { $0.sharpen = value }
     }
 
+    /// Imports a `.cube` file into the engine as a color table.
+    ///
+    /// Parse and validation happen here, once, at import — a table that cannot be
+    /// proven correct never reaches the store and can never meet a frame. The space
+    /// is declared sRGB: a `.cube` file cannot state one, and the engine bans
+    /// inferring it.
+    func importTable(from url: URL) -> Bool {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else {
+            present("That file could not be read", isError: true)
+            return false
+        }
+        guard let text = String(data: data, encoding: .utf8) else {
+            present("That file is not plain text, so it is not a table", isError: true)
+            return false
+        }
+        do {
+            let parsed = try LutParser.parse(text: text)
+            guard let reference = LutStore.importTable(size: parsed.size,
+                                                       samples: parsed.samples,
+                                                       filename: url.lastPathComponent,
+                                                       space: .sRGB) else {
+                present("That table could not be stored", isError: true)
+                return false
+            }
+            updateSettings { $0.lut = reference }
+            AppLog.note(AppLog.processing,
+                         "table imported: \(reference.filename) size=\(parsed.size)")
+            return true
+        } catch {
+            present(error.localizedDescription, isError: true)
+            return false
+        }
+    }
+
+    func setTableIntensity(_ value: Float) {
+        updateSettings {
+            if $0.lut != nil { $0.lut?.intensity = value }
+        }
+    }
+
+    func removeTable() {
+        if let reference = settings.lut {
+            LutStore.remove(reference)
+        }
+        updateSettings { $0.lut = nil }
+    }
+
     /// `true` when the recipe does nothing, which is when the app uses the direct preview
     /// layer instead of the processed one.
     var isProcessingActive: Bool { !settings.isIdentity && processedPreview.isAvailable }

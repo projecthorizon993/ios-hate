@@ -7,7 +7,7 @@ import Foundation
 /// every processor, a mismatch between a LUT and an image is a **hard error with a log
 /// line**, and a silent conversion never happens. This type exists so that rule is
 /// enforced by the type system rather than by remembering it at each call site.
-enum ColorSpace: Equatable, Sendable {
+enum ColorSpace: Equatable, Sendable, Codable {
 
     /// Gamma-encoded sRGB. Where `.cube` files without a `DOMAIN` declaration are assumed
     /// to live, per the Adobe convention.
@@ -19,6 +19,44 @@ enum ColorSpace: Equatable, Sendable {
     /// Linear-light sRGB. The working space for tone curves, because a curve applied in
     /// gamma space produces muddy shadows.
     case linearSRGB
+
+    /// The stored form, which is also the display name: recipes and references carry
+    /// words, never integers, so a file stays readable without the enum.
+    enum CodingKeys: String, CodingKey {
+        case sRGB = "sRGB"
+        case displayP3 = "Display P3"
+        case linearSRGB = "linear sRGB"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        guard let key = CodingKeys(rawValue: raw) else {
+            throw DecodingError.dataCorruptedError(
+                in: container, debugDescription: "unknown colour space \(raw)")
+        }
+        switch key {
+        case .sRGB: self = .sRGB
+        case .displayP3: self = .displayP3
+        case .linearSRGB: self = .linearSRGB
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(name)
+    }
+
+    /// The space for a stored name, or `nil` — which fails closed at the call site
+    /// rather than guessing sRGB for a word nobody wrote.
+    static func named(_ name: String) -> ColorSpace? {
+        guard let key = CodingKeys(rawValue: name) else { return nil }
+        switch key {
+        case .sRGB: return .sRGB
+        case .displayP3: return .displayP3
+        case .linearSRGB: return .linearSRGB
+        }
+    }
 
     /// The primaries the capture arrived in, and the only place a colour-space
     /// conversion is legitimate: at the very end, for display or for export.

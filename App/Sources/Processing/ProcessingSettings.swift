@@ -22,6 +22,10 @@ struct ProcessingSettings: Equatable, Codable, Sendable {
     /// distinguishable from "set back to zero", and the stage is skipped when nil.
     var tone: ToneCurve?
 
+    /// An imported color table, applied by the engine between tone and finish.
+    /// `nil` (or zero intensity) means no table stage at all.
+    var lut: LutReference?
+
     /// 0…1. Grain in linear light is invisible in shadows, so this runs in gamma space.
     var grain: Float = 0
     /// 0…2.5, the CISharpness radius, applied after denoise thinking — never before
@@ -34,6 +38,7 @@ struct ProcessingSettings: Equatable, Codable, Sendable {
     func clamped() -> ProcessingSettings {
         var copy = self
         copy.tone = tone?.clamped()
+        copy.lut = lut?.clamped()
         copy.grain = min(max(grain.isFinite ? grain : 0, 0), 1)
         copy.sharpen = min(max(sharpen.isFinite ? sharpen : 0, 0), 2.5)
         return copy
@@ -44,6 +49,7 @@ struct ProcessingSettings: Equatable, Codable, Sendable {
     /// preview and a warm one.
     var isIdentity: Bool {
         (tone?.isIdentity ?? true)
+            && (lut == nil || lut?.intensity == 0)
             && grain == 0
             && sharpen == 0
     }
@@ -52,6 +58,9 @@ struct ProcessingSettings: Equatable, Codable, Sendable {
     func summarise() -> String {
         var parts: [String] = []
         if let tone, !tone.isIdentity { parts.append("tone(\(tone))") }
+        if let lut, lut.intensity > 0 {
+            parts.append("table(\(lut.filename)@\(lut.intensity))")
+        }
         if grain > 0 { parts.append("grain(\(grain))") }
         if sharpen > 0 { parts.append("sharpen(\(sharpen))") }
         return parts.isEmpty ? "identity" : parts.joined(separator: " ")

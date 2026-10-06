@@ -38,9 +38,11 @@ enum ProcessingError: LocalizedError, Equatable {
 /// 1. tone curve, in **linear** light — a curve applied in gamma space makes muddy
 ///    shadows, which is the most common way a grade looks wrong without being obviously
 ///    broken;
-/// 2. sharpen then grain, in gamma space. Grain in linear light is invisible in the
+/// 2. the imported table, in its declared space — converted into, evaluated
+///    colour-managed, at the recipe's intensity;
+/// 3. sharpen then grain, in gamma space. Grain in linear light is invisible in the
 ///    shadows, which is the whole reason it is specified there;
-/// 3. convert to the output space.
+/// 4. convert to the output space.
 ///
 /// Two rules from the architecture are enforced here rather than trusted:
 ///
@@ -78,7 +80,16 @@ struct ProcessingPipeline {
             result = try applyTone(tone, to: result)
         }
 
-        // 2. Sharpen then grain, in gamma space. Grain in linear light is invisible in the
+        // 2. The imported table, in its declared space. The image is converted
+        // into the table's space first — matching names is not being in the
+        // space, and the invariant filter that skipped the conversion is gone.
+        // Intensity interpolates the table toward identity (engine semantics,
+        // `docs/ENGINE_PLAN.md` §4), so one filter pass, not a dissolve of two.
+        if let lut = recipe.lut, lut.intensity > 0 {
+            result = try applyTable(lut, to: result, space: &space)
+        }
+
+        // 3. Sharpen then grain, in gamma space. Grain in linear light is invisible in the
         // shadows, which is the whole reason it is specified there.
         if recipe.sharpen > 0 || recipe.grain > 0 {
             if space != .sRGB {
@@ -89,7 +100,7 @@ struct ProcessingPipeline {
             if recipe.grain > 0 { result = try applyGrain(recipe.grain, to: result) }
         }
 
-        // 3. Output transform.
+        // 4. Output transform.
         if space != outputSpace {
             result = convert(result, from: space, to: outputSpace)
         }
@@ -202,6 +213,38 @@ struct ProcessingPipeline {
         filter.inputImage = image
         filter.sharpness = amount
         return try output(of: filter, stage: "sharpen")
+    }
+
+    /// Evaluates an imported table through the colour-managed filter.
+    ///
+    /// The table arrives with its declared space (`LutTable.space`, stated at import,
+    /// never inferred), which becomes the filter's working space — the conversion the
+    /// old invariant path skipped. A missing file or a bad upload fails the frame to
+    /// the original via `renderOrOriginal`, never to a half-graded image.
+    private func applyTable(_ reference: LutReference,
+                            to image: CIImage,
+                            space: inout ColorSpace) throws -> CIImage {
+        guard let table = LutStore.resolve(reference) else {
+            throw LUTApplicationError.notUsable(
+                reason: "table file \(reference.filename) is missing")
+        }
+        var current = image
+        if space != table.space {
+            current = convert(current, from: space, to: table.space)
+            space = table.space
+        }
+        guard let data = table.rgbaData(intensity: reference.intensity) else {
+            throw LUTApplicationError.notUsable(reason: "table samples failed the upload shape")
+        }
+        let filter = CIFilter.colorCubeWithColorSpace()
+        filter.colorSpace = table.space.cgColorSpace
+        filter.inputImage = current
+        filter.cubeDimension = Float(table.size)
+        filter.cubeData = data
+        // Clamp out-of-range samples to the table edge: the tables the engine writes
+        // never leave 0…1, so anything outside is a conversion artefact, not a colour.
+        filter.extrapolate = false
+        return try output(of: filter, stage: "color table")
     }
 
     /// `CIRandomGenerator` is monochrome by design, so it needs no desaturation — only

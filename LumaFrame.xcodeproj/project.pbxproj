@@ -55,9 +55,12 @@
 				A13290FFC0709B92BC31D9A2,
 				A835BFBB706BFECF65143581,
 				A019A4F6BDAC9348F15BA7D1,
+				ACCF626BF59068773D37BF2B,
+				AE7CF6C2FC0AF03188E15E98,
 				A10880D6DBFC29C0EA3BFF07,
 				AC8B016C6F86342C5160A808,
 				AAE0F97D8CE57352E249633B,
+				ADE0B4F355E5FFE40C86B372,
 				AEB620EE64789952E59B006A,
 				AB174A3B018201C704EA6219,
 				A1C7C834D702AFD9E95A3880,
@@ -67,6 +70,7 @@
 				A549153AEC2703901FADC6CE,
 				ADA0DEBE0747651E8E6C6109,
 				AC938FD7C68ED288AC7E4FED,
+				A1A8AA801A2E1ECDD7509869,
 				A2DBE3DC77B7D5D67C72CF65,
 				A10000000000000000000058
 			);
@@ -263,9 +267,12 @@
 				C6907871D060BA394FCBA123,
 				C1D45DCD8B8F1BFC8C869CDE,
 				C3E5E117929808FA54A0F71B,
+				C3FE995F6765F59A05B0F0C3,
+				C2E3FDE2922A3982527BAD22,
 				CB027F8F37C8B0ECE2069B9E,
 				C2A1FBECAA50DFCFF699BB6B,
 				CDB8F82FA873B01CFE9AB0D3,
+				CE223E22A62A4CCB4BA2A88F,
 				C8F0875D32195865344EC1F9,
 				C4AA261019E06676EC934AA8,
 				CA722B681EC7C4C3E2FAA635,
@@ -280,6 +287,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D7EA069DAB30A429FBAE2818,
+				D2D629DD0BDAD299C7E5769E,
 				DE69752AFD735837BE0E75AB,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -415,6 +423,18 @@
 			path = App/Sources/Processing/LearnedStagePlan.swift;
 			sourceTree = "<group>";
 		};
+		ACCF626BF59068773D37BF2B = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Processing/LutParser.swift;
+			sourceTree = "<group>";
+		};
+		AE7CF6C2FC0AF03188E15E98 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Processing/LutTable.swift;
+			sourceTree = "<group>";
+		};
 		A10880D6DBFC29C0EA3BFF07 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -431,6 +451,12 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Sources/Processing/ToneCurve.swift;
+			sourceTree = "<group>";
+		};
+		ADE0B4F355E5FFE40C86B372 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Sources/Storage/LutStore.swift;
 			sourceTree = "<group>";
 		};
 		AEB620EE64789952E59B006A = {
@@ -485,6 +511,12 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = App/Tests/CameraStep1Tests.swift;
+			sourceTree = "<group>";
+		};
+		A1A8AA801A2E1ECDD7509869 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = App/Tests/LutParserTests.swift;
 			sourceTree = "<group>";
 		};
 		A2DBE3DC77B7D5D67C72CF65 = {
@@ -553,6 +585,14 @@
 			isa = PBXBuildFile;
 			fileRef = A019A4F6BDAC9348F15BA7D1;
 		};
+		C3FE995F6765F59A05B0F0C3 = {
+			isa = PBXBuildFile;
+			fileRef = ACCF626BF59068773D37BF2B;
+		};
+		C2E3FDE2922A3982527BAD22 = {
+			isa = PBXBuildFile;
+			fileRef = AE7CF6C2FC0AF03188E15E98;
+		};
 		CB027F8F37C8B0ECE2069B9E = {
 			isa = PBXBuildFile;
 			fileRef = A10880D6DBFC29C0EA3BFF07;
@@ -564,6 +604,10 @@
 		CDB8F82FA873B01CFE9AB0D3 = {
 			isa = PBXBuildFile;
 			fileRef = AAE0F97D8CE57352E249633B;
+		};
+		CE223E22A62A4CCB4BA2A88F = {
+			isa = PBXBuildFile;
+			fileRef = ADE0B4F355E5FFE40C86B372;
 		};
 		C8F0875D32195865344EC1F9 = {
 			isa = PBXBuildFile;
@@ -592,6 +636,10 @@
 		D7EA069DAB30A429FBAE2818 = {
 			isa = PBXBuildFile;
 			fileRef = AC938FD7C68ED288AC7E4FED;
+		};
+		D2D629DD0BDAD299C7E5769E = {
+			isa = PBXBuildFile;
+			fileRef = A1A8AA801A2E1ECDD7509869;
 		};
 		DE69752AFD735837BE0E75AB = {
 			isa = PBXBuildFile;

@@ -21,6 +21,7 @@ struct CameraScreen: View {
     @State private var isShowingDeveloper = false
     @State private var isShowingPro = false
     @State private var isShowingTone = false
+    @State private var isShowingTables = false
     /// The zoom slider's position while it is being dragged, or `nil` when it is not.
     ///
     /// `nil` means "follow the camera". The readout only refreshes twice a second, so a drag
@@ -261,25 +262,40 @@ struct CameraScreen: View {
             // Flash only, in the contextual row.
             autoControls
         case .pro:
-            // An empty chip list used to render as an empty strip of the same height —
-            // a control that cannot do anything, occupying the space of one that can.
-            // `rowContent` collapses that into the reason as a status line, so the panel
-            // is hidden rather than vacant and the user is told why.
-            switch ProParameter.rowContent(for: model.proCapabilities) {
-            case .chips:
-                ProChipBar(model: model,
-                           expanded: $isShowingPro,
-                           open: $openProParameter)
-            case .reason(let text):
-                Text(text)
-                    .font(.system(size: Theme.TypeSize.caption))
-                    .foregroundStyle(Theme.ColorToken.textDisabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.Space.l)
-                    .padding(.vertical, Theme.Space.xs)
-                    .accessibilityLabel("Manual controls unavailable")
-                    .accessibilityValue(text)
+            VStack(spacing: Theme.Space.xs) {
+                // An empty chip list used to render as an empty strip of the same height —
+                // a control that cannot do anything, occupying the space of one that can.
+                // `rowContent` collapses that into the reason as a status line, so the panel
+                // is hidden rather than vacant and the user is told why.
+                switch ProParameter.rowContent(for: model.proCapabilities) {
+                case .chips:
+                    ProChipBar(model: model,
+                               expanded: $isShowingPro,
+                               open: $openProParameter)
+                case .reason(let text):
+                    Text(text)
+                        .font(.system(size: Theme.TypeSize.caption))
+                        .foregroundStyle(Theme.ColorToken.textDisabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Theme.Space.l)
+                        .padding(.vertical, Theme.Space.xs)
+                        .accessibilityLabel("Manual controls unavailable")
+                        .accessibilityValue(text)
+                }
+                // Grading lives with grading: the engine's tone and table panels are one
+                // tap away in Pro too, below the capture controls.
+                HStack(spacing: Theme.Space.xs) {
+                    toneChip
+                    tablesChip
+                }
+            }
+            .onChange(of: openProParameter, initial: false) { _, opened in
+                // The dial takes the docked slot, so opening one closes the panels.
+                if opened != nil {
+                    isShowingTone = false
+                    isShowingTables = false
+                }
             }
         case .video:
             // Unreachable while Video is disabled, but the switch must be exhaustive and
@@ -411,6 +427,9 @@ struct CameraScreen: View {
     private var toneChip: some View {
         Button {
             Haptics.selection()
+            openProParameter = nil
+            isShowingPro = false
+            isShowingTables = false
             isShowingTone.toggle()
         } label: {
             Text("Tune")
@@ -429,6 +448,33 @@ struct CameraScreen: View {
         .accessibilityHint(isShowingTone ? "Collapses the tone controls" : "Expands the tone controls")
     }
 
+    /// Opens the tables panel in its docked slot over the viewfinder. Imported color
+    /// tables are engine inputs, so the chip sits with Tune: grading controls together,
+    /// capture controls together.
+    private var tablesChip: some View {
+        Button {
+            Haptics.selection()
+            openProParameter = nil
+            isShowingPro = false
+            isShowingTone = false
+            isShowingTables.toggle()
+        } label: {
+            Text("Tables")
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(isShowingTables
+                                 ? Theme.ColorToken.surfaceBase
+                                 : Theme.ColorToken.textSecondary)
+                .padding(.horizontal, Theme.Space.s)
+                .frame(minHeight: Theme.Space.xl + Theme.Space.s)
+                .background(isShowingTables
+                            ? Theme.ColorToken.accentActive
+                            : Theme.ColorToken.surfaceRaised)
+                .clipShape(Capsule())
+        }
+        .accessibilityLabel("Color tables")
+        .accessibilityHint(isShowingTables ? "Collapses the color tables" : "Expands the color tables")
+    }
+
     private var autoControls: some View {
         HStack(spacing: Theme.Space.s) {
             if model.capabilities.flash.isAvailable {
@@ -444,6 +490,9 @@ struct CameraScreen: View {
                 .accessibilityLabel(model.flashMode == .on ? "Flash, on" : "Flash, off")
                 .accessibilityHint("Turns the flash on or off for the next photo")
             }
+
+            toneChip
+            tablesChip
 
             Spacer(minLength: 0)
 
@@ -471,8 +520,11 @@ struct CameraScreen: View {
                 .environment(\.proParameterOverride, open)
                 .background(Theme.ColorToken.surfaceBase.opacity(0.96))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-        } else if model.mode == .pro, isShowingTone {
+        } else if model.mode == .pro || model.mode == .photo, isShowingTone {
             TonePanel(model: model, expanded: $isShowingTone)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if model.mode == .pro || model.mode == .photo, isShowingTables {
+            TablesPanel(model: model, expanded: $isShowingTables)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
@@ -539,6 +591,7 @@ struct CameraScreen: View {
     private func collapsePanels() {
         isShowingPro = false
         isShowingTone = false
+        isShowingTables = false
         openProParameter = nil
     }
 

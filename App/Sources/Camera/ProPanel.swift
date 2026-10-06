@@ -7,6 +7,7 @@
 // nothing was edited; see the commit message for the reasoning.
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - dial (was App/Sources/Camera/ProDial.swift)
 
@@ -730,5 +731,125 @@ struct TonePanel: View {
             }
             return copy
         }
+    }
+}
+
+// MARK: - tables
+
+/// The imported color tables, docked in the bottom stack behind a small "Tables" chip.
+///
+/// A table is an engine input, not a look: it is parsed and validated once at import
+/// and evaluated by the pipeline in its declared space. This panel therefore shows
+/// exactly three things — what is applied, how strongly, and how to change it — and
+/// import failures arrive as a banner from the view model, not as a state in here.
+struct TablesPanel: View {
+
+    @ObservedObject var model: CameraViewModel
+    @Binding var expanded: Bool
+
+    @State private var showingImporter = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            header
+            Text("A table is evaluated in the space declared at import, between tone "
+                 + "and finish. Anything the importer could not prove correct never "
+                 + "reaches this list.")
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(Theme.ColorToken.textDisabled)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let lut = model.settings.lut {
+                appliedRow(lut)
+                strengthRow(lut)
+            } else {
+                Text("No table applied")
+                    .font(.system(size: Theme.TypeSize.caption))
+                    .foregroundStyle(Theme.ColorToken.textSecondary)
+                    .accessibilityLabel("No color table applied")
+            }
+
+            importButton
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.s)
+        .background(Theme.ColorToken.surfaceBase.opacity(0.96))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .fileImporter(isPresented: $showingImporter,
+                      allowedContentTypes: [.data],
+                      allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { _ = model.importTable(from: url) }
+            case .failure:
+                break
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Tables")
+                .font(.system(size: Theme.TypeSize.label))
+                .foregroundStyle(Theme.ColorToken.textSecondary)
+            Spacer()
+            if model.settings.lut != nil {
+                Button("Remove") { model.removeTable() }
+                    .font(.system(size: Theme.TypeSize.caption))
+                    .foregroundStyle(Theme.ColorToken.accentActive)
+                    .accessibilityLabel("Remove the applied color table")
+            }
+        }
+    }
+
+    private func appliedRow(_ lut: LutReference) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            Text(lut.filename)
+                .font(.system(size: Theme.TypeSize.label, design: .monospaced))
+                .foregroundStyle(Theme.ColorToken.textPrimary)
+                .lineLimit(1)
+            Spacer()
+            Text(lut.space.name)
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(Theme.ColorToken.textDisabled)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Applied color table, \(lut.filename), \(lut.space.name)")
+    }
+
+    private func strengthRow(_ lut: LutReference) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            Text("Strength")
+                .font(.system(size: Theme.TypeSize.caption))
+                .foregroundStyle(Theme.ColorToken.textDisabled)
+                .frame(width: 52, alignment: .leading)
+
+            Slider(value: Binding(get: { lut.intensity },
+                                  set: { model.setTableIntensity($0) }),
+                   in: 0...1)
+                .tint(Theme.ColorToken.accentActive)
+                .accessibilityLabel("Table strength")
+                .accessibilityValue("\(Int(lut.intensity * 100)) percent")
+
+            Text("\(Int(lut.intensity * 100))")
+                .font(.system(size: Theme.TypeSize.caption, design: .monospaced))
+                .foregroundStyle(Theme.ColorToken.textSecondary)
+                .frame(width: 24, alignment: .trailing)
+        }
+    }
+
+    private var importButton: some View {
+        Button {
+            Haptics.selection()
+            showingImporter = true
+        } label: {
+            Label("Import table…", systemImage: "square.and.arrow.down")
+                .font(.system(size: Theme.TypeSize.label))
+                .foregroundStyle(Theme.ColorToken.textSecondary)
+                .padding(.horizontal, Theme.Space.s)
+                .frame(minHeight: Theme.Space.minTouch)
+        }
+        .accessibilityLabel("Import a color table")
+        .accessibilityHint("Opens the file picker for a .cube table")
     }
 }
